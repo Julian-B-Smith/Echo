@@ -3,11 +3,11 @@
 horde's standard delay module: a stereo delay library hosted in horde's FX rack, with a lab twin for listening.
 "Echo" is a working name; the module's name will be cleared before release.
 
-**Status: Phase A in progress (2026-10-20).** The spec is at revision 2 ([`spec/SPEC.md`](spec/SPEC.md),
+**Status: Phase A gate met (2026-10-20); Phase A closes when PR #4 lands.** Phase 0 closed 2026-10-20 (D-013). The spec is ratified at revision 2 ([`spec/SPEC.md`](spec/SPEC.md),
 [`spec/params.json`](spec/params.json), 29 keys) and the listening lab is built ([`lab/echo-lab.html`](lab/echo-lab.html)).
 The listening choices are ruled: two repitch laws (tape, exponential), a per-patch tempo policy, jump as a 3 ms
-crossfade, and a load that ends the old repeats. What remains is one technical point (S-1) and the human's
-ratification of the spec. No C++ yet. horde's module cutoff is **2026-12-11**. Phase state lives in
+crossfade, and a load that ends the old repeats. S-1 and the defaults were ruled
+with the spec's ratification (D-017); M1, the C++ core, is next. No C++ yet. horde's module cutoff is **2026-12-11**. Phase state lives in
 [`ROADMAP.md`](ROADMAP.md).
 
 ## What it will do
@@ -32,7 +32,7 @@ first. **Status: specified in the Phase A spec (revision 2) and playable in the 
 | `integrations/` | Inbound mailbox (`integrations/<sender>/`) and the outbound thread table | live |
 | `docs/prior-art.md` | Phase 0 landscape: interpolation, feedback, time changes, click and mono-fold metrics, IR display, competitors, name check | done 2026-10-19 |
 | `docs/filings/` | Drafts of what Echo files in other repos | live |
-| `spec/` | The module spec and its parameter manifest (29 keys) | revision 2, awaiting ratification |
+| `spec/` | The module spec and its parameter manifest (29 keys) | ratified 2026-10-20 (D-017), protected |
 | `lab/echo-lab.html` | The listening twin: A/B panels and a blind bench for the Phase A choices; free play with every key; an IR echogram. Open it in Chrome or Safari, or serve it: `python3 -m http.server -d lab` | built |
 | `tools/lab_smoke.mjs` | The lab smoke in `./verify fast`, every detector with a planted control | green |
 | `core/` | The C++ core | M1, not started |
@@ -51,4 +51,4 @@ first. **Status: specified in the Phase A spec (revision 2) and playable in the 
 ./verify fast
 ```
 
-_Last verified: 2026-10-20 (Phase A draft; `./verify fast` green, lab smoke included)._
+_Last verified: 2026-10-20 (spec ratified, main merged; `./verify fast` green: legal gate and lab smoke included)._
