@@ -6,15 +6,14 @@ lives in `DECISIONS.md`; horde's shipping bar is `intake/module-1.0-bar.md`.
 
 ## Status
 
-- **Phase:** Phase 0 (prior art) delivered 2026-10-19 in `docs/prior-art.md`,
-  awaiting the human's merge and the D-004–D-011 rulings; Phase A is next.
-  Nothing built.
+- **Phase:** Phase 0 CLOSED 2026-10-20 (PR #1 merged; D-004–D-011 ratified by
+  poll, D-005 as amended, D-013). **Phase A (spec + lab) is next.** Nothing built.
 - **Oracle:** `./verify fast` = kit integrity, leak gate, private-name gate,
   structure, manifest, intake pin. No DSP gates yet — they arrive with the lab
   (Phase A) and the C++ core (M1). `full` = `fast` for now.
 - **Hard date:** horde's module cutoff **2026-12-11**. Every MUST row of the 1.0
   bar met by then, or Echo ships after 1.0.
-- **Last human ratification:** 2026-10-19 — manifest ratified by poll (D-003).
+- **Last human ratification:** 2026-10-20 — Phase 0 rulings by poll (D-013).
 
 ## Phases (each gate is a checkable condition)
 
@@ -37,10 +36,10 @@ commercial delay or borrow its mode names, presets or UI text.
   clamp; the three filter positions with true bypass; the modulation modes.
 - `lab/` — single-file browser listening twin (not a parity target), seeded,
   wall-clock-free, run headless by a Node smoke in `tools/`.
-- **Decide by listening, then ADR:** Q-A1 and Q-A2 below.
+- **Decide by listening, then ADR:** Q-A1 and Q-A2 below; rule Q-A4 in the spec.
 - **Gate:** the human ratifies `spec/` (then it is protected); `./verify fast`
   runs the lab determinism smoke (seeded → bit-identical; silence → exact
-  silence; finite); Q-A1, Q-A2 closed in DECISIONS.
+  silence; finite); Q-A1, Q-A2, Q-A4 closed in DECISIONS.
 
 ### M1 — C++ core: lines, time, routing, feedback, filters
 - `core/` C++20 library; buffers sized at prepare for 12 s at the host rate;
@@ -93,8 +92,8 @@ commercial delay or borrow its mode names, presets or UI text.
 ## Queue
 
 ### T-001 — Phase 0 prior-art swarm
-- **Status:** delivered 2026-10-19, in review (PR): `docs/prior-art.md`;
-  DECISIONS D-004–D-011 PROPOSED, D-012 (name) RATIFIED by poll.
+- **Status:** done 2026-10-20 (trace: `traces/2026-10-20-phase0-rulings.md`; PR #1):
+  `docs/prior-art.md`; D-004–D-011 RATIFIED (D-005 as amended, D-013), D-012 RATIFIED.
 - **Scope:** `docs/prior-art.md`, DECISIONS
 - **Acceptance criteria:** the Phase 0 gate above.
 - **Out of scope:** any spec or code.
