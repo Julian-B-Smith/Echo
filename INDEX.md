@@ -6,3 +6,5 @@ modulation-repitch · stereo-mono-safety · sample-rate-independence ·
 performance-budget.
 
 - [L0001](LIBRARY.md#L0001) — state the delay-buffer memory figure at 192 kHz, from the formula (performance-budget, sample-rate-independence) · candidate
+- [L0002](LIBRARY.md#L0002) — kernel L1 norm bounds sample peaks, not loop gain; check |H| for stability (feedback-stability, time-accuracy) · candidate
+- [L0003](LIBRARY.md#L0003) — linear interpolation darkens repeats at an SR-dependent rate (sample-rate-independence, time-accuracy) · candidate
