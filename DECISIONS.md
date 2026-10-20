@@ -85,7 +85,7 @@ From `docs/prior-art.md` (T-001). Each entry is PROPOSED: it shapes the
 Phase A spec and the lab, and the human ratifies it there or strikes it. The
 section of the prior-art doc holding the evidence is cited in each entry.
 
-## D-004 — FIR interpolation on every read; no allpass, no plain linear in the loop (PROPOSED, 2026-10-19)
+## D-004 — FIR interpolation on every read; no allpass, no plain linear in the loop (RATIFIED by poll, 2026-10-20 — see D-013)
 
 **Avoid / reuse.** Use a 4-point FIR kernel (cubic Hermite or 3rd-order
 Lagrange) for every fractional read. Keep the read position in double or fixed
@@ -103,7 +103,7 @@ each line as max delay + kernel half-width + the read/write-order margin
 The choice between Hermite and Lagrange, and whether to oversample the read,
 is left to the lab.
 
-## D-005 — Loop stability is a computed invariant; DC blocker after the ceiling (PROPOSED, 2026-10-19)
+## D-005 — Loop stability is a computed invariant; DC blocker after the ceiling (RATIFIED by poll, 2026-10-20, AS AMENDED — see D-013)
 
 **Reuse.** For every reachable parameter set, the peak over frequency of
 |g · H_loop(e^jω)| stays below 1 at the current SR. The bound includes filter
@@ -119,7 +119,7 @@ prior-art §2. The kernels' L1 norm (1.25) bounds sample peaks, not loop gain
   2002); FTZ per RS-7.8 is the remedy;
 - *fixed coefficient constants:* the corner moves with SR.
 
-## D-006 — Repitch: read speed bounded and never reversed; four lab candidates for Q-A1 (PROPOSED, 2026-10-19)
+## D-006 — Repitch: read speed bounded and never reversed; four lab candidates for Q-A1 (RATIFIED by poll, 2026-10-20 — see D-013)
 
 **Avoid / differentiate.** In repitch mode the read speed s = 1 − dD/dt stays
 within [s_min > 0, s_max] as a tested invariant (zero reverse reads). Past
@@ -137,7 +137,7 @@ Each is tested with and without the crossfade fallback. Evidence: prior-art
 reaches about +83 semitones on a 12 s → 10 ms move at τ = 100 ms, and reads
 backward on any lengthening move faster than 1 s/s.
 
-## D-007 — Crossfade mode: equal-gain law, deterministic retrigger, tested near unity (PROPOSED, 2026-10-19)
+## D-007 — Crossfade mode: equal-gain law, deterministic retrigger, tested near unity (RATIFIED by poll, 2026-10-20 — see D-013)
 
 **Reuse.** Crossfade-mode time changes use two read heads with an equal-gain
 fade. This is RS-3.6's law for correlated paths, and it keeps the loop sum at
@@ -148,7 +148,7 @@ click metric flags it. Evidence: prior-art §3.3.
 **Rejected:** *equal-power inside the loop.* Correlated copies sum to about
 1.41× the loop gain at mid-fade, which can push past unity.
 
-## D-008 — Q-A2 framing: following a tempo ramp is a pitch shift of D·BPM′/BPM (PROPOSED, 2026-10-19)
+## D-008 — Q-A2 framing: following a tempo ramp is a pitch shift of D·BPM′/BPM (RATIFIED by poll, 2026-10-20 — see D-013)
 
 **Differentiate.** The spec states what the audible delay does on a tempo
 change. No product manual found does. The lab tests four candidates:
@@ -163,7 +163,7 @@ the candidates is the ramp result: following a ramp gives a pitch ratio of
 1 + D·(dBPM/dt)/BPM, which is +17 cents at D = 1 s but +1.65 semitones at
 D = 10 s, so long lines need a policy. Evidence: prior-art §3.4.
 
-## D-009 — Echo's click metric is probe- and SR-normalised; B265 reported beside it (PROPOSED, 2026-10-19)
+## D-009 — Echo's click metric is probe- and SR-normalised; B265 reported beside it (RATIFIED by poll, 2026-10-20 — see D-013)
 
 **Differentiate.** Three readings:
 - **M1:** a residual against the analytic x(t − D(t)).
@@ -178,7 +178,7 @@ a clean fixed delay. The B265 reading stays reported, as the contract requires
 independent of probe and rate). That is an observation for horde once
 measured, not now.
 
-## D-010 — Mono-fold metric ρ = E_M / mean(E_L, E_R), per repeat and per band (PROPOSED, 2026-10-19)
+## D-010 — Mono-fold metric ρ = E_M / mean(E_L, E_R), per repeat and per band (RATIFIED by poll, 2026-10-20 — see D-013)
 
 **Differentiate.** The B408 stereo report states, per routing mode:
 - ρ broadband, per repeat generation and per octave band;
@@ -196,7 +196,7 @@ a near-coincident cross-feedback tap falls inside the ~40 ms colouring zone.
 **Open for the human:** whether S-only content in mid/side mode is stated as
 cancelling by construction, rather than as a B408 defect.
 
-## D-011 — One offline IR renderer feeds the display, the tail oracle and the mono-fold metric (PROPOSED, 2026-10-19)
+## D-011 — One offline IR renderer feeds the display, the tail oracle and the mono-fold metric (RATIFIED by poll, 2026-10-20 — see D-013)
 
 **Differentiate.** The visualiser draws the true post-filter, post-routing
 impulse response. No surveyed product was found doing so; existing displays
@@ -227,3 +227,31 @@ from the doc's three generic directions.
   name;
 - *keeping "Echo" as the rack label:* in-host confusion with three DAWs'
   stock devices.
+
+## D-013 — Phase 0 rulings: D-004–D-011 ratified, D-005 amended (RATIFIED by poll, 2026-10-20)
+
+The human ruled on the eight Phase 0 proposals by poll. Before polling, the
+lead re-derived the numbers they rest on: float32 position resolution 0.25
+sample at 12 s × 192 kHz; linear-interpolation loss −16.7 dB vs −0.47 dB at
+20 kHz; +83 st for a fixed-τ one-pole on a 12 s → 10 ms move; 1.41× for
+equal-power correlated copies; the ramp law 1 + D·BPM′/BPM. All held. (The
+"+1.65 st at 10 s" in D-008 assumes a 1 %/s ramp; scaling the rounded "+17
+cents at 1 s" gives 1.63 st, a rounding difference only.)
+- **D-004, D-006, D-007, D-008, D-009, D-010, D-011:** RATIFIED as written.
+  Rejected alternatives offered: "M2 only for 1.0" for D-009 (the human kept
+  all three readings).
+- **D-005: RATIFIED AS AMENDED.** As written, it said loop gain stays below 1
+  at every reachable setting, which would forbid past-unity feedback. That
+  contradicts ADR-142 (`intake/legacy/ADR-142-standard-delay.md:32`: past-unity
+  feedback parks at the ceiling, the musical edge-of-oscillation zone) and the
+  ratified oracle row "the ceiling holds past unity" (D-000 Q4). Ruled reading:
+  **the filter path is bounded, not the knob.** The computed invariant is
+  peak |H_loop(e^jω)| ≤ 1 over the frequency grid at the current SR: loop
+  filters, shelves, resonance and the interpolation kernel never ADD gain, so
+  loop gain is bounded by the feedback g. g > 1 is a deliberate regime that the
+  ceiling on the returning term parks; tails there are declared `kInfiniteTail`
+  (RS-7.3–7.6). The planted control is unchanged (a loop shelf with gain > 1
+  must fail). The DC blocker after the ceiling stands. Rejected: "always < 1"
+  (caps feedback below unity, drops the edge zone and an oracle row).
+- **Q-A4** (mid/side S-only content in mono: by construction or a B408 defect?)
+  stays OPEN for Phase A's spec, by the human's choice.
