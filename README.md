@@ -3,7 +3,7 @@
 horde's standard delay module: a stereo delay library hosted in horde's FX rack, with a lab twin for listening.
 "Echo" is a working name; the module's name will be cleared before release.
 
-**Status: Phase A gate met (2026-10-20); Phase A closes when PR #4 lands.** Phase 0 closed 2026-10-20 (D-013). The spec is ratified at revision 2 ([`spec/SPEC.md`](spec/SPEC.md),
+**Status: Phase A closed 2026-10-20 (PR #4); M1, the C++ core, is next.** Phase 0 closed 2026-10-20 (D-013). The spec is ratified at revision 2 ([`spec/SPEC.md`](spec/SPEC.md),
 [`spec/params.json`](spec/params.json), 29 keys) and the listening lab is built ([`lab/echo-lab.html`](lab/echo-lab.html)).
 The listening choices are ruled: two repitch laws (tape, exponential), a per-patch tempo policy, jump as a 3 ms
 crossfade, and a load that ends the old repeats. S-1 and the defaults were ruled
@@ -51,4 +51,4 @@ first. **Status: specified in the Phase A spec (revision 2) and playable in the 
 ./verify fast
 ```
 
-_Last verified: 2026-10-20 (spec ratified, main merged; `./verify fast` green: legal gate and lab smoke included)._
+_Last verified: 2026-10-20 (Phase A closed on main at 8187aef; `./verify fast` and `full` green)._
