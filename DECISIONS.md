@@ -352,3 +352,18 @@ the smoke.
   lab render; an unbounded loop on the audio thread in the C++); it is now bounded at the speed limit.
 - **Still open:** S-1 (spec §5.3) and the two new keys' defaults, both ratified with the spec. Follow-ups for horde
   (spec §14): the tempo-rule notice, the mode-dependent switch declaration, and the 1 kHz probe's blind spot.
+
+## D-017 — The Phase A spec ratified, with S-1 and the new keys' defaults (RATIFIED by poll, 2026-10-20)
+
+- **S-1: RATIFIED — the generation ratio is g within 10⁻³**, with generation 2 exactly g·(1+R)/2 (the DC
+  blocker's impulse gain). D-005's 5 Hz blocker stays as ratified; D-000 Q4's "= feedback exactly" is read
+  through it (spec §5.3). The lab's gate, provisional until now, stands. Rejected: a 1 Hz corner (still not
+  exact, slower DC recovery); switching the blocker out while the ceiling is idle (a switched loop element).
+- **Defaults: RATIFIED — `time.law` = tape, `time.tempoMode` = glide.** Glide is horde's tempo rule as written,
+  so the default patch amends nothing. Rejected: exponential by default; follow by default.
+- **`spec/` revision 2: RATIFIED** (spec/SPEC.md, spec/params.json at 29 keys) and now a protected path (charter
+  §Domain). `lab/` is NOT ratified by this poll and stays unprotected; it is a listening twin that follows the
+  spec. The Phase A gate is met when this lands on main: spec ratified, the lab smoke in `./verify fast`, Q-A1,
+  Q-A2, Q-A4, Q-A5 and S-1 closed.
+- Same poll: merge main into the Phase A branch (keeping main's `legal_gate` and D-014 beside this branch's
+  `lab_smoke_gate`, D-015–D-017), push it and open a PR; the human merges.

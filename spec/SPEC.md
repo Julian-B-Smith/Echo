@@ -1,10 +1,10 @@
 # Echo — the module spec (Phase A)
 
-**Status: DRAFT 2026-10-20 (revision 2), awaiting the human's ratification** (ROADMAP Phase A gate). Once
-ratified, `spec/` is a protected path. Written by the Phase A lead session from the ratified Phase 0 decisions
+**Status: RATIFIED 2026-10-20 by poll (revision 2; D-017). `spec/` is a protected path:** a change is a human
+gate, made by a new decision that cites this one. Written by the Phase A lead session from the ratified Phase 0 decisions
 (D-004–D-013), the Phase A rulings (D-015, D-016), the horde contract packet (`intake/`), an independent critic
-review of revision 1 (folded in here), and measurements on the lab (`lab/echo-lab.html`). The one item still open
-is **S-1** (§5.3); the defaults of the two keys added by the rulings are proposed (§9).
+review of revision 1 (folded in here), and measurements on the lab (`lab/echo-lab.html`). S-1 (§5.3) and the
+defaults of the two keys added by the rulings were ratified with it (D-017).
 
 **What this is.** The behaviour Echo must have, stated so the C++ core (M1–M3) can be built and tested against it.
 The machine-readable half is [`params.json`](params.json): every key, unit, range, default, morph class, rate
@@ -233,16 +233,15 @@ for every reachable setting. H_loop is the loop filter, the interpolation kernel
 blocker and, during a switch, the equal-gain blends. So the loop gain is at most g. The planted control (M1) is a
 loop shelf with gain above 1. No loop element has resonance; the loop filter is one-pole (§6).
 
-### 5.3 The generation ratio — **OPEN (S-1), ruled with the spec**
+### 5.3 The generation ratio — S-1, ruled (D-017)
 
 D-000 Q4's oracle row says the generation ratio equals the feedback **exactly**, filters bypassed. D-005's DC
 blocker is always in the loop, so it cannot be exact. Measured (48 kHz, 100 ms, g = 0.5, filters off): repeats land
 on their samples exactly; generation 2 is g·(1+R)/2 = 0.499836 of generation 1 (the blocker's impulse gain); later
 generations also carry the blocker's small negative tail from earlier passes, an error of order (1−R)·R^D,
-3 × 10⁻⁵ relative at 100 ms and about 5 × 10⁻⁴ at 10 ms. **The proposal: state the ratio as g within 10⁻³** (the
-lab's gate, provisional until ruled) and generation 2 as g·(1+R)/2 exactly, keeping D-005. Alternatives: lower the
-corner to 1 Hz (five times smaller error, slower DC recovery), or switch the blocker out while the ceiling is idle
-(exact, but a switched loop element).
+3 × 10⁻⁵ relative at 100 ms and about 5 × 10⁻⁴ at 10 ms. **Ruled: the ratio is g within 10⁻³**, and generation 2
+is g·(1+R)/2 exactly; D-005 stands. Rejected: a 1 Hz corner (five times smaller error, still inexact, slower DC
+recovery); switching the blocker out while the ceiling is idle (exact, but a switched loop element).
 
 ## 6. Filters
 
@@ -310,8 +309,8 @@ a normalised law (ADR-203): `lin`, `log` (geometric between min and max), `io` (
 | `time.offL` | Left Offset | % | −50 … 50 | 0 | continuous | lin | moves the time (§3.5) |
 | `time.offR` | Right Offset | % | −50 … 50 | 0 | continuous | lin | moves the time (§3.5) |
 | `time.change` | Time Change | repitch / crossfade / jump | — | repitch | flip | step | deferred |
-| `time.law` | Repitch Law | tape / exponential | — | **tape** (proposed) | flip | step | deferred |
-| `time.tempoMode` | Tempo Follow | crossfade / glide / follow | — | **glide** (proposed) | flip | step | deferred |
+| `time.law` | Repitch Law | tape / exponential | — | tape | flip | step | deferred |
+| `time.tempoMode` | Tempo Follow | crossfade / glide / follow | — | glide | flip | step | deferred |
 | `time.glide` | Glide | s | 0.01 … 5 | 0.3 | continuous | log | the law's time constant |
 | `time.xfadeMs` | Crossfade | ms | 2 … 500 | 60 | continuous | log | latched per fade |
 | `fb.amount` | Feedback | % | 0 … 120 | 35 | continuous | lin | 20 ms ramp |
@@ -344,7 +343,7 @@ does not step and only its slope changes; it needs a reported click reading and 
 - **`mod.shape`, `mod.seed`: seeded jump of the modulation offset**, with a planted unseeded reseed as the control.
 
 Keys freeze at the first release (B428). The defaults of `time.law` (tape) and `time.tempoMode` (glide: horde's
-rule as written) are proposals, ratified with the spec.
+rule as written) were ratified with the spec (D-017).
 
 ## 10. Declarations, rest and load
 
@@ -439,8 +438,8 @@ intents unless a preset binds it.
 | load | what a load does to ringing repeats (raised by the critic) | **ruled** 2026-10-20: they end; spill-over is horde's (D-016) |
 | Q-A4 | mid/side and B408 | **ruled** 2026-10-20: by construction (D-015) |
 | offsets | L/R offset model | **ruled** 2026-10-20: % of base (D-015) |
-| **S-1** | the generation ratio against the DC blocker (§5.3) | **OPEN**: with the spec |
-| defaults | `time.law` = tape, `time.tempoMode` = glide | proposed: with the spec |
+| S-1 | the generation ratio against the DC blocker (§5.3) | **ruled** 2026-10-20: g within 10⁻³ (D-017) |
+| defaults | `time.law` = tape, `time.tempoMode` = glide | **ruled** 2026-10-20 (D-017) |
 
 **For horde (follow-ups, not blockers):** (1) a notice that two tempo modes amend the "glide through smoothers"
 rule for the patches that choose them (§3.8); (2) the question whether a mode-dependent switch declaration is

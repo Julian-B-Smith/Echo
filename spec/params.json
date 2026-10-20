@@ -1,7 +1,7 @@
 {
  "schema": "echo-params.1 — the B439 / RS-2.1 manifest: key, unit, range, default, morph class (continuous | jump = flip | device; OQ #33 map in SPEC §9), rate class (FOUNDATIONS ReadCadence), normalised law, smoothing, and each flip key's switch method (contract A11 as amended). Flip keys carry their A11 switch declaration. One key per line.",
  "module": "Echo",
- "status": "DRAFT 2026-10-20 — awaiting the human's ratification (ROADMAP Phase A). Keys freeze at first release (B428).",
+ "status": "RATIFIED 2026-10-20 by poll (spec revision 2, D-017); a protected path. Keys freeze at first release (B428).",
  "params": [
   {"key":"io.inGain","name":"Input Gain","unit":"dB","type":"scalar","min":-24,"max":24,"def":0,"morph":"device","rate":"continuous","law":"io","smoothing":"gain"},
   {"key":"io.outGain","name":"Output Gain","unit":"dB","type":"scalar","min":-24,"max":24,"def":0,"morph":"device","rate":"continuous","law":"io","smoothing":"gain"},

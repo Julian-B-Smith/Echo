@@ -6,18 +6,18 @@ lives in `DECISIONS.md`; horde's shipping bar is `intake/module-1.0-bar.md`.
 
 ## Status
 
-- **Phase:** Phase 0 CLOSED 2026-10-20 (D-013). **Phase A IN PROGRESS** (T-003):
-  `spec/` revision 2, the lab, the lab smoke in `./verify fast`; Q-A1, Q-A2, Q-A4,
-  Q-A5, the offset model and load ruled (D-015, D-016); S-1, the two new keys'
-  defaults and the spec's ratification await the human.
+- **Phase:** Phase 0 CLOSED 2026-10-20 (D-013). **Phase A gate MET** 2026-10-20
+  on its branch (T-003; D-015–D-017): `spec/` revision 2 ratified, the lab smoke
+  in `./verify fast`, Q-A1, Q-A2, Q-A4, Q-A5 and S-1 closed. Phase A closes when
+  its PR lands on main; **M1 (the C++ core) is next.**
 - **Oracle:** `./verify fast` = kit integrity, leak gate, private-name gate,
   structure, manifest, intake pin, legal gate, **lab smoke** (`tools/lab_smoke.mjs`,
   every detector with a planted must-fail control, ~7 s). The C++ invariant suite arrives at
   M1. `full` = `fast` for now.
 - **Hard date:** horde's module cutoff **2026-12-11**. Every MUST row of the 1.0
   bar met by then, or Echo ships after 1.0.
-- **Last human ratification:** 2026-10-20 — Phase A's listening polls (D-016):
-  Q-A1 (two laws, a key), Q-A2 (a key), Q-A5 (3 ms crossfade), load ends the tail.
+- **Last human ratification:** 2026-10-20 — the spec, revision 2, with S-1 and
+  the new keys' defaults (D-017); before it, the listening polls (D-016).
 
 ## Phases (each gate is a checkable condition)
 
@@ -108,7 +108,7 @@ commercial delay or borrow its mode names, presets or UI text.
   `spec/params.json` (29 keys), `lab/echo-lab.html` (A/B panels, a blind bench,
   free play with every key, an IR echogram), `tools/lab_smoke.mjs` in `./verify
   fast`. An Opus critic reviewed revision 1 (REWORK, 7 HIGH; all fixed, D-016).
-  Awaiting: S-1, the new keys' defaults, the spec ratification.
+  Spec ratified 2026-10-20 (D-017): done when the PR lands on main.
 - **Scope:** `spec/`, `lab/`, `tools/`, the `./verify` lab gate, CI's node step.
 - **Acceptance criteria:** the Phase A gate above.
 - **Out of scope:** any C++; `intake/`; the manifest.
@@ -135,9 +135,6 @@ commercial delay or borrow its mode names, presets or UI text.
 
 ## Open questions (blocking — ask the human)
 
-- **S-1 — The generation ratio against the DC blocker.** D-000 Q4 says
-  "= feedback exactly"; D-005's DC blocker makes it g within 10⁻³ (spec §5.3).
-  Ruled with the spec, with the defaults of `time.law` and `time.tempoMode`.
 - **Q-A3 — Per-module CPU budget** for 1.0 is the human's to set (1.0 bar row 51);
   the appendix's ~2 % default / 4 % worst of a min-spec core is the working target.
 
@@ -147,6 +144,9 @@ commercial delay or borrow its mode names, presets or UI text.
   key, `time.tempoMode`; **Q-A5** — jump is a 3 ms crossfade (amends D-007);
   **load** — the ringing repeats end, spill-over is horde's. RULED by poll
   2026-10-20 (D-016; spec §3.6–3.8, §10).
+- **S-1** — the generation ratio is g within 10⁻³ (generation 2 exactly
+  g·(1+R)/2); defaults tape + glide; **the spec ratified**. RULED by poll
+  2026-10-20 (D-017).
 - **Q-A4** — mid/side S-only content cancels in mono by construction, not a B408
   defect; unintended cancellation = the output's fold losing more than the
   input's. RATIFIED by poll 2026-10-20 (D-015; spec §4.1).

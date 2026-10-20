@@ -239,7 +239,7 @@ check(ctl > 1e-3, `control: an impulse at the same settings is audible in all 9 
 // left in the loop, so generation 2 is g * (1+R)/2 of generation 1 (the
 // blocker's impulse gain); later generations also carry the blocker's small
 // negative tail, O((1-R) R^D): "ratio = g" holds to 1e-3, not bit-exactly
-// (spec §5.3, S-1 — this tolerance is the proposal, provisional until ruled).
+// (spec §5.3; S-1 ruled this tolerance, D-017).
 function generations(params, sr, lab) {
   const r = X.echoRender({ sr, seconds: 0.9, lab, params: Object.assign({ "time.sync": 0, "time.ms": 100, "fb.amount": 50, mix: 100, "filt.loop.on": 0 }, params), srcL: impulse(blocks(0.9 * sr)) });
   const D = Math.round(0.1 * sr), out = [];
