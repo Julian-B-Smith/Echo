@@ -256,7 +256,7 @@ cents at 1 s" gives 1.63 st, a rounding difference only.)
 - **Q-A4** (mid/side S-only content in mono: by construction or a B408 defect?)
   stays OPEN for Phase A's spec, by the human's choice.
 
-## D-014 — Phase A: first rulings, and what the spec draft proposes (2026-10-20)
+## D-015 — Phase A: first rulings, and what the spec draft proposes (2026-10-20)
 
 Phase A lead session (ROADMAP Phase A, T-003). Three polls before building, then the spec draft
 (`spec/SPEC.md`, `spec/params.json`) and the lab (`lab/echo-lab.html`) with its smoke.
@@ -290,9 +290,65 @@ Phase A lead session (ROADMAP Phase A, T-003). Three polls before building, then
   a bare jump, 0.3 for a 3 ms crossfade). **S-1** — D-000 Q4's "generation ratio = feedback
   exactly" cannot hold with D-005's always-in-circuit DC blocker; measured 3 × 10⁻⁵ relative at
   100 ms (spec §5.3).
-- **Findings recorded** (LIBRARY candidates L0005–L0007): the textbook DC blocker peaks at 2/(1+R) > 1
+- **Findings recorded** (LIBRARY candidates L0006–L0008): the textbook DC blocker peaks at 2/(1+R) > 1
   at Nyquist, so it alone breaches D-005's bound — use the gain-normalised form; D-009's M2 reads a
   speed *kink* at a few (slew and log one-pole laws read 4.1), between a smooth glide (≤ 1) and a
   jump (tens); a click probe commensurate with the test times is blind (440 Hz × 0.25 s = 110 cycles,
   so a 0.5 → 0.25 s jump reads clean) — the lab probes at 431.7 Hz; a modulation ramp time is a read
   *speed* (a 20 ms ramp to 20 ms depth moves the head at 2×), so modulation ramps are 250 ms.
+
+## D-016 — Phase A: the listening rulings, and the critic's rework of the spec draft (2026-10-20)
+
+The human listened in the lab (`lab/echo-lab.html`; a bench of the four repitch laws was added at their request,
+with a blind mode) and ruled by poll. An independent critic (Opus, fresh context, read-only; verdict REWORK, 7 HIGH,
+no CRITICAL) reviewed revision 1 (dab6f9b) first; its findings are folded into revision 2 of the spec, the lab and
+the smoke.
+- **Q-A1: RULED — two laws ship, as a key.** The human: "I like the sound of varispeed and of one-pole; maybe both
+  should be options." New stepped key `time.law` ∈ {tape (varispeed, D-006 d), exponential (one-pole on ln D,
+  D-006 c)}; `time.glide` is each law's time constant. Default proposed: tape (ratified with the spec). Not chosen:
+  the asymmetric slew (a) and the critically damped 2nd order (b); they stay in the lab as references.
+- **Q-A2: RULED — (D), a key.** `time.tempoMode` ∈ {crossfade (A), glide (B), follow (C)}. Default proposed: glide,
+  which is horde's tempo rule as written (`intake/tempo-divisions.md`: re-resolved values "glide through the
+  parameters' own smoothers"); crossfade and follow amend that rule for the patches that pick them, and horde gets a
+  notice (ROADMAP follow-up).
+- **Q-A5: RULED — jump is a 3 ms equal-gain crossfade.** **Amends D-007's jump line** ("Jump mode's test asserts
+  that the click metric flags it"): a bare jump cannot pass horde's A11 (no bare jump at a flip, no step under a
+  morph). The bare jump survives only as the click metric's planted must-fail control, which D-009 already wants.
+  Rejected: keeping the bare jump and declaring jump mode inadmissible under morph; dropping jump as a user mode.
+- **Load: RULED — the ringing repeats end; spill-over is horde's.** The critic's one question for the human
+  (RS-6.7, RS-6.13 and RS-6.5 give a load's old tail to horde's spill-over setting). A load fades the old audio out
+  over 20 ms (LoadDecl: crossfade-out, 20 ms), clears the lines and lands the heads on the new times. Rejected:
+  keeping the line (it would decide spill-over inside the module, and with horde's spill-over "on" play the old
+  tail twice).
+- **The critic's HIGH findings, each fixed and gated with a plant that fires:**
+  1. modulation could breach D-006's speed bound (a rate glide, a spread ramp, a shape switch; the clamp only on the
+     repitch path) → the modulation **offset is slew-limited** to ±0.25 sample/sample, so the bound holds by
+     construction; the gate runs every law, move and modulation extreme with zero backstop hits;
+  2. drift overshot [−1, 1] (to 1.25) and read past the line → the drift curve is clamped, every read is held inside
+     the line and an attempt is counted;
+  3. the tail declaration contradicted its own gate → a tail gate that also fires when the declared tail has elapsed,
+     clearing lines, filters and DC, so "exact zero at the declared tail" holds by construction;
+  4. load vs RS-6.7 → the ruling above; Device keys are no longer written by a load (RS-4.5);
+  5. switch declarations outside A11's vocabulary → repitch is declared a seeded jump of the read position,
+     crossfades with stated lengths, `time.change` / `time.law` / `time.tempoMode` deferred (each move is latched to
+     the modes in force when it starts; flipping mid-glide no longer jumps the head), with plants for an eager flip
+     and an unseeded reseed;
+  6. the reset check had no plant and moved nothing → reset from mid-ramp, with a reset that keeps the old line as
+     the plant (the canonical "unsnapped smoother" plant cannot fire by design: reset puts the instance at rest,
+     and rest snaps everything);
+  7. sleep and wake were unaddressed → a **rest state**: at rest (after the gate) everything that would drift is
+     held and every parameter lands at its target, so a slept instance equals its never-slept twin (A16), and the
+     first block after prepare or reset lands on the host tempo (the critic's M2).
+- **MEDIUM and LOW findings folded in:** the past-unity level is stated as a bound (< 2 after the input stops;
+  ≤ input peak + 2 while it plays), not a measured 1.25; real plants replace the empty ones (a residue at rest, both
+  NaN-repair layers removed, a guard that zeroes without counting); new coverage with plants: equal-power
+  crossfade, instant routing and filter switches, a dry-path limiter, a dry leak at mix 100, a frozen tempo, the
+  I/O gain law, Input Gain before the loop; all loop state is repaired on a non-finite value; synced folding keeps
+  the L/R ratio; depth ≤ D − 3 samples; the §3.8 figures corrected (+51 cents at 3 s, not a semitone); the
+  `smoothing` labels fixed; the static ban covers AudioWorklet clocks; the Q-A2 panel lets (B) follow any law.
+- **Found by the rework itself:** after the rest state landed, the speed checks fed by an impulse went to rest and
+  measured nothing — a vacuous pass. They now run on a constant non-zero input and require that the gate never
+  fired. And the tape law's cursor search was unbounded per sample when the cap held the head back (10.7 s for one
+  lab render; an unbounded loop on the audio thread in the C++); it is now bounded at the speed limit.
+- **Still open:** S-1 (spec §5.3) and the two new keys' defaults, both ratified with the spec. Follow-ups for horde
+  (spec §14): the tempo-rule notice, the mode-dependent switch declaration, and the 1 kHz probe's blind spot.

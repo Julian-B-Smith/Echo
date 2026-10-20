@@ -116,7 +116,7 @@ need_node() {
 # Lab smoke (ROADMAP Phase A gate; human-approved by poll 2026-10-20): the lab is
 # seeded and bit-identical, silence -> exact silence, finite, in step with
 # spec/params.json, and honest about the invariants its A/B choices rest on.
-# Every detector is first proven against a planted fault. ~5 s.
+# Every detector is first proven against a planted fault. ~7 s.
 lab_smoke_gate() { need_node && node tools/lab_smoke.mjs; }
 
 fast() {

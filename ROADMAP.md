@@ -7,17 +7,17 @@ lives in `DECISIONS.md`; horde's shipping bar is `intake/module-1.0-bar.md`.
 ## Status
 
 - **Phase:** Phase 0 CLOSED 2026-10-20 (D-013). **Phase A IN PROGRESS** (T-003):
-  `spec/` drafted, `lab/` built, the lab smoke in `./verify fast`; Q-A4 and the
-  offset model ruled (D-014); Q-A1, Q-A2, Q-A5, S-1 and the spec's ratification
-  await the human.
+  `spec/` revision 2, the lab, the lab smoke in `./verify fast`; Q-A1, Q-A2, Q-A4,
+  Q-A5, the offset model and load ruled (D-015, D-016); S-1, the two new keys'
+  defaults and the spec's ratification await the human.
 - **Oracle:** `./verify fast` = kit integrity, leak gate, private-name gate,
-  structure, manifest, intake pin, **lab smoke** (`tools/lab_smoke.mjs`, every
-  detector with a planted must-fail control). The C++ invariant suite arrives at
+  structure, manifest, intake pin, legal gate, **lab smoke** (`tools/lab_smoke.mjs`,
+  every detector with a planted must-fail control, ~7 s). The C++ invariant suite arrives at
   M1. `full` = `fast` for now.
 - **Hard date:** horde's module cutoff **2026-12-11**. Every MUST row of the 1.0
   bar met by then, or Echo ships after 1.0.
-- **Last human ratification:** 2026-10-20 — Phase A's first polls (D-014):
-  the `./verify` wiring, Q-A4, the L/R offset model.
+- **Last human ratification:** 2026-10-20 — Phase A's listening polls (D-016):
+  Q-A1 (two laws, a key), Q-A2 (a key), Q-A5 (3 ms crossfade), load ends the tail.
 
 ## Phases (each gate is a checkable condition)
 
@@ -43,7 +43,8 @@ commercial delay or borrow its mode names, presets or UI text.
 - **Decide by listening, then ADR:** Q-A1 and Q-A2 below; rule Q-A4 in the spec.
 - **Gate:** the human ratifies `spec/` (then it is protected); `./verify fast`
   runs the lab determinism smoke (seeded → bit-identical; silence → exact
-  silence; finite); Q-A1, Q-A2, Q-A4 closed in DECISIONS.
+  silence; finite); Q-A1, Q-A2, Q-A4, Q-A5 and S-1 closed in DECISIONS (Q-A5 and
+  S-1 were raised by the spec draft, D-015; added here by the lead, 2026-10-20).
 
 ### M1 — C++ core: lines, time, routing, feedback, filters
 - `core/` C++20 library; buffers sized at prepare for 12 s at the host rate;
@@ -103,13 +104,25 @@ commercial delay or borrow its mode names, presets or UI text.
 - **Out of scope:** any spec or code.
 
 ### T-003 — Phase A: spec + lab twin
-- **Status:** in progress 2026-10-20 (D-014). Drafted: `spec/SPEC.md`,
-  `spec/params.json` (27 keys), `lab/echo-lab.html` (Q-A1 / Q-A2 / Q-A5 A/B
-  panels, free play with every key, an IR echogram), `tools/lab_smoke.mjs` in
-  `./verify fast`. Awaiting: Q-A1, Q-A2, Q-A5 by ear; S-1; the spec ratification.
+- **Status:** in progress 2026-10-20 (D-015, D-016). `spec/SPEC.md` revision 2,
+  `spec/params.json` (29 keys), `lab/echo-lab.html` (A/B panels, a blind bench,
+  free play with every key, an IR echogram), `tools/lab_smoke.mjs` in `./verify
+  fast`. An Opus critic reviewed revision 1 (REWORK, 7 HIGH; all fixed, D-016).
+  Awaiting: S-1, the new keys' defaults, the spec ratification.
 - **Scope:** `spec/`, `lab/`, `tools/`, the `./verify` lab gate, CI's node step.
 - **Acceptance criteria:** the Phase A gate above.
 - **Out of scope:** any C++; `intake/`; the manifest.
+
+### T-004 — Phase A notices to horde (after the spec is ratified)
+- **Status:** open (spec §14).
+- **Scope:** horde's `integrations/echo/`: (1) `time.tempoMode`'s crossfade and
+  follow modes amend horde's "glide through smoothers" tempo rule for the
+  patches that pick them; (2) is a switch declaration that depends on another
+  key's value (`time.div` by `time.change`) admissible under A11?; (3) A11's 1 kHz
+  probe reads jumps between integer-ms times and 120-bpm divisions as clean.
+- **Acceptance criteria:** filed by a PR in horde's tree touching only that path,
+  with the human's go-ahead; the outbound table updated.
+- **Out of scope:** the spin-up notice (T-002).
 
 ### T-002 — Spin-up filings
 - **Status:** open (drafts in `docs/filings/`)
@@ -122,25 +135,21 @@ commercial delay or borrow its mode names, presets or UI text.
 
 ## Open questions (blocking — ask the human)
 
-- **Q-A1 — The repitch law.** How the read head moves when the time changes in
-  repitch mode (glide time constant / rate law). Decided in Phase A by listening
-  in the lab against the click metric (survey poll, 2026-10-19).
-- **Q-A2 — Synced time on a tempo change mid-note:** glide or jump? Same venue.
-- **Q-A5 — What "jump" means.** D-007's bare jump cannot pass horde's A11 (no
-  bare jump at a flip, no step under a morph). Proposed: jump = a 3 ms crossfade,
-  the bare jump kept only as the click metric's plant. Decided by ear in the
-  lab's Q-A5 panel. Raised by the spec draft (spec §3.7, D-014).
 - **S-1 — The generation ratio against the DC blocker.** D-000 Q4 says
   "= feedback exactly"; D-005's DC blocker makes it g within 10⁻³ (spec §5.3).
-  Ruled with the spec.
+  Ruled with the spec, with the defaults of `time.law` and `time.tempoMode`.
 - **Q-A3 — Per-module CPU budget** for 1.0 is the human's to set (1.0 bar row 51);
   the appendix's ~2 % default / 4 % worst of a min-spec core is the working target.
 
 ## Closed in Phase A
 
+- **Q-A1** — both the tape and exponential laws ship, as `time.law`; **Q-A2** — a
+  key, `time.tempoMode`; **Q-A5** — jump is a 3 ms crossfade (amends D-007);
+  **load** — the ringing repeats end, spill-over is horde's. RULED by poll
+  2026-10-20 (D-016; spec §3.6–3.8, §10).
 - **Q-A4** — mid/side S-only content cancels in mono by construction, not a B408
   defect; unintended cancellation = the output's fold losing more than the
-  input's. RATIFIED by poll 2026-10-20 (D-014; spec §4.1).
+  input's. RATIFIED by poll 2026-10-20 (D-015; spec §4.1).
 
 ## Deferred / demoted
 

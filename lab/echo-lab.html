@@ -67,12 +67,14 @@ bit-reproducible. The choices made here are recorded in DECISIONS by poll: <b>Q-
   <button data-t="qa5">Q-A5 · jump</button>
   <button data-t="play">Free play · every key</button>
   <label style="margin-left:auto;color:var(--dim);font-size:11px"><input type="checkbox" id="fold"> hear the mono fold (L+R)/2</label>
+  <button id="tone" title="a 0.4 s 440 Hz beep: if you hear this, the browser's audio works">test tone</button>
   <button id="stop">■ stop</button>
 </nav>
+<div class="status" id="audio-status">audio: not started — click a candidate or "test tone"</div>
 
 <section id="qa1" class="on">
   <div class="card">
-    <h2>Q-A1 — the repitch law</h2>
+    <h2>Q-A1 — the repitch law · <span class="ok">ruled 2026-10-20: (d) tape and (c) exponential both ship, as the Repitch Law key</span></h2>
     <div class="q">In repitch mode a moving time bends the pitch of what is in the line (pitch ratio = 1 − dD/dt).
     D-006 bounds the read speed (never backward) and asks which <b>law</b> moves the read head. Pick a move and a
     source, then switch candidates while it plays — the switch keeps the playhead, so you hear the same moment.
@@ -84,10 +86,15 @@ bit-reproducible. The choices made here are recorded in DECISIONS by poll: <b>Q-
       <label>feedback <select id="a1-fb"><option value="0">0 %</option><option value="45">45 %</option><option value="75">75 %</option></select></label>
       <label>mix <select id="a1-mix"><option value="100">wet only</option><option value="50">50 %</option></select></label>
       <label>glide (s) <input type="number" id="a1-glide" value="0.3" step="0.05" min="0.01" max="5"></label>
-      <label>pitch cap (st) <input type="number" id="a1-cap" value="12" step="1" min="1" max="18"></label>
       <label><input type="checkbox" id="a1-fallback" checked> crossfade fallback past 3 s of glide</label>
     </div>
     <div class="cands" id="a1-cands"></div>
+    <div class="ctl">
+      <button id="a1-bench" class="play">▶ bench: the four laws in turn</button>
+      <label><input type="checkbox" id="a1-blind"> blind (shuffled, numbered)</label>
+      <button id="a1-reveal" disabled>reveal</button>
+      <span class="status" id="a1-now"></span>
+    </div>
     <div class="ctl"><button id="a1-measure">measure clicks (M2, probe 431.7 Hz)</button><span class="status" id="a1-status"></span></div>
     <div style="overflow-x:auto"><table id="a1-table"></table></div>
     <canvas id="a1-plot" width="1100" height="220"></canvas>
@@ -99,18 +106,21 @@ bit-reproducible. The choices made here are recorded in DECISIONS by poll: <b>Q-
 
 <section id="qa2">
   <div class="card">
-    <h2>Q-A2 — synced time when the tempo changes</h2>
+    <h2>Q-A2 — synced time when the tempo changes · <span class="ok">ruled 2026-10-20: (D), the Tempo Follow key</span></h2>
     <div class="q">Synced time follows the host tempo (data, per block, interpolated per sample). Following a ramp
     bends the pitch by 1 + D·BPM′/BPM: a few cents at 0.25 s, a semitone or more at 3 s. D-008's candidates:
     <b>(A)</b> always crossfade to the new grid time, <b>(B)</b> follow through the repitch law,
     <b>(C)</b> follow exactly under a 50-cent cap and crossfade past it, and <b>(D)</b> make it a user choice —
-    pick D if no single one is right for every patch.</div>
+    pick D if no single one is right for every patch. Note: horde's tempo rule says re-resolved synced values
+    "glide through the parameters' own smoothers" (intake/tempo-divisions.md) — (B) is that rule; (A) and (C)
+    would amend it, which horde would be told.</div>
     <div class="ctl">
       <label>tempo <select id="a2-tempo"></select></label>
       <label>delay <select id="a2-div"></select></label>
       <label>source <select id="a2-src" class="src"></select></label>
       <label>feedback <select id="a2-fb"><option value="0">0 %</option><option value="45" selected>45 %</option><option value="75">75 %</option></select></label>
       <label>mix <select id="a2-mix"><option value="100">wet only</option><option value="50" selected>50 %</option></select></label>
+      <label>(B)'s repitch law <select id="a2-law"><option value="crit2">(b) crit2</option><option value="varispeed">(d) varispeed</option><option value="slew">(a) slew</option><option value="logpole">(c) log one-pole</option></select></label>
     </div>
     <div class="cands" id="a2-cands"></div>
     <div class="ctl"><button id="a2-measure">measure clicks (M2)</button><span class="status" id="a2-status"></span></div>
@@ -122,7 +132,7 @@ bit-reproducible. The choices made here are recorded in DECISIONS by poll: <b>Q-
 
 <section id="qa5">
   <div class="card">
-    <h2>Q-A5 — what "jump" means</h2>
+    <h2>Q-A5 — what "jump" means · <span class="ok">ruled 2026-10-20: a 3 ms crossfade</span></h2>
     <div class="q">D-007 ratified a jump mode whose test asserts the click metric <b>flags</b> it: a bare jump of the
     read head. Drafting the spec found a conflict: horde admits no bare jump of signal-path state at a flip, and a
     morph of a continuous key must not step (contract A11, §12). A bare jump fails both. The alternative is a jump
@@ -151,9 +161,9 @@ bit-reproducible. The choices made here are recorded in DECISIONS by poll: <b>Q-
       <label>source <select id="fp-src" class="src"></select></label>
       <label>tempo (bpm) <input type="number" id="fp-bpm" value="120" step="1" min="20" max="300"></label>
       <label><input type="checkbox" id="fp-sweep"> sweep Time at 1 Hz (stress)</label>
-      <label>law <select id="fp-law"><option>crit2</option><option>slew</option><option>logpole</option><option>varispeed</option></select></label>
-      <label>tempo policy <select id="fp-tp"><option value="glide">B glide</option><option value="xfade">A crossfade</option><option value="capped">C capped</option></select></label>
-      <label>jump <select id="fp-jump"><option value="raw">bare</option><option value="xfade">3 ms crossfade</option></select></label>
+      <label title="lab override of the Repitch Law key; the unpicked Q-A1 laws stay here as references">law <select id="fp-law"><option value="">per key (tape / exponential)</option><option value="crit2">ref: crit2</option><option value="slew">ref: slew</option></select></label>
+      <label title="lab override of the Tempo Follow key">tempo <select id="fp-tp"><option value="">per key</option><option value="xfade">A crossfade</option><option value="glide">B glide</option><option value="capped">C follow</option></select></label>
+      <label title="Q-A5 ruled: jump = a 3 ms crossfade; the bare jump is kept only as a reference">jump <select id="fp-jump"><option value="xfade">3 ms crossfade (ruled)</option><option value="raw">ref: bare jump (rejected)</option></select></label>
       <label>kernel <select id="fp-kernel"><option>hermite</option><option>lagrange</option></select></label>
       <button id="fp-init">init</button>
       <span class="status" id="fp-status"></span>
@@ -174,12 +184,11 @@ bit-reproducible. The choices made here are recorded in DECISIONS by poll: <b>Q-
  * into an AudioWorklet, so what the smoke gates is what the ear hears.
  *
  * Behaviour: spec/SPEC.md. Keys: spec/params.json — ECHO_PARAMS below must
- * agree with it key for key (the smoke checks, with a planted mismatch).
+ * agree with it key for key, switch declarations included (smoke-checked).
  *
- * LAB_DEFAULTS are NOT spec parameters. They select the Phase A candidates the
- * human chooses between by ear (Q-A1 repitch law, Q-A2 tempo policy, Q-A5
- * jump) and the planted variants the smoke needs. Once ruled, the winner is
- * written into the spec and the losers stay here only as references.
+ * LAB_DEFAULTS are NOT spec parameters. Their non-null values override a key
+ * so the lab can still play the Phase A candidates the human did not pick
+ * (references) and the planted faults the smoke needs. null = follow the key.
  */
 "use strict";
 
@@ -192,45 +201,59 @@ const ECHO_DIVS = [
   ["1/32", 0.125], ["3/128", 0.09375], ["1/32T", 1 / 12], ["1/64", 0.0625],
 ];
 
+// Switch declarations of the flip-class keys, in contract A11's vocabulary as
+// amended (§12.1: an equal-gain crossfade of a stated length, or `gate`; §12.2:
+// a seeded jump — the state that starts running is seeded from the value being
+// applied, so the value does not step and only its slope changes).
+const SW_TIME = "moves the read head: repitch = seeded jump of the read position (continuous, slope within the law's cap); crossfade = equal-gain crossfade, time.xfadeMs; jump = equal-gain crossfade, 3 ms";
+const SW_DEFER = "deferred: no signal-path state switches at the flip; applies from the next time move";
+const SW_XF20 = "equal-gain crossfade, 20 ms";
+
 // The manifest as the lab implements it (mirror of spec/params.json).
 // morph: continuous | jump (flip-class) | device — Bulwark's local enum, which
 // maps one to one onto OQ #33 (RS-2.2). rate: FOUNDATIONS ReadCadence.
 // A stepped value is an index into `labels`; the LABEL is what a preset stores.
-const P = (key, name, unit, type, min, max, def, morph, law, smoothing, labels) =>
-  Object.assign({ key, name, unit, type, min, max, def, morph, rate: "continuous", law, smoothing }, labels ? { labels } : {});
+const P = (key, name, unit, type, min, max, def, morph, law, smoothing, labels, sw) =>
+  Object.assign({ key, name, unit, type, min, max, def, morph, rate: "continuous", law, smoothing },
+    labels ? { labels } : {}, sw ? { switch: sw } : {});
 const ECHO_PARAMS = [
   P("io.inGain", "Input Gain", "dB", "scalar", -24, 24, 0, "device", "io", "gain"),
   P("io.outGain", "Output Gain", "dB", "scalar", -24, 24, 0, "device", "io", "gain"),
   P("mix", "Mix", "%", "scalar", 0, 100, 30, "continuous", "lin", "gain"),
-  P("time.sync", "Sync", "", "stepped", 0, 1, 1, "jump", "step", "time", ["free", "sync"]),
+  P("time.sync", "Sync", "", "stepped", 0, 1, 1, "jump", "step", "time", ["free", "sync"], SW_TIME),
   P("time.ms", "Time", "ms", "scalar", 1, 12000, 375, "continuous", "log", "time"),
-  P("time.div", "Division", "", "stepped", 0, ECHO_DIVS.length - 1, 9, "jump", "step", "time", ECHO_DIVS.map(d => d[0])),
+  P("time.div", "Division", "", "stepped", 0, ECHO_DIVS.length - 1, 9, "jump", "step", "time", ECHO_DIVS.map(d => d[0]), SW_TIME),
   P("time.offL", "Left Offset", "%", "scalar", -50, 50, 0, "continuous", "lin", "time"),
   P("time.offR", "Right Offset", "%", "scalar", -50, 50, 0, "continuous", "lin", "time"),
-  P("time.change", "Time Change", "", "stepped", 0, 2, 0, "jump", "step", "topology", ["repitch", "crossfade", "jump"]),
+  P("time.change", "Time Change", "", "stepped", 0, 2, 0, "jump", "step", "deferred", ["repitch", "crossfade", "jump"], SW_DEFER),
+  P("time.law", "Repitch Law", "", "stepped", 0, 1, 0, "jump", "step", "deferred", ["tape", "exponential"], SW_DEFER),
+  P("time.tempoMode", "Tempo Follow", "", "stepped", 0, 2, 1, "jump", "step", "deferred", ["crossfade", "glide", "follow"], SW_DEFER),
   P("time.glide", "Glide", "s", "scalar", 0.01, 5, 0.3, "continuous", "log", "law"),
   P("time.xfadeMs", "Crossfade", "ms", "scalar", 2, 500, 60, "continuous", "log", "law"),
   P("fb.amount", "Feedback", "%", "scalar", 0, 120, 35, "continuous", "lin", "gain"),
-  P("route.mode", "Routing", "", "stepped", 0, 2, 0, "jump", "step", "crossfade", ["stereo", "pingpong", "midside"]),
-  P("filt.in.on", "Input Filter", "", "stepped", 0, 1, 0, "jump", "step", "crossfade", ["off", "on"]),
+  P("route.mode", "Routing", "", "stepped", 0, 2, 0, "jump", "step", "crossfade", ["stereo", "pingpong", "midside"], SW_XF20),
+  P("filt.in.on", "Input Filter", "", "stepped", 0, 1, 0, "jump", "step", "crossfade", ["off", "on"], SW_XF20),
   P("filt.in.hpHz", "Input Low Cut", "Hz", "scalar", 20, 2000, 20, "continuous", "log", "filter"),
   P("filt.in.lpHz", "Input High Cut", "Hz", "scalar", 500, 20000, 20000, "continuous", "log", "filter"),
-  P("filt.loop.on", "Loop Filter", "", "stepped", 0, 1, 1, "jump", "step", "crossfade", ["off", "on"]),
+  P("filt.loop.on", "Loop Filter", "", "stepped", 0, 1, 1, "jump", "step", "crossfade", ["off", "on"], SW_XF20),
   P("filt.loop.hpHz", "Loop Low Cut", "Hz", "scalar", 20, 2000, 60, "continuous", "log", "filter"),
   P("filt.loop.lpHz", "Loop High Cut", "Hz", "scalar", 500, 20000, 9000, "continuous", "log", "filter"),
-  P("filt.out.on", "Output Filter", "", "stepped", 0, 1, 0, "jump", "step", "crossfade", ["off", "on"]),
+  P("filt.out.on", "Output Filter", "", "stepped", 0, 1, 0, "jump", "step", "crossfade", ["off", "on"], SW_XF20),
   P("filt.out.hpHz", "Output Low Cut", "Hz", "scalar", 20, 2000, 20, "continuous", "log", "filter"),
   P("filt.out.lpHz", "Output High Cut", "Hz", "scalar", 500, 20000, 20000, "continuous", "log", "filter"),
-  P("mod.depthMs", "Mod Depth", "ms", "scalar", 0, 20, 0, "continuous", "lin", "gain"),
-  P("mod.rateHz", "Mod Rate", "Hz", "scalar", 0.05, 10, 0.6, "continuous", "log", "law"),
-  P("mod.shape", "Mod Shape", "", "stepped", 0, 1, 0, "jump", "step", "crossfade", ["sine", "drift"]),
-  P("mod.spread", "Mod Spread", "%", "scalar", 0, 100, 0, "continuous", "lin", "gain"),
-  P("mod.seed", "Mod Seed", "", "stepped", 0, 65535, 1, "jump", "step", "law"),
+  P("mod.depthMs", "Mod Depth", "ms", "scalar", 0, 20, 0, "continuous", "lin", "mod"),
+  P("mod.rateHz", "Mod Rate", "Hz", "scalar", 0.05, 10, 0.6, "continuous", "log", "mod"),
+  P("mod.shape", "Mod Shape", "", "stepped", 0, 1, 0, "jump", "step", "mod", ["sine", "drift"],
+    "seeded jump of the modulation offset: it starts from the value being applied (250 ms value blend, slew-limited)"),
+  P("mod.spread", "Mod Spread", "%", "scalar", 0, 100, 0, "continuous", "lin", "mod"),
+  P("mod.seed", "Mod Seed", "", "stepped", 0, 65535, 1, "jump", "step", "mod", null,
+    "seeded jump (contract §12.2): the new streams start from the value being applied"),
 ];
 const ECHO_PARAM_INDEX = Object.fromEntries(ECHO_PARAMS.map((p, i) => [p.key, i]));
 const EI = ECHO_PARAM_INDEX;
+const ECHO_DEVICE_KEYS = ECHO_PARAMS.filter(p => p.morph === "device").map(p => p.key);
 
-// Engine constants (spec/SPEC.md §9). Times in seconds, converted at the
+// Engine constants (spec/SPEC.md §13). Times in seconds, converted at the
 // current sample rate (ADR-009) — never per-sample constants.
 const ECHO_K = {
   maxDelayS: 12,        // the line (manifest max_delay); time + offset clamp to it
@@ -240,13 +263,19 @@ const ECHO_K = {
   knee: 0.9,            // ceiling on the returning term: identity up to the knee ...
   ceil: 1.0,            // ... then a tanh shoulder toward this asymptote (ADR-142's law)
   dcHz: 5,              // DC blocker corner, in the loop after the ceiling (D-005)
-  rampS: 0.020,         // gain / mix / feedback / switch ramps (B435's 20 ms)
-  modRampS: 0.25,       // depth / spread / shape changes. NOT 20 ms: a 20 ms depth reached
-                        // in 20 ms moves the read at up to 2x speed; over 250 ms, at most 8 %
-  modRateGlideS: 0.1,   // mod rate glides in log-frequency (the slope cap follows it smoothly)
+  rampS: 0.020,         // gain / mix / feedback / switch / load-fade ramps (B435's 20 ms)
+  modRampS: 0.25,       // depth / spread / shape changes: a ramp of the modulation is a read speed
+  modRateGlideS: 0.1,   // mod rate glides in log-frequency
   filtGlideS: 0.010,    // cutoff glide time constant, log-frequency
   sMin: 0.25, sMax: 4,  // HARD read-speed invariant (D-006): never reversed, never past 4x
-  modSlopeMax: 0.25,    // modulation alone moves the read speed by at most +-25 %
+  capSt: 12,            // every repitch law's pitch cap, both directions
+  modSlopeMax: 0.25,    // |d(offset)/dt| of the modulation, enforced as a slew limit.
+                        // With the cap: s >= 1 - (1 - 2^-1) - 0.25 = 0.25 and s <= 1 + 1 + 0.25, inside the bound by construction
+  jumpS: 0.003,         // "jump" is an equal-gain crossfade this long (Q-A5, D-015)
+  fallbackS: 3,         // a repitch move longer than this at the cap's rate crossfades instead (D-006)
+  tempoCapCents: 50,    // tempo mode "follow": exact while the bend stays under this
+  gateDb: -120,         // the tail gate's floor (spec §10)
+  tailMarginS: 0.25,    // filter and DC-blocker settling added to the declared tail
 };
 
 // mulberry32 — the only randomness anywhere in Echo (charter §Domain).
@@ -261,18 +290,16 @@ function mulberry32(seed) {
 }
 
 const LAB_DEFAULTS = {
-  law: "crit2",         // Q-A1: slew | crit2 | logpole | varispeed | onepoleD (REJECTED by D-006: reference + plant)
-  capSt: 12,            // the law's pitch cap in semitones: its rate bound, both directions
-  fallback: true,       // D-006 hybrid: a move the capped law cannot finish in fallbackS crossfades instead
-  fallbackS: 3,
-  tempoPolicy: "glide", // Q-A2: xfade (A) | glide (B, through the repitch law) | capped (C); D = expose as a key
-  tempoCapCents: 50,    // policy C's pitch cap
-  jump: "raw",          // Q-A5: raw (a bare jump, as D-007 ratified) | xfade (jumpXfadeMs crossfade)
-  jumpXfadeMs: 3,
+  law: null,            // override time.law: slew | crit2 | logpole | varispeed | onepoleD (D-006's rejected law: plant only)
+  tempoPolicy: null,    // override time.tempoMode: xfade | glide | capped
+  jump: "xfade",        // "raw" = a bare jump: the click metric's planted must-fail control only (Q-A5)
+  fallback: true,       // the D-006 hybrid; false only to hear a law's full glide
   kernel: "hermite",    // D-004 leaves Hermite vs Lagrange to the lab
-  clampSpeed: true,     // the hard s-invariant. false ONLY in the smoke's planted control
+  plant: null,          // smoke-only fault switches; never set in the UI
   trace: null,          // optional Float64Array: line 0's sounding read position per sample (NaN mid-fade)
 };
+const ECHO_LAWS = ["varispeed", "logpole"];          // time.law: tape, exponential (Q-A1, D-015)
+const ECHO_TEMPO = ["xfade", "glide", "capped"];      // time.tempoMode: crossfade, glide, follow (Q-A2, D-015)
 
 // Routing (spec §4). Line 0 / line 1 carry L / R (stereo, ping-pong) or M / S
 // (mid/side, M = (L+R)/2, so a mono input runs the M line at the stereo mode's
@@ -308,12 +335,14 @@ class EchoLab {
   }
 
   // ALL allocation happens here, sized for the 12 s line at THIS rate
-  // (manifest max_delay; spec §8 memory). process() allocates nothing.
+  // (manifest max_delay; spec §11 memory). process() allocates nothing.
   prepare(sr) {
     this.sr = sr;
     this.N = Math.ceil((ECHO_K.maxDelayS + ECHO_K.maxModS) * sr) + 8;
     this.line = [new Float32Array(this.N), new Float32Array(this.N)];
-    this.tape = [new Float64Array(this.N), new Float64Array(this.N)]; // varispeed law only
+    // Tape position history for the tape law, one value per sample. The C++ may
+    // keep it at control rate (spec §11); the lab keeps it simple.
+    this.tape = [new Float64Array(this.N), new Float64Array(this.N)];
     this.filters = [new EchoFilter(true, EI["filt.in.hpHz"], EI["filt.in.lpHz"], EI["filt.in.on"]),
                     new EchoFilter(false, EI["filt.loop.hpHz"], EI["filt.loop.lpHz"], EI["filt.loop.on"]),
                     new EchoFilter(true, EI["filt.out.hpHz"], EI["filt.out.lpHz"], EI["filt.out.on"])];
@@ -324,7 +353,11 @@ class EchoLab {
     this.modRampN = Math.max(1, Math.round(ECHO_K.modRampS * sr));
     this.rateA = 1 - Math.exp(-1 / (ECHO_K.modRateGlideS * sr));
     this.filtA = 1 - Math.exp(-1 / (ECHO_K.filtGlideS * sr));
-    // smoothers: inGain, outGain, mix, fb, depth, spread (linear, rampS)
+    this.floor = Math.pow(10, ECHO_K.gateDb / 20);
+    this.up = Math.pow(2, ECHO_K.capSt / 12) - 1;       // max shortening rate (pitch up)
+    this.dn = 1 - Math.pow(2, -ECHO_K.capSt / 12);      // max lengthening rate (pitch down)
+    this.capR = Math.pow(2, ECHO_K.tempoCapCents / 1200) - 1;
+    // smoothers: inGain, outGain, mix, fb, depth, spread (linear)
     this.smV = new Float64Array(6); this.smT = new Float64Array(6); this.smS = new Float64Array(6);
     this.smLeft = new Int32Array(6);
     this.dc = new Float64Array(4);
@@ -335,11 +368,12 @@ class EchoLab {
     this.stats = [this._newStats(), this._newStats()];
     this.reset();
   }
-  _newStats() { return { sMin: Infinity, sMax: -Infinity, reverse: 0, clamps: 0, fades: 0, fallbacks: 0, nonfinite: 0 }; }
+  _newStats() { return { sMin: Infinity, sMax: -Infinity, reverse: 0, clamps: 0, fades: 0, fallbacks: 0, nonfinite: 0, overrun: 0, gates: 0 }; }
   resetStats() { for (let k = 0; k < 2; k++) Object.assign(this.stats[k], this._newStats()); }
   _newHead() {
-    return { D: 0, V: 0, T: 0, tc: 1, fade: false, dA: 0, dB: 0, fi: 0, fn: 1, pending: NaN, pendingSwitch: false,
-             tempo: false, lastPos: 0, v: 1, c: 0, pNow: 0, headId: 0, statId: 0, statPos: 0, tapeRun: false, init: true };
+    return { D: 0, V: 0, T: 0, tc: 0, fade: false, dA: 0, dB: 0, fi: 0, fn: 1, pending: NaN,
+             mode: 0, law: "varispeed", tempo: false, lastPos: 0, v: 1, c: 0, pNow: 0,
+             headId: 0, statId: 0, statPos: 0, tapeRun: false, init: true };
   }
 
   get(key) { return this.p[EI[key]]; }
@@ -357,46 +391,48 @@ class EchoLab {
     this._applied(key, v);
     return true;
   }
-  setLab(opts) { Object.assign(this.lab, opts); this._labCache(); }
-  _labCache() {
-    this.up = Math.pow(2, this.lab.capSt / 12) - 1;    // max shortening rate (pitch up)
-    this.dn = 1 - Math.pow(2, -this.lab.capSt / 12);   // max lengthening rate (pitch down)
-    this.capR = Math.pow(2, this.lab.tempoCapCents / 1200) - 1;
-  }
+  setLab(opts) { Object.assign(this.lab, opts); }
 
-  // A preset/state load (RS-6.7): values land with NO ramp-in, and the read
-  // head never glides (ADR-142) — it crossfades to the new time (time.xfadeMs).
+  // A preset/state load (RS-6.7, ruled D-015: the old repeats END). Values land
+  // with no ramp-in; Device keys are not part of a patch and are left alone
+  // (RS-4.5). The old audio fades out over rampS (the declared LoadDecl bound),
+  // then the lines and loop state are cleared and the heads land on the new
+  // times — no glide (ADR-142). Whether the old tail keeps ringing is horde's
+  // spill-over setting (a second instance, RS-6.3/6.5), never Echo's.
   load(values) {
     for (const k of Object.keys(values)) {
       const i = EI[k], v = values[k];
       if (i === undefined || typeof v !== "number" || !Number.isFinite(v)) continue;
+      if (ECHO_PARAMS[i].morph === "device" && !(this.lab.plant === "loadDevice")) continue;
       const q = ECHO_PARAMS[i];
       this.p[i] = Math.min(q.max, Math.max(q.min, q.type === "stepped" ? Math.round(v) : v));
     }
     this._snap();
     this._reseedDrift(this.get("mod.seed"), true);
-    this.timeDirty = true; this.loadPending = true;
+    this.timeDirty = true;
+    this.loadLeft = this.lab.plant === "loadKeeps" ? 0 : this.rampN;
+    if (this.lab.plant === "loadKeeps") this.loadKeep = true;
   }
 
   _applied(key, v) {
     if (key === "time.sync" || key === "time.ms" || key === "time.div" || key === "time.offL" || key === "time.offR") {
       this.timeDirty = true; this.paramMoved = true;
-    } else if (key === "time.change") {
-      // Into crossfade mode while a glide is in flight: finish it by a crossfade.
-      if (v === 1) for (const h of this.heads) h.pendingSwitch = true;
     } else if (key === "route.mode") {
-      this.routeFrom = this.routeTo; this.routeTo = v; this.routeW = 0;
+      this.routeFrom = this.routeTo; this.routeTo = v; this.routeW = this.lab.plant === "instantSwitch" ? 1 : 0;
+      if (this.routeW === 1) this.routeFrom = v;
     } else if (key === "filt.in.on") this._filterSwitch(this.filters[0], v);
     else if (key === "filt.loop.on") this._filterSwitch(this.filters[1], v);
     else if (key === "filt.out.on") this._filterSwitch(this.filters[2], v);
     else if (key.startsWith("filt.")) { for (const f of this.filters) f.settled = false; }
-    else if (key === "mod.seed") this._reseedDrift(v, true);
+    else if (key === "mod.seed") this._reseedDrift(v, this.lab.plant !== "unseededSeed");
     else if (key === "mod.shape") { this.shapeFrom = 1 - v; this.shapeW = 0; }
+    // time.change, time.law, time.tempoMode: deferred — read when the next move starts.
     const si = ["io.inGain", "io.outGain", "mix", "fb.amount", "mod.depthMs", "mod.spread"].indexOf(key);
     if (si >= 0) {
       const t = this._smTarget(si), len = si >= 4 ? this.modRampN : this.rampN;
       this.smT[si] = t; this.smS[si] = (t - this.smV[si]) / len; this.smLeft[si] = len;
     }
+    if (key === "fb.amount" || key === "mod.depthMs") this.timeDirty = true;  // the declared tail moves
   }
   _smTarget(si) {
     const p = this.p;
@@ -409,6 +445,7 @@ class EchoLab {
       default: return p[EI["mod.spread"]] / 100;
     }
   }
+  // Snap every smoother and switch to its target (load, reset, and at rest).
   _snap() {
     for (let si = 0; si < 6; si++) { this.smV[si] = this.smT[si] = this._smTarget(si); this.smLeft[si] = 0; }
     for (const f of this.filters) {
@@ -417,24 +454,32 @@ class EchoLab {
       if (!f.w) f.reset();
     }
     this.routeFrom = this.routeTo = this.p[EI["route.mode"]]; this.routeW = 1;
+    this.rateL2 = Math.log2(this.p[EI["mod.rateHz"]]); this.shapeW = 1; this.shapeFrom = this.p[EI["mod.shape"]];
   }
   _filterSwitch(f, on) {
     if (on && f.w === 0) { f.hl = Math.log2(this.p[f.hpKey]); f.ll = Math.log2(this.p[f.lpKey]); f.settled = false; }
-    f.wT = on; f.wStep = (on - f.w) / this.rampN;
+    f.wT = on;
+    if (this.lab.plant === "instantSwitch") { f.w = on; f.wStep = 0; if (!on) f.reset(); }
+    else f.wStep = (on - f.w) / this.rampN;
+  }
+
+  // Clear everything that rings: lines, loop and output filter states, DC.
+  _clearLoop() {
+    this.line[0].fill(0); this.line[1].fill(0);
+    for (const f of this.filters) f.reset();
+    this.dc.fill(0);
   }
 
   // reset(): bit-identical to a freshly prepared instance (admission row A2).
   reset() {
-    this.line[0].fill(0); this.line[1].fill(0);
+    this._clearLoop();
     this.w = 0; this.n = 0;
-    for (const f of this.filters) f.reset();
-    this.dc.fill(0);
     this.bpm = this.bpmPrev = 120;
-    this.paramMoved = false; this.loadPending = false; this.timeDirty = false;
-    this._labCache();
+    this.paramMoved = false; this.timeDirty = false; this.loadLeft = 0; this.loadKeep = false;
     this._snap();
-    this.modPhase = 0; this.rateL2 = Math.log2(this.get("mod.rateHz")); this.shapeW = 1; this.shapeFrom = this.get("mod.shape");
+    this.modPhase = 0;
     this._reseedDrift(this.get("mod.seed"), false);
+    this.mods[0] = this.mods[1] = 0;
     this._resolveBoth(this.bpm);
     for (let k = 0; k < 2; k++) {
       const h = this.heads[k];
@@ -442,22 +487,26 @@ class EchoLab {
       h.D = h.T = h.dA = h.dB = h.lastPos = h.statPos = this.Tt[k];
       this._tapeRebuild(k, h);
     }
+    // A fresh instance is AT REST (idle): nothing rings, so the first block
+    // snaps to the host's tempo instead of gliding from 120 (spec §3.3, §10).
+    this.idle = true; this.silentRun = 0; this.quietRun = 0;
     this.resetStats();
   }
 
   // ---- time resolution: base x (1 + offset), the 12 s clamp ---------------
-  // Synced times past the line FOLD by halving (they stay on the grid; the
-  // `folded` flag is for the display). Free times clamp. Both clamp below at
-  // minDelayS. Spec §3.4.
+  // Synced times past the line FOLD by halving, BOTH lines together so the
+  // L/R ratio survives (the `folded` flag is for the display). Free times
+  // clamp. Both clamp below at minDelayS. Spec §3.4. Also refreshes the
+  // declared tail, which depends on the times, the feedback and the depth.
   _resolveBoth(bpm) {
     const p = this.p, sync = p[EI["time.sync"]] === 1;
     const base = sync ? ECHO_DIVS[p[EI["time.div"]]][1] * 60 / (bpm > 1 ? bpm : 120) : p[EI["time.ms"]] / 1000;
+    let tL = base * (1 + p[EI["time.offL"]] / 100), tR = base * (1 + p[EI["time.offR"]] / 100);
     this.folded = false;
-    for (let k = 0; k < 2; k++) {
-      let t = base * (1 + p[k ? EI["time.offR"] : EI["time.offL"]] / 100);
-      if (sync) while (t > ECHO_K.maxDelayS) { t *= 0.5; this.folded = true; }
-      this.Tt[k] = Math.min(ECHO_K.maxDelayS, Math.max(ECHO_K.minDelayS, t)) * this.sr;
-    }
+    if (sync) while (Math.max(tL, tR) > ECHO_K.maxDelayS) { tL *= 0.5; tR *= 0.5; this.folded = true; }
+    this.Tt[0] = Math.min(ECHO_K.maxDelayS, Math.max(ECHO_K.minDelayS, tL)) * this.sr;
+    this.Tt[1] = Math.min(ECHO_K.maxDelayS, Math.max(ECHO_K.minDelayS, tR)) * this.sr;
+    this.tailN = this._tailSamples();
   }
 
   // ---- modulation ----------------------------------------------------------
@@ -465,7 +514,7 @@ class EchoLab {
     for (let k = 0; k < 2; k++) {
       const d = this.drift[k], cur = seeded && d.r ? this._driftVal(d) : 0;
       d.r = mulberry32(seed * 2 + 1 + k);       // two streams, derived from mod.seed alone
-      if (seeded && d.r) {
+      if (seeded) {
         // Seeded switch (contract §12.2): the new stream starts FROM the value
         // being output, so the modulation does not step; only its slope changes.
         d.pts[0] = cur; d.pts[1] = cur; d.pts[2] = d.r() * 2 - 1; d.pts[3] = d.r() * 2 - 1;
@@ -475,16 +524,20 @@ class EchoLab {
       d.u = 0;
     }
   }
+  // Catmull-Rom through the stream's points. It can overshoot [-1, 1] (to 1.25),
+  // which would read past the line's modulation margin, so it is clamped.
   _driftVal(d) {
     const p0 = d.pts[0], p1 = d.pts[1], p2 = d.pts[2], p3 = d.pts[3], u = d.u;
     const m1 = 0.5 * (p2 - p0), m2 = 0.5 * (p3 - p1), u2 = u * u, u3 = u2 * u;
-    return (2 * u3 - 3 * u2 + 1) * p1 + (u3 - 2 * u2 + u) * m1 + (-2 * u3 + 3 * u2) * p2 + (u3 - u2) * m2;
+    const v = (2 * u3 - 3 * u2 + 1) * p1 + (u3 - 2 * u2 + u) * m1 + (-2 * u3 + 3 * u2) * p2 + (u3 - u2) * m2;
+    return this.lab.plant === "driftOvershoot" ? v : v > 1 ? 1 : v < -1 ? -1 : v;
   }
-  // Modulation offsets in samples for both lines at this sample. Depth is
-  // limited so modulation alone keeps |d(pos)/dt| <= modSlopeMax. Both shapes
-  // advance every sample, so a shape switch can blend their VALUES over
-  // modRampS (a crossfade of the modulation, not of the audio).
-  _modStep() {
+  // Modulation offsets (samples) for both lines at this sample. The depth is
+  // limited so the curve's own slope stays within modSlopeMax, and the OFFSET
+  // itself is slew-limited to modSlopeMax per sample, so no rate glide, spread
+  // ramp, shape blend or seed change can move the read faster than that.
+  // The depth is also kept clear of the write head (D + offset >= 3 samples).
+  _modStep(dMin) {
     const depth = this.smV[4], out = this.mods, sr = this.sr;
     this.rateL2 += (Math.log2(this.p[EI["mod.rateHz"]]) - this.rateL2) * this.rateA;
     const f = Math.pow(2, this.rateL2), sp = this.smV[5];
@@ -495,16 +548,22 @@ class EchoLab {
       d.u += f / sr;
       if (d.u >= 1) { d.u -= 1; d.pts[0] = d.pts[1]; d.pts[1] = d.pts[2]; d.pts[2] = d.pts[3]; d.pts[3] = d.r() * 2 - 1; }
     }
-    if (depth === 0) { out[0] = out[1] = 0; return; }
-    const s0 = Math.sin(this.modPhase), s1 = Math.sin(this.modPhase + sp * Math.PI / 2);
-    const a = this._driftVal(this.drift[0]), d0 = a, d1 = (1 - sp) * a + sp * this._driftVal(this.drift[1]);
-    let w = this.p[EI["mod.shape"]];                                // 0 sine, 1 drift
-    if (this.shapeW < 1) { this.shapeW = Math.min(1, this.shapeW + 1 / this.modRampN); w = this.shapeFrom + (w - this.shapeFrom) * this.shapeW; }
-    const m0 = (1 - w) * s0 + w * d0, m1 = (1 - w) * s1 + w * d1;
-    // max |dm/dt|: 2*pi*f for the sine; Catmull-Rom through points in [-1, 1]: 3.5 f
-    const slope = Math.max(w < 1 ? 2 * Math.PI * f / sr : 0, w > 0 ? 3.5 * f / sr : 0);
-    const A = Math.min(depth, ECHO_K.modSlopeMax / slope);
-    out[0] = A * m0; out[1] = A * m1;
+    let t0 = 0, t1 = 0;
+    if (depth > 0) {
+      const s0 = Math.sin(this.modPhase), s1 = Math.sin(this.modPhase + sp * Math.PI / 2);
+      const a = this._driftVal(this.drift[0]), d0 = a, d1 = (1 - sp) * a + sp * this._driftVal(this.drift[1]);
+      let w = this.p[EI["mod.shape"]];                              // 0 sine, 1 drift
+      if (this.shapeW < 1) { this.shapeW = Math.min(1, this.shapeW + 1 / this.modRampN); w = this.shapeFrom + (w - this.shapeFrom) * this.shapeW; }
+      const m0 = (1 - w) * s0 + w * d0, m1 = (1 - w) * s1 + w * d1;
+      // max |dm/dt|: 2*pi*f for the sine; Catmull-Rom through points in [-1, 1]: 3.5 f
+      const slope = Math.max(w < 1 ? 2 * Math.PI * f / sr : 0, w > 0 ? 3.5 * f / sr : 0);
+      const A = Math.max(0, Math.min(depth, ECHO_K.modSlopeMax / slope, dMin - ECHO_K.minReadSamples));
+      t0 = A * m0; t1 = A * m1;
+    }
+    if (this.lab.plant === "modUnlimited") { out[0] = t0; out[1] = t1; return; }
+    const lim = ECHO_K.modSlopeMax;
+    out[0] += Math.max(-lim, Math.min(lim, t0 - out[0]));
+    out[1] += Math.max(-lim, Math.min(lim, t1 - out[1]));
   }
 
   // ---- the read kernel (D-004: a 4-point FIR, position in double) ----------
@@ -523,101 +582,114 @@ class EchoLab {
     const c1 = 0.5 * (x1 - xm1), c2 = xm1 - 2.5 * x0 + 2 * x1 - 0.5 * x2, c3 = 0.5 * (x2 - xm1) + 1.5 * (x0 - x1);
     return ((c3 * f + c2) * f + c1) * f + x0;
   }
+  // Every read position is held inside the line; an attempt past it is counted.
+  _pos(p, st) {
+    const hi = this.N - 4;
+    if (p > hi) { st.overrun++; return hi; }
+    return p < ECHO_K.minReadSamples ? ECHO_K.minReadSamples : p;
+  }
 
   // ---- the time engine -----------------------------------------------------
-  _startFade(h, from, to, ms, st) {
-    h.fade = true; h.dA = from; h.dB = to; h.fi = 0; h.fn = Math.max(1, Math.round(ms / 1000 * this.sr));
+  _startFade(h, from, to, s, st) {
+    h.fade = true; h.dA = from; h.dB = to; h.fi = 0; h.fn = Math.max(1, Math.round(s * this.sr));
     h.pending = NaN; st.fades++;
   }
-  // Varispeed: a steady tape at speed v = 1/D (head spacing L = 1 tape unit).
+  // Tape law: a steady tape at speed v = 1/D (head spacing L = 1 tape unit).
   _tapeRebuild(k, h) {
     const tp = this.tape[k], N = this.N; h.v = 1 / h.D;
     for (let a = 0; a < N; a++) { let i = (this.w - 1 - a) % N; if (i < 0) i += N; tp[i] = -a * h.v; }
     h.pNow = 0; h.c = this.n - h.D;
   }
+  // The behaviour a NEW move gets: time.change for a knob, automation or morph
+  // move; time.tempoMode for a move caused by the host tempo alone. Latched for
+  // the life of the move, so flipping either key mid-move changes nothing until
+  // the next one (their declared switch: deferred).
+  _latch(h) {
+    const lab = this.lab, change = this.p[EI["time.change"]];
+    h.law = lab.law || ECHO_LAWS[this.p[EI["time.law"]]];
+    if (h.tempo) {
+      const tp = lab.tempoPolicy || ECHO_TEMPO[this.p[EI["time.tempoMode"]]];
+      h.mode = tp === "xfade" ? 1 : tp === "capped" ? 4 : 0;
+    } else h.mode = change === 0 ? 0 : change === 1 ? 1 : lab.jump === "raw" ? 2 : 3;
+  }
 
   _headStep(k, h, T, cls, mod, st) {
     const lab = this.lab, sr = this.sr;
-    if (cls === 1) h.tempo = false; else if (cls === 2) h.tempo = true;
-    const change = this.p[EI["time.change"]];
-    // Who owns this move: time.change for a knob, automation or morph move;
-    // the tempo policy (Q-A2) for a move caused by the host tempo alone.
-    let mode = change === 0 ? 0 : change === 1 ? 1 : 2;           // 0 repitch, 1 crossfade, 2 jump
-    if (h.tempo) mode = lab.tempoPolicy === "xfade" ? 1 : lab.tempoPolicy === "capped" ? 4 : 0;
-    if (mode === 2 && lab.jump === "xfade") mode = 3;             // 3: jump as a short crossfade
-    const xf = mode === 3 ? lab.jumpXfadeMs : this.p[EI["time.xfadeMs"]];
-    if (this.loadPending) {                                       // a load never glides
-      if (Math.abs(T - h.D) >= 0.5) this._startFade(h, h.D, T, this.p[EI["time.xfadeMs"]], st);
-      h.D = T; h.V = 0; h.T = T; return;
-    }
     const Tprev = h.T; h.T = T;
-    if (T !== Tprev) h.tc = 0;                                    // retarget: the law re-latches its time scale
+    if (T !== Tprev) {                                            // a new move (or a retarget)
+      if (cls === 1) h.tempo = false; else if (cls === 2) h.tempo = true;
+      const was = h.law;
+      this._latch(h); h.tc = 0;
+      if (h.law === "varispeed" && was !== "varispeed") this._tapeRebuild(k, h);
+    }
+    const mode = h.mode, xf = mode === 3 ? ECHO_K.jumpS : this.p[EI["time.xfadeMs"]] / 1000;
 
     if (h.fade) {
       if (++h.fi < h.fn) { h.pending = T; return; }
       h.fade = false; h.D = h.dB; h.V = 0; h.headId++;
-      if (lab.law === "varispeed") this._tapeRebuild(k, h);
+      if (h.law === "varispeed") this._tapeRebuild(k, h);
       const tgt = h.pending === h.pending ? h.pending : T;
       // The queue (D-007's deterministic retrigger rule): a target that moved
       // during the fade is faded to next; the latest target wins.
       if ((mode === 1 || mode === 3 || mode === 4) && Math.abs(tgt - h.D) >= 0.5) { this._startFade(h, h.D, tgt, xf, st); return; }
     }
-    if (h.pendingSwitch) {
-      h.pendingSwitch = false;
-      if (mode === 1 && Math.abs(T - h.D) >= 0.5) { this._startFade(h, h.D, T, xf, st); return; }
-    }
-    if (mode === 2) { h.D = T; return; }                          // a bare jump: the documented artefact
+    if (mode === 2) { h.D = T; return; }                          // the planted bare jump (smoke only)
     if (mode === 1 || mode === 3) { if (Math.abs(T - h.D) >= 0.5) this._startFade(h, h.D, T, xf, st); return; }
-    if (mode === 4) {                                             // tempo policy C
+    if (mode === 4) {                                             // tempo "follow" (Q-A2 C)
       const dT = T - Tprev, settled = Math.abs(h.D - Tprev) < 1;
       if (settled && Math.abs(dT) <= this.capR) { h.D += dT; this._clampSpeed(h, mod, st); return; }
-      if (settled) { this._startFade(h, h.D, T, this.p[EI["time.xfadeMs"]], st); return; }
+      if (settled) { this._startFade(h, h.D, T, this.p[EI["time.xfadeMs"]] / 1000, st); return; }
       // else a glide from a knob move is still in flight: the law finishes it
     }
 
-    // ---- repitch: the candidate law moves h.D toward T ---------------------
+    // ---- repitch: the law moves h.D toward T --------------------------------
     const up = this.up, dn = this.dn, gap = T - h.D;
-    if (lab.fallback && lab.law !== "onepoleD" && Math.abs(gap) / (gap < 0 ? up : dn) > lab.fallbackS * sr) {
-      st.fallbacks++; this._startFade(h, h.D, T, this.p[EI["time.xfadeMs"]], st); return;
+    if (gap === 0 && h.V === 0) return;
+    if (lab.fallback && h.law !== "onepoleD" && Math.abs(gap) / (gap < 0 ? up : dn) > ECHO_K.fallbackS * sr) {
+      st.fallbacks++; this._startFade(h, h.D, T, this.p[EI["time.xfadeMs"]] / 1000, st); return;
     }
     const tau = Math.max(1, this.p[EI["time.glide"]] * sr);
-    switch (lab.law) {
-      case "slew": h.V = gap; break;                              // (a): the rate bound below IS the law
-      case "crit2": {
-        // (b) critically damped 2nd order. Its time scale is latched at each
-        // retarget as max(glide, |gap|/(e*rate)), so the peak rate |gap|/(e*tc)
-        // stays within the cap however large the move.
+    switch (h.law) {
+      case "slew": h.V = gap; break;                              // reference (a): the cap below IS the law
+      case "crit2": {                                             // reference (b)
         if (h.tc === 0) h.tc = Math.max(tau, Math.abs(gap) / (Math.E * (gap < 0 ? up : dn)));
         h.V += gap / (h.tc * h.tc) - (2 / h.tc) * h.V;            // D'' = (T - D)/tc^2 - 2 D'/tc
         break;
       }
-      case "logpole": h.V = h.D * (Math.log(T) - Math.log(h.D)) / tau; break;  // (c) one-pole on ln D
+      // "exponential" (Q-A1 c): a one-pole on ln D, time constant glide.
+      case "logpole": h.V = h.D * (Math.log(T) - Math.log(h.D)) / tau; break;
       case "varispeed": {
-        // (d) tape: the speed v lags its target with time constant glide, the
-        // heads stay put, and a repeat recorded at v(t - D) plays at v(t).
+        // "tape" (Q-A1 d): the speed v lags its target with time constant glide,
+        // the heads stay put, and a repeat recorded at v(t - D) plays at v(t).
         const tp = this.tape[k], N = this.N;
         h.v += (1 / T - h.v) * (1 - Math.exp(-1 / tau));
         h.pNow += h.v; tp[this.n % N] = h.pNow; h.tapeRun = true;
         const target = h.pNow - 1;                                // L = 1 tape unit behind the write head
         let j = Math.floor(h.c), a0 = j % N; if (a0 < 0) a0 += N;
         let a1 = a0 + 1 === N ? 0 : a0 + 1;
-        while (j + 1 <= this.n && tp[a1] <= target) { j++; a0 = a1; a1 = a1 + 1 === N ? 0 : a1 + 1; }
+        // Bounded search (real-time work bound): the read may not advance more
+        // than s_max = 4 samples a sample, so neither does the cursor. When the
+        // tape model runs ahead of the cap, the head follows at the cap.
+        for (let steps = 0; steps < 4 && j + 1 <= this.n && tp[a1] <= target; steps++) { j++; a0 = a1; a1 = a1 + 1 === N ? 0 : a1 + 1; }
         const p0 = tp[a0], p1 = tp[a1];
         const c = j + (p1 > p0 ? (target - p0) / (p1 - p0) : 0);
         h.V = (this.n - c) - h.D;
         break;
       }
-      case "onepoleD": h.V = gap / tau; break;                    // REJECTED (D-006): reference and plant only
+      case "onepoleD": h.V = gap / tau; break;                    // REJECTED (D-006): plant only
     }
-    // The law's own rate bound (its pitch cap), then the hard invariant.
-    if (lab.law !== "onepoleD") h.V = h.V < -up ? -up : h.V > dn ? dn : h.V;
-    h.D += h.V;
-    if (lab.law === "varispeed") h.c = this.n - h.D;
+    // The law's pitch cap, then the hard invariant as a backstop.
+    if (h.law !== "onepoleD") h.V = h.V < -up ? -up : h.V > dn ? dn : h.V;
+    if (Math.abs(T - (h.D + h.V)) < 1e-9 && Math.abs(h.V) <= Math.abs(gap)) { h.D = T; h.V = 0; }
+    else h.D += h.V;
+    if (h.law === "varispeed") h.c = this.n - h.D;
     this._clampSpeed(h, mod, st);
   }
   // The hard invariant (D-006): read speed s = 1 - d(pos)/dt in [sMin, sMax].
+  // By construction the law's cap plus the modulation's slew limit stay inside
+  // it; this clamp is the backstop, and its hits are counted.
   _clampSpeed(h, mod, st) {
-    if (!this.lab.clampSpeed) return;
+    if (this.lab.plant === "noClamp") return;
     const dp = h.D + mod - h.lastPos, lo = 1 - ECHO_K.sMax, hi = 1 - ECHO_K.sMin;
     if (dp > hi || dp < lo) {
       const D = h.lastPos + (dp > hi ? hi : lo) - mod;
@@ -657,16 +729,61 @@ class EchoLab {
     return f.w === 1 ? v : (1 - f.w) * x + f.w * v;
   }
 
+  // ---- rest: the tail gate and the idle state (spec §10) -------------------
+  // At rest = the input is silent and nothing rings. While idle, process()
+  // outputs exact zero, holds every time-varying state (modulation, tempo
+  // interpolation, heads) and lands every parameter at its target with no ramp.
+  // So an instance horde stopped calling (sleep) and one that kept running on
+  // silence are in the same state when the next sound arrives (A16's twin).
+  _enterIdle(st) { this._clearLoop(); this.idle = true; st.gates++; }
+  _atRest(bpmEnd) {
+    this._snap();
+    const moved = this.bpm !== bpmEnd;
+    this.bpm = this.bpmPrev = bpmEnd;
+    if (this.timeDirty || moved) { this._resolveBoth(bpmEnd); this.timeDirty = false; }
+    for (let k = 0; k < 2; k++) {
+      const h = this.heads[k], T = this.Tt[k];
+      if (h.D !== T || h.fade) { h.D = h.T = T; h.V = 0; h.fade = false; h.tc = 0; h.headId++; }
+      h.tempo = false; this._latch(h);
+    }
+    this.paramMoved = false; this.loadLeft = 0;
+    this.mods[0] = this.mods[1] = 0;
+  }
+  // The declared tail, in samples (spec §10): after the input stops, one pass
+  // drains what the input wrote; after that the returning term is at most the
+  // ceiling times the DC blocker's L1 gain (< 2, +6 dB) and falls by g per pass
+  // (|H_loop| <= 1), so n passes reach the gate floor. Plus a pass for the
+  // gate's own window and a settling margin. g >= 1 holds the loop: infinite.
+  _tailSamples() {
+    const g = this.p[EI["fb.amount"]] / 100;
+    if (g >= 1) return Infinity;
+    const Tmax = Math.max(this.Tt[0], this.Tt[1]) + this.p[EI["mod.depthMs"]] / 1000 * this.sr + 4;
+    const n = g === 0 ? 0 : Math.ceil((ECHO_K.gateDb - 6.03) / (20 * Math.log10(g)));
+    return Math.ceil((n + 2) * Tmax + ECHO_K.tailMarginS * this.sr);
+  }
+
   // ---- process -------------------------------------------------------------
   // bpm: the host tempo for THIS block (data, never a clock; bpm <= 1 -> 120),
   // interpolated per sample from the previous block's value (D-008).
   process(inL, inR, outL, outR, n, bpm) {
-    const K = ECHO_K, lab = this.lab, N = this.N, R = this.R, gdc = 0.5 * (1 + R);
-    const bpmEnd = bpm > 1 ? bpm : 120, bpmStart = this.bpmPrev;
+    const K = ECHO_K, lab = this.lab, N = this.N, R = this.R, gdc = 0.5 * (1 + R), floor = this.floor;
+    const bpmEnd = bpm > 1 ? bpm : 120;
+    if (this.idle) this.bpmPrev = bpmEnd;                         // at rest the tempo lands, never glides
+    const bpmStart = this.bpmPrev;
     const fin = this.filters[0], floop = this.filters[1], fout = this.filters[2];
     const L0 = this.line[0], L1 = this.line[1], dc = this.dc, smV = this.smV;
     const syncOn = this.p[EI["time.sync"]] === 1;
     for (let i = 0; i < n; i++) {
+      // input, guarded (RS-7.9: every repair is counted and latched)
+      let xL = inL[i], xR = inR[i];
+      if (!Number.isFinite(xL)) { xL = 0; if (lab.plant !== "silentRepair") this.stats[0].nonfinite++; }
+      if (!Number.isFinite(xR)) { xR = 0; if (lab.plant !== "silentRepair") this.stats[1].nonfinite++; }
+      if (this.idle) {
+        if (xL === 0 && xR === 0) { this._atRest(bpmEnd); outL[i] = 0; outR[i] = 0; continue; }
+        this._atRest(bpmEnd);
+        for (let k = 0; k < 2; k++) if (this.heads[k].law === "varispeed" || lab.law === "varispeed") this._tapeRebuild(k, this.heads[k]);
+        this.idle = false; this.silentRun = 0; this.quietRun = 0;
+      }
       for (let si = 0; si < 6; si++) if (this.smLeft[si] > 0) { smV[si] += this.smS[si]; if (--this.smLeft[si] === 0) smV[si] = this.smT[si]; }
       const gIn = smV[0], gOut = smV[1], mix = smV[2], g = smV[3];
       for (let fi = 0; fi < 3; fi++) {
@@ -674,12 +791,8 @@ class EchoLab {
         if (f.w !== f.wT) { f.w += f.wStep; if ((f.wStep > 0 && f.w >= f.wT) || (f.wStep < 0 && f.w <= f.wT)) { f.w = f.wT; if (f.w === 0) f.reset(); } }
         if (f.w !== 0 || f.wT !== 0) this._filtCoef(f);
       }
-
-      // input, guarded (RS-7.9: every repair is counted)
-      let xL = inL[i], xR = inR[i];
-      if (!Number.isFinite(xL)) { xL = 0; this.stats[0].nonfinite++; }
-      if (!Number.isFinite(xR)) { xR = 0; this.stats[1].nonfinite++; }
       xL *= gIn; xR *= gIn;
+      this.silentRun = xL === 0 && xR === 0 ? this.silentRun + 1 : 0;
 
       // routing: a switch is a rampS equal-gain blend of the two matrices
       if (this.routeW < 1) { this.routeW += 1 / this.rampN; if (this.routeW >= 1) { this.routeW = 1; this.routeFrom = this.routeTo; } }
@@ -689,19 +802,29 @@ class EchoLab {
       if (fin.w !== 0 || fin.wT !== 0) { u0 = this._filt(fin, 0, u0); u1 = this._filt(fin, 1, u1); }
 
       // time targets; the tempo is interpolated per sample within the block
-      const b = bpmStart + (bpmEnd - bpmStart) * (i + 1) / n;
+      const b = lab.plant === "tempoFrozen" ? 120 : bpmStart + (bpmEnd - bpmStart) * (i + 1) / n;
       const tempoMoved = syncOn && b !== this.bpm; this.bpm = b;
       if (this.timeDirty || tempoMoved) { this._resolveBoth(b); this.timeDirty = false; }
       const cls = this.paramMoved ? 1 : tempoMoved ? 2 : 0;       // 1 knob/automation/morph, 2 tempo
       this.paramMoved = false;
-      this._modStep();
+      const h0 = this.heads[0], h1 = this.heads[1];
+      this._modStep(Math.min(h0.D, h1.D, h0.fade ? Math.min(h0.dA, h0.dB) : Infinity, h1.fade ? Math.min(h1.dA, h1.dB) : Infinity));
+      // a load fades the old audio out over rampS, then clears it (D-015)
+      let lg = 1;
+      if (this.loadLeft > 0) {
+        lg = --this.loadLeft / this.rampN;
+        if (this.loadLeft === 0) {
+          this._clearLoop();
+          for (let k = 0; k < 2; k++) { const h = this.heads[k]; h.D = h.T = this.Tt[k]; h.V = 0; h.fade = false; h.headId++; this._latch(h); if (h.law === "varispeed") this._tapeRebuild(k, h); }
+        }
+      }
       let y0 = 0, y1 = 0;
       for (let j = 0; j < 2; j++) {
         const h = this.heads[j], st = this.stats[j], md = this.mods[j], buf = j ? L1 : L0;
-        if (h.init) { h.lastPos = h.statPos = h.D + md; h.init = false; }
+        if (h.init) { h.lastPos = h.statPos = h.D + md; h.init = false; this._latch(h); }
         this._headStep(j, h, this.Tt[j], cls, md, st);
-        if (lab.law === "varispeed" && !h.tapeRun) {
-          // Outside the varispeed law the tape still runs, steadily at 1/D,
+        if (h.law === "varispeed" && !h.tapeRun) {
+          // Outside the tape law's glide the tape still runs, steadily at 1/D,
           // so the law resumes from a consistent speed history.
           h.v = 1 / h.D; h.pNow += h.v; this.tape[j][this.n % N] = h.pNow; h.c = this.n - h.D;
         }
@@ -710,12 +833,13 @@ class EchoLab {
         // modulation rides on every head.
         let yy, sp;
         if (h.fade) {
-          const wF = (h.fi + 1) / h.fn;
-          const pa = Math.max(K.minReadSamples, h.dA + md), pb = Math.max(K.minReadSamples, h.dB + md);
-          yy = (1 - wF) * this._read(buf, pa) + wF * this._read(buf, pb);
+          const wF = (h.fi + 1) / h.fn, pa = this._pos(h.dA + md, st), pb = this._pos(h.dB + md, st);
+          yy = lab.plant === "equalPower"
+            ? Math.cos(wF * Math.PI / 2) * this._read(buf, pa) + Math.sin(wF * Math.PI / 2) * this._read(buf, pb)
+            : (1 - wF) * this._read(buf, pa) + wF * this._read(buf, pb);
           sp = pa;
         } else {
-          sp = Math.max(K.minReadSamples, Math.min(N - 4, h.D + md));
+          sp = this._pos(h.D + md, st);
           yy = this._read(buf, sp);
         }
         // Statistics on the SOUNDING head. A fade's end hands over to the other
@@ -730,49 +854,63 @@ class EchoLab {
         h.lastPos = (h.fade ? h.dB : h.D) + md;
         if (j === 0 && lab.trace && this.n < lab.trace.length) lab.trace[this.n] = h.fade ? NaN : sp;
         if (floop.w !== 0 || floop.wT !== 0) yy = this._filt(floop, j, yy);
+        yy *= lg;
         if (j) y1 = yy; else y0 = yy;
       }
-      this.loadPending = false;
 
       // feedback: routing, gain, the ceiling on the RETURNING term only, then DC
+      let loud = false, bad = false;
       for (let j = 0; j < 2; j++) {
         const f = rw === 1 ? echoFb(rb, j, y0, y1) : (1 - rw) * echoFb(ra, j, y0, y1) + rw * echoFb(rb, j, y0, y1);
         let v = g * f;
         const a = v < 0 ? -v : v;
-        if (a > K.knee) { const sh = K.knee + (K.ceil - K.knee) * Math.tanh((a - K.knee) / (K.ceil - K.knee)); v = v < 0 ? -sh : sh; }
+        if (a > K.knee && lab.plant !== "noCeiling") { const sh = K.knee + (K.ceil - K.knee) * Math.tanh((a - K.knee) / (K.ceil - K.knee)); v = v < 0 ? -sh : sh; }
         // Gain-normalised DC blocker: the (1+R)/2 factor holds |H| <= 1 up to
         // Nyquist. The textbook (1 - z^-1)/(1 - R z^-1) peaks at 2/(1+R) > 1
         // there, which would breach D-005's bound by itself.
         const o = j * 2, out = gdc * (v - dc[o]) + R * dc[o + 1]; dc[o] = v; dc[o + 1] = out;
         let wv = (j ? u1 : u0) + out;
-        if (!Number.isFinite(wv)) { wv = 0; dc[o] = dc[o + 1] = 0; this.stats[j].nonfinite++; }
+        if (!Number.isFinite(wv)) { wv = 0; bad = true; }
+        if (wv > floor || wv < -floor) loud = true;
         (j ? L1 : L0)[this.w] = wv;
+      }
+      // Non-finite inside the loop (RS-7.9, A9): repair ALL loop state — lines,
+      // filters, DC — and count it. Zeroing one sample would leave the NaN in a
+      // filter's state, re-poisoning every sample after.
+      if (bad || !Number.isFinite(y0 + y1)) {
+        if (lab.plant !== "noLoopRepair") { this._clearLoop(); y0 = y1 = 0; }
+        this.stats[0].nonfinite++;
       }
       this.w = this.w + 1 === N ? 0 : this.w + 1;
       this.n++;
+      this.quietRun = loud ? 0 : this.quietRun + 1;
 
       // decode the wet, output filter, mix (equal-power), output gain
       let w0 = rw === 1 ? echoDec(rb, 0, y0, y1) : (1 - rw) * echoDec(ra, 0, y0, y1) + rw * echoDec(rb, 0, y0, y1);
       let w1 = rw === 1 ? echoDec(rb, 1, y0, y1) : (1 - rw) * echoDec(ra, 1, y0, y1) + rw * echoDec(rb, 1, y0, y1);
       if (fout.w !== 0 || fout.wT !== 0) { w0 = this._filt(fout, 0, w0); w1 = this._filt(fout, 1, w1); }
-      const dg = mix === 1 ? 0 : Math.cos(mix * Math.PI / 2), wg = mix === 0 ? 0 : Math.sin(mix * Math.PI / 2);
-      outL[i] = (dg * xL + wg * w0) * gOut;
-      outR[i] = (dg * xR + wg * w1) * gOut;
+      const dg = mix === 1 && lab.plant !== "dryLeak" ? 0 : Math.cos(mix * Math.PI / 2), wg = mix === 0 ? 0 : Math.sin(mix * Math.PI / 2);
+      const dL = lab.plant === "dryLimiter" ? Math.tanh(xL) : xL, dR = lab.plant === "dryLimiter" ? Math.tanh(xR) : xR;
+      let oL = (dg * dL + wg * w0) * gOut, oR = (dg * dR + wg * w1) * gOut;
+      if (!Number.isFinite(oL) || !Number.isFinite(oR)) { oL = oR = 0; this._clearLoop(); this.stats[1].nonfinite++; }
+      outL[i] = oL; outR[i] = oR;
+
+      // The tail gate: input silent and every write below the floor for a whole
+      // read span, OR the declared tail elapsed since the input stopped — so the
+      // declaration is exact by construction (A5), never an estimate.
+      if (lab.plant !== "noGate" && this.silentRun > 0) {
+        const span = Math.max(this.Tt[0], this.Tt[1], h0.D, h1.D, h0.fade ? h0.dA : 0, h1.fade ? h1.dA : 0) + this.smV[4] + 4;
+        if ((this.quietRun >= span && this.silentRun >= span) || this.silentRun >= this.tailN) this._enterIdle(this.stats[0]);
+      }
     }
     this.bpmPrev = bpmEnd;
   }
 
-  // Declarations (spec §7): latency 0; the tail in seconds, from the
-  // parameters, Infinity when the loop is held (g >= 1, kInfiniteTail).
+  // Declarations (spec §10): latency 0; the tail in seconds, Infinity when the
+  // loop is held (feedback >= 100 %: kInfiniteTail).
   latencySamples() { return 0; }
-  tailSeconds(floorDb = -120) {
-    const g = this.p[EI["fb.amount"]] / 100;
-    const Tmax = Math.max(this.Tt[0], this.Tt[1]) / this.sr + this.p[EI["mod.depthMs"]] / 1000;
-    if (g >= 1) return Infinity;
-    if (g === 0) return Tmax + 0.05;
-    return Tmax * Math.ceil(floorDb / (20 * Math.log10(g))) + 0.05;
-  }
-  memoryBytes() { return 2 * this.N * 4 + (this.lab.law === "varispeed" ? 2 * this.N * 8 : 0); }
+  tailSeconds() { return this.tailN / this.sr; }
+  memoryBytes() { return 2 * this.N * 4 + 2 * this.N * 8; }
 }
 /* ================= ANALYSIS =================
  * Deterministic stimuli, the scripted A/B scenarios, and the readings the lab
@@ -965,8 +1103,8 @@ const ECHO_QA5_MAT = [
   ["time knob swept 1 Hz, 150 \u2194 450 ms", 8],
 ];
 const ECHO_QA5_CANDS = [
-  ["raw", "bare jump (D-007 as ratified)", { jump: "raw" }, { "time.change": 2 }],
-  ["xfade3", "jump = 3 ms crossfade", { jump: "xfade", jumpXfadeMs: 3 }, { "time.change": 2 }],
+  ["raw", "bare jump (rejected; the click metric's plant)", { jump: "raw" }, { "time.change": 2 }],
+  ["xfade3", "jump = 3 ms crossfade (ruled)", { jump: "xfade" }, { "time.change": 2 }],
   ["xfade60", "crossfade mode, 60 ms", {}, { "time.change": 1 }],
   ["repitch", "repitch (crit2)", { law: "crit2" }, { "time.change": 0 }],
 ];
@@ -997,10 +1135,30 @@ const COLORS = ["#ffc24b", "#5ff2e0", "#b48cff", "#5fd08a", "#8b94a6", "#ff6b8a"
 const SOURCES = [["drums", "drum loop"], ["voice", "sung vowels"], ["sine", "sine 440 Hz"], ["hfnoise", "bright noise bursts"], ["file", "your file…"]];
 const UI = { ctx: null, cur: null, file: null, live: null };
 
+// Audio needs a real browser tab. An in-app file viewer or sandboxed preview
+// may have no Web Audio, or keep the context suspended; the status line says
+// which, instead of failing silently (the first lab build did, 2026-10-20).
+function audioStatus(msg, cls) { const el = $("audio-status"); el.textContent = "audio: " + msg; el.className = "status " + (cls || ""); }
 function ensureCtx() {
-  if (!UI.ctx) { try { UI.ctx = new AudioContext({ sampleRate: SR }); } catch (e) { UI.ctx = new AudioContext(); } }
+  if (!UI.ctx) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) { audioStatus("this page has no Web Audio here — open lab/echo-lab.html in Chrome or Safari", "bad"); throw new Error("no Web Audio"); }
+    try { UI.ctx = new AC({ sampleRate: SR }); } catch (e) { UI.ctx = new AC(); }
+    const show = () => UI.ctx.state === "running"
+      ? audioStatus(`running · ${UI.ctx.sampleRate} Hz${UI.ctx.sampleRate !== SR ? " (renders at 48 kHz, resampled)" : ""}`, "ok")
+      : audioStatus(`${UI.ctx.state} — click a candidate again; if it stays silent, open the file in Chrome or serve it: python3 -m http.server -d lab`, "warn");
+    UI.ctx.onstatechange = show; show();
+  }
   return UI.ctx;
 }
+// Start only once the context is running: a source started on a suspended
+// context (Safari, first click) can begin silently or out of step.
+async function running() { const ctx = ensureCtx(); if (ctx.state !== "running") await ctx.resume(); return ctx; }
+$("tone").onclick = async () => {
+  const ctx = await running(), o = ctx.createOscillator(), g = ctx.createGain();
+  o.frequency.value = 440; g.gain.setValueAtTime(0.2, ctx.currentTime); g.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.4);
+  o.connect(g); g.connect(ctx.destination); o.start(); o.stop(ctx.currentTime + 0.45);
+};
 const tick = () => new Promise(r => setTimeout(r, 0));
 
 // ---------- sources ----------------------------------------------------------
@@ -1029,19 +1187,20 @@ const num = id => parseFloat($(id).value);
 const PANELS = {
   qa1: {
     cands: ECHO_QA1_CANDS.map(c => ({ id: c[0], label: c[1], lab: c[2], params: c[3] })),
-    opts: () => ({ fb: num("a1-fb"), mix: num("a1-mix"), glide: num("a1-glide"), capSt: num("a1-cap"), fallback: $("a1-fallback").checked }),
+    opts: () => ({ fb: num("a1-fb"), mix: num("a1-mix"), glide: num("a1-glide"), fallback: $("a1-fallback").checked }),
     spec(c, src) { const m = +$("a1-move").value; return echoQA1Spec(m, src, SR, Object.assign(this.opts(), { lab: c.lab, params: c.params })); },
     playFrom: () => ECHO_QA1_MOVES[+$("a1-move").value][6],
     readFrom: () => ECHO_QA1_MOVES[+$("a1-move").value][3],
-    src: () => $("a1-src").value, controls: ["a1-move", "a1-src", "a1-fb", "a1-mix", "a1-glide", "a1-cap", "a1-fallback"],
+    src: () => $("a1-src").value, controls: ["a1-move", "a1-src", "a1-fb", "a1-mix", "a1-glide", "a1-fallback"],
   },
   qa2: {
     cands: ECHO_QA2_CANDS.map(c => ({ id: c[0], label: c[1], lab: c[2], params: {} })),
     opts: () => ({ fb: num("a2-fb"), mix: num("a2-mix"), glide: 0.3, capSt: 12 }),
-    spec(c, src) { return echoQA2Spec(+$("a2-tempo").value, +$("a2-div").value, src, SR, Object.assign(this.opts(), { lab: c.lab })); },
+    // (B) glides through whichever repitch law Q-A1 is weighing, not a fixed one.
+    spec(c, src) { return echoQA2Spec(+$("a2-tempo").value, +$("a2-div").value, src, SR, Object.assign(this.opts(), { lab: Object.assign({ law: $("a2-law").value }, c.lab) })); },
     playFrom: () => (+$("a2-div").value === 1 ? 1.5 : 0.5), readFrom: () => 2,
     tempo: () => ECHO_QA2_TEMPO[+$("a2-tempo").value][1],
-    src: () => $("a2-src").value, controls: ["a2-tempo", "a2-div", "a2-src", "a2-fb", "a2-mix"],
+    src: () => $("a2-src").value, controls: ["a2-tempo", "a2-div", "a2-src", "a2-fb", "a2-mix", "a2-law"],
   },
   qa5: {
     cands: ECHO_QA5_CANDS.map(c => ({ id: c[0], label: c[1], lab: c[2], params: c[3] })),
@@ -1092,7 +1251,7 @@ async function measurePanel(name) {
     const c = P.cands[i], spec = P.spec(c, "probe"); spec.trace = false;
     if (spec.params.mix !== undefined) spec.params.mix = 100;
     spec.params["fb.amount"] = 0;
-    const r = echoRender(spec), sMax = Math.pow(2, (spec.lab.capSt || 12) / 12);
+    const r = echoRender(spec), sMax = Math.pow(2, ECHO_K.capSt / 12);
     P.m2[c.id] = echoClickM2(r.L, Math.round(P.readFrom() * SR) - 1, r.L.length, 0.5, ECHO_PROBE_HZ, SR, sMax);
   }
   st.textContent = "M2 on a 431.7 Hz probe, wet only, feedback 0, normalised by the cap's s_max";
@@ -1170,12 +1329,13 @@ function makeBuffer(L, R) {
 }
 function stopAll() {
   if (UI.cur) { try { UI.cur.src.stop(); } catch (e) {} UI.cur = null; }
+  if (UI.bench) { try { UI.bench.src.stop(); } catch (e) {} clearInterval(UI.bench.timer); UI.bench = null; }
   if (UI.live) stopLive();
   for (const P of Object.values(PANELS)) P.cands.forEach(c => c.btn.classList.remove("on"));
 }
-function playPanel(name, id) {
+async function playPanel(name, id) {
   const P = PANELS[name], r = P.renders[id]; if (!r) return;
-  const ctx = ensureCtx(); ctx.resume();
+  const ctx = await running();
   const start = P.playFrom(), end = r.L.length / SR;
   let pos = start;
   if (UI.cur && UI.cur.name === name) {                   // keep the playhead: A/B the same moment
@@ -1189,6 +1349,37 @@ function playPanel(name, id) {
   P.cands.forEach(c => c.btn.classList.toggle("on", c.id === id));
   drawTable(name); drawTrace(name);
 }
+// The bench (asked for by the human, 2026-10-20): the four Q-A1 laws back to back
+// on the same clip, each announced as it plays. Blind mode shuffles the order and
+// shows only numbers until "reveal", so the choice is made by ear, not by name
+// (doctrine: surface the hoped-for answer before evaluating). The shuffle is UI
+// randomness, outside the DSP; the renders themselves stay seeded and identical.
+const BENCH_IDS = ["slew", "crit2", "logpole", "varispeed"];
+async function playBench() {
+  const P = PANELS.qa1; if (!BENCH_IDS.every(id => P.renders[id])) return;
+  const ctx = await running(); stopAll();
+  const order = BENCH_IDS.slice(), blind = $("a1-blind").checked;
+  if (blind) { const u = new Uint32Array(order.length); crypto.getRandomValues(u); for (let i = order.length - 1; i > 0; i--) { const j = u[i] % (i + 1); [order[i], order[j]] = [order[j], order[i]]; } }
+  const start = Math.round(P.playFrom() * SR), gap = Math.round(0.8 * SR), segs = [];
+  let total = 0;
+  for (const id of order) { const len = P.renders[id].L.length - start; segs.push({ id, at: total, len }); total += len + gap; }
+  const L = new Float32Array(total), R = new Float32Array(total);
+  for (const g of segs) { const r = P.renders[g.id]; L.set(r.L.subarray(start), g.at); R.set(r.R.subarray(start), g.at); }
+  const src = ctx.createBufferSource(); src.buffer = makeBuffer(L, R); src.connect(ctx.destination);
+  const t0 = ctx.currentTime + 0.05; src.start(t0);
+  const label = id => P.cands.find(c => c.id === id).label;
+  const timer = setInterval(() => {
+    const t = (ctx.currentTime - t0) * SR, k = segs.findIndex(g => t >= g.at && t < g.at + g.len + gap);
+    if (k < 0) { $("a1-now").textContent = t < 0 ? "" : "bench done"; if (t >= total) clearInterval(timer); return; }
+    $("a1-now").textContent = `now ${k + 1} of ${segs.length}` + (blind ? "" : `: ${label(segs[k].id)}`);
+    if (!blind) P.cands.forEach(c => c.btn.classList.toggle("on", c.id === segs[k].id));
+  }, 50);
+  UI.bench = { src, timer, order };
+  $("a1-reveal").disabled = !blind;
+  UI.lastBench = order;
+}
+$("a1-bench").onclick = playBench;
+$("a1-reveal").onclick = () => { if (UI.lastBench) $("a1-now").textContent = UI.lastBench.map((id, i) => `${i + 1} = ${PANELS.qa1.cands.find(c => c.id === id).label}`).join(" · "); };
 $("stop").onclick = stopAll;
 $("fold").addEventListener("change", () => {
   if (UI.cur) playPanel(UI.cur.name, UI.cur.id);
@@ -1240,7 +1431,7 @@ function buildParams() {
 }
 buildParams();
 $("fp-init").onclick = () => { for (const q of ECHO_PARAMS) FP[q.key] = q.def; buildParams(); if (UI.live) { sendAll(); UI.live.node.port.postMessage({ type: "reset" }); } scheduleIR(); };
-const fpLab = () => ({ law: $("fp-law").value, tempoPolicy: $("fp-tp").value, jump: $("fp-jump").value, kernel: $("fp-kernel").value });
+const fpLab = () => ({ law: $("fp-law").value || null, tempoPolicy: $("fp-tp").value || null, jump: $("fp-jump").value, kernel: $("fp-kernel").value });
 for (const id of ["fp-law", "fp-tp", "fp-jump", "fp-kernel", "fp-bpm"]) $(id).addEventListener("change", () => {
   if (UI.live) { UI.live.node.port.postMessage({ type: "lab", opts: fpLab() }); UI.live.node.port.postMessage({ type: "bpm", v: num("fp-bpm") }); }
   scheduleIR();
@@ -1307,7 +1498,7 @@ class EchoProc extends AudioWorkletProcessor {
 registerProcessor("echo-proc", EchoProc);`;
 function sendAll() { for (const [k, v] of Object.entries(FP)) UI.live.node.port.postMessage({ type: "param", key: k, v }); }
 async function startLive() {
-  const ctx = ensureCtx(); await ctx.resume();
+  const ctx = await running();
   if (!ctx.audioWorklet) { $("fp-status").textContent = "AudioWorklet unavailable in this browser — the A/B panels still work."; return; }
   if (!UI.workletReady) {
     const url = URL.createObjectURL(new Blob([$("dsp").textContent + PROC], { type: "application/javascript" }));
