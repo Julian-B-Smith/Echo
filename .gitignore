@@ -8,3 +8,6 @@ build*/
 __pycache__/
 node_modules/
 renders/
+
+# legal/IP analysis — never tracked (horde rule, applied across projects 2026-10-20, D-014)
+local/

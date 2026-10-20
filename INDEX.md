@@ -9,6 +9,7 @@ performance-budget.
 - [L0002](LIBRARY.md#L0002) — kernel L1 norm bounds sample peaks, not loop gain; check |H| for stability (feedback-stability, time-accuracy) · candidate
 - [L0003](LIBRARY.md#L0003) — linear interpolation darkens repeats at an SR-dependent rate (sample-rate-independence, time-accuracy) · candidate
 - [L0004](LIBRARY.md#L0004) — bound the loop filter path (|H_loop| ≤ 1), not the knob, when past-unity feedback is a feature (feedback-stability) · candidate
+- [L0005](LIBRARY.md#L0005) — git grep -P: no multi-byte chars inside [classes]; use (–|-) and plant each branch (gates) · candidate
 - [L0006](LIBRARY.md#L0006) — the textbook DC blocker peaks at 2/(1+R) > 1 at Nyquist; normalise it inside a bounded loop (feedback-stability) · candidate
 - [L0007](LIBRARY.md#L0007) — a click probe commensurate with the test delays is blind to jumps (time-accuracy, modulation-repitch) · candidate
 - [L0008](LIBRARY.md#L0008) — a modulation ramp's length is a read speed; and M2 reads speed kinks between glides and jumps (modulation-repitch) · candidate
