@@ -98,7 +98,6 @@ each line as max delay + kernel half-width + the read/write-order margin
   moves;
 - *plain linear in the loop:* per-pass loss at 20 kHz is −16.7 dB at 44.1 kHz
   against −0.47 dB at 192 kHz, which breaks the SR-independence invariant;
-- *the two-allpass + crossfader structure of US 5,742,532:* expiry unconfirmed.
 
 The choice between Hermite and Lagrange, and whether to oversample the read,
 is left to the lab.
@@ -215,18 +214,15 @@ prior-art §6–7.
 
 ## D-012 — "Echo" stays a placeholder until horde's B433 screen (RATIFIED by poll, 2026-10-19)
 
-Prior-art §8 found the same name in the same category: stock delays named Echo
-in Ableton Live, Logic Pro and Reason Studios, plus smaller uses. Amazon's
-ECHO-formative class-9 marks exist too. The risk reads Medium–High for branded
-use and Medium as a rack label only. This came from a web check, not legal
-clearance. The human chose, by poll: **"Echo" remains the repo and working
-name only.** The user-visible name is chosen at Phase N through B433, starting
-from the doc's three generic directions.
+Name: placeholder until horde's B433 clearance; notes kept privately (D-014). The human
+chose, by poll: **"Echo" remains the repo and working name only.** The
+user-visible name is chosen at Phase N through B433.
 **Rejected:**
 - *a naming poll in Phase A:* the screens can be designed without the final
   name;
-- *keeping "Echo" as the rack label:* in-host confusion with three DAWs'
-  stock devices.
+- *keeping "Echo" as the rack label.*
+
+(Body reduced 2026-10-20 under D-014.)
 
 ## D-013 — Phase 0 rulings: D-004–D-011 ratified, D-005 amended (RATIFIED by poll, 2026-10-20)
 
@@ -255,3 +251,24 @@ cents at 1 s" gives 1.63 st, a rounding difference only.)
   (caps feedback below unity, drops the edge zone and an oracle row).
 - **Q-A4** (mid/side S-only content in mono: by construction or a B408 defect?)
   stays OPEN for Phase A's spec, by the human's choice.
+
+## D-014 — Legal and IP analysis lives in gitignored local/legal/ (RATIFIED by poll, 2026-10-20)
+
+The human's cross-project rule, relayed by horde's lead and confirmed here by
+poll: legal and IP analysis (trademark readings, patent notes, clearance
+assessments, Phase N's patent/IP pass and B433 screen outputs) never sits in a
+tracked file, a PR or a public post. It lives in `local/legal/`, gitignored.
+Tracked files keep a neutral pointer only.
+- **Moved 2026-10-20:** prior-art §8 and its references; the patent mentions in
+  prior-art §1, §9 and the reference list; D-004's patent bullet; D-012's
+  reading of marks and risk; two open-question lines in the Phase 0 trace.
+- **A recorded exception to append-only:** D-004's and D-012's bodies and that
+  trace were edited in place, because leaving the text there defeats the rule.
+  Their decisions are unchanged. D-004 still rejects allpass on moving reads on
+  technical grounds, which excludes that structure anyway.
+- **History is not rewritten** (the human's ruling for horde, 2026-10-17):
+  commits before this change still carry the text.
+- **Enforced, not just stated:** `./verify`'s `legal_gate` fails on patent and
+  registration numbers, trademark-office names and risk ratings in tracked
+  files outside `intake/` (horde's pinned copy), proven on a plant.
+Rejected: leaving trace lines untouched; a prose-only rule.

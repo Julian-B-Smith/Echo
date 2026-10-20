@@ -83,11 +83,12 @@ commercial delay or borrow its mode names, presets or UI text.
   the house-style UI if Echo's own screen is not ready.
 - **Gate:** defined at Phase A close, with the human.
 
-### Phase N (pre-ship) — Prior-art & IP re-scan + name clearance
-- Re-run the swarm; a patent/IP landscape pass; horde's B433 knockout screen
-  for the user-visible name.
-- **Gate:** dated re-scan appended to `docs/prior-art.md`; conflicts surfaced to
-  the human with a go/no-go; name cleared before any public release.
+### Phase N (pre-ship) — Prior-art re-scan + name clearance
+- Re-run the prior-art swarm; the legal and IP checks and horde's B433 screen
+  for the user-visible name run privately (`local/legal/`, gitignored, D-014).
+- **Gate:** dated technical re-scan appended to `docs/prior-art.md`; legal/IP
+  findings in `local/legal/` only, surfaced to the human with a go/no-go; name
+  cleared before any public release.
 
 ## Queue
 

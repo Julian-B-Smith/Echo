@@ -75,8 +75,7 @@ float32 position has about 0.25-sample resolution there [D]. The position must b
 **Design implications.**
 - *Reuse:* a 4-point FIR kernel (Hermite or Lagrange) on every read. Size the buffer as max delay + kernel half-width +
   write/read margin, with the read/write order stated. Keep the read position in double or fixed point.
-- *Avoid:* allpass and Thiran on any read whose delay can move. Avoid plain linear in the loop. Avoid the two-allpass +
-  crossfader structure of US 5,742,532 [11] until its expiry is confirmed by someone qualified (§9).
+- *Avoid:* allpass and Thiran on any read whose delay can move. Avoid plain linear in the loop.
 - *Differentiate:* state the per-repeat HF loss as a measured figure (dB at 5, 10 and 20 kHz, offsets 0 and 0.5) that
   holds within tolerance from 44.1 to 192 kHz. If the kernel's loss still varies with SR, oversample the read or
   compensate. → D-004.
@@ -267,7 +266,7 @@ inside the colouring zone. → D-010.
 
 Twenty-five delays were surveyed: the stock delays of six DAWs, eleven commercial plugins, four hardware or Eurorack
 units, and the delays of three open-source synths. The capabilities below are summarised generically; per-product notes
-and URLs are in the cited sources [27][38]–[52]. Most facts come from product pages and summaries; only the Ableton and
+and URLs are in the cited sources [27][38]–[46]. Most facts come from product pages and summaries; only the Ableton and
 Bitwig manual pages were read in full.
 
 - **Table stakes:** ms and tempo sync (straight, dotted, triplet), feedback, a ping-pong option, dry/wet, some
@@ -295,25 +294,10 @@ against a click metric; determinism as a stated property. All but the first are 
 landscape confirms the scope rather than changing it. The finding that changes the design is that the IR display is
 the visible differentiator, which argues for D-011's one-renderer architecture. → D-011.
 
-## 8. Name collision: "Echo"
+## 8. Name
 
-A preliminary web check, **not legal advice and not clearance**. horde's B433 screen is the real gate (ROADMAP Phase N).
-
-- **The same name in the same category ships today:** a stock audio effect named Echo in Ableton Live (since Live 11)
-  [27], a stock tempo-synced delay named Echo in Logic Pro [47], and Reason Studios' "The Echo" (also sold as
-  VST3/AU/AAX) [48]. A free stereo delay "Echo1" was released on 2026-02-25 [49], and an open-source delay is called
-  "Echo Factory" [50].
-- **Echo-prefixed delays:** at least five, including EchoBoy and Echoes [51]. Heritage hardware terms (Echoplex, Space
-  Echo) are still in commercial use [10][52].
-- **Trademarks, from aggregator pages only:** Amazon holds several ECHO-formative US marks in class 9, covering
-  speakers and voice software (e.g. ECHO SUB, Reg. 6,713,943) [53]. No ECHO registration specific to audio-effect
-  software was found, but USPTO, WIPO and EUIPO were **not** queried directly.
-- **Risk (the agent's qualitative read, accepted by the lead):** bare "Echo" is a weak, descriptive and crowded mark,
-  **Medium–High** risk for any standalone or branded use. User confusion inside a host is **high**, because users of
-  Live, Logic and Reason already have an "Echo". As a rack label inside horde only, the risk is **Medium**.
-- **Directions, none found colliding, each needing its own check:** a house prefix with a plain function word; a coined
-  word from repeat, interval, cadence or tail; or a slot or role label, with the brand reserved for the host.
-- **The human's ruling** on this finding is recorded in DECISIONS D-012.
+Name: "Echo" is a placeholder until horde's B433 clearance; notes kept privately (D-014). The human's
+ruling is DECISIONS D-012.
 
 ## 9. Gaps, unverified items and open questions
 
@@ -321,8 +305,6 @@ A preliminary web check, **not legal advice and not clearance**. horde's B433 sc
   1971, Schroeder 1965, Farina 2000 (abstract only), and Arnardottir/Abel/Smith 2008 (abstract only, paywalled).
   Dattorro Part 2 was read by one agent and was an unextractable scan for the other. Laakso et al. 1996 was checked for
   its scope only. The Thiran stability conditions under varying delay are unconfirmed.
-- **Patent:** US 5,742,532 (two allpass read pointers + a crossfader) [11]. Its expiry is unconfirmed. D-004 avoids the
-  structure regardless.
 - **Open for Phase A (proposed to the human through DECISIONS, not decided here):**
   - Does B408's "no unintended cancellation" exempt S-only content in mid/side mode, stated as by construction (D-010)?
   - What is the deterministic retrigger rule for a crossfade arriving mid-fade (D-007)?
@@ -330,8 +312,7 @@ A preliminary web check, **not legal advice and not clearance**. horde's B433 sc
     the ceiling (D-005)?
 - **Energy growth under a modulated fractional read inside the loop** was not quantified anywhere in the literature
   found. It is Echo's to measure, with a planted worst case (M2).
-- **Phase N re-scan** (ROADMAP): full manuals for the rare-feature products; a patent/IP pass; direct trademark
-  database queries.
+- **Phase N re-scan** (ROADMAP): full manuals for the rare-feature products; legal and IP checks, kept privately (D-014).
 
 ---
 
@@ -357,7 +338,7 @@ A preliminary web check, **not legal advice and not clearance**. horde's B433 sc
    https://ccrma.stanford.edu/~dattorro/EffectDesignPart2.pdf [R by one agent, §4–5]
 10. S. Arnardottir, J. S. Abel, J. O. Smith III, "A Digital Model of the Echoplex Tape Delay", AES 125th Conv., paper
     7649, 2008. https://aes2.org/publications/elibrary-page/?id=14800 [A]
-11. US Patent 5,742,532. https://patents.google.com/patent/US5742532 [A; expiry unconfirmed]
+11. — moved to a private note, 2026-10-20 (D-014).
 12. J. O. Smith, "Feedback Comb Filters" and "Lowpass Feedback Comb Filter", PASP.
     https://ccrma.stanford.edu/~jos/pasp/Feedback_Comb_Filters.html ; https://ccrma.stanford.edu/~jos/pasp/Lowpass_Feedback_Comb_Filter.html [R]
 13. J. O. Smith, passivity of reflectances, PASP. https://ccrma.stanford.edu/~jos/pasp05/Reactive_Terminations.html [A]
@@ -407,12 +388,10 @@ A preliminary web check, **not legal advice and not clearance**. horde's B433 sc
     https://bluecataudio.com/PressReleases/NewsItem_2017_08_24.Blue_Cat_Audio_Releases_Blue_Cat's_Late_Replies_Creative_Delay_Plug-In [A]
 45. MusicTech, Baby Audio Comeback Kid. https://musictech.com/products/baby-audio-comeback-kid-delay-plugin [A]
 46. Cockos, ReaPlugs (ReaDelay). https://www.reaper.fm/reaplugs/ [A]
-47. Apple, *Logic Pro* user guide, Echo. https://support.apple.com/ar-kw/guide/logicpro/lgcef18b92b0/mac [A]
-48. Reason Studios, The Echo. https://www.reasonstudios.com/devices/the-echo [A]
-49. Bedroom Producers Blog, "voidDSP Echo1", 2026-02-25. https://bedroomproducersblog.com/2026/02/25/voiddsp-echo1/ [A]
-50. Echo Factory (GitHub). https://github.com/MichaelJohann1/echo-factory [A]
-51. KVR Audio product listings (EchoBoy, Echoes, delays marketplace). https://www.kvraudio.com/product/echoboy-by-soundtoys ;
-    https://www.kvraudio.com/product/echoes-by-softube ; https://www.kvraudio.com/marketplace/delays [A]
-52. Wikipedia, "Echoplex" (brand ownership possibly outdated). https://en.wikipedia.org/wiki/Echoplex [A]
-53. Docket Alarm / Justia trademark records (ECHO SUB; AMAZON ECHO).
-    https://www.docketalarm.com/trademarks/88983918/ECHO_SUB/ ; https://trademarks.justia.com/869/26/amazon-echo-86926991.html [A]
+47. — moved to a private note, 2026-10-20 (D-014).
+48. — moved to a private note, 2026-10-20 (D-014).
+49. — moved to a private note, 2026-10-20 (D-014).
+50. — moved to a private note, 2026-10-20 (D-014).
+51. — moved to a private note, 2026-10-20 (D-014).
+52. — moved to a private note, 2026-10-20 (D-014).
+53. — moved to a private note, 2026-10-20 (D-014).
