@@ -255,3 +255,44 @@ cents at 1 s" gives 1.63 st, a rounding difference only.)
   (caps feedback below unity, drops the edge zone and an oracle row).
 - **Q-A4** (mid/side S-only content in mono: by construction or a B408 defect?)
   stays OPEN for Phase A's spec, by the human's choice.
+
+## D-014 — Phase A: first rulings, and what the spec draft proposes (2026-10-20)
+
+Phase A lead session (ROADMAP Phase A, T-003). Three polls before building, then the spec draft
+(`spec/SPEC.md`, `spec/params.json`) and the lab (`lab/echo-lab.html`) with its smoke.
+- **`./verify` + CI wiring: RATIFIED by poll** (a human gate). `lab_smoke_gate` runs
+  `node tools/lab_smoke.mjs` in `fast`; `need_node` fails loudly rather than skipping; `structure_gate`
+  lists the spec, the lab and the smoke; CI gains `setup-node`. Rejected: `./verify` only (CI would
+  skip or fail on the step); diff-first review (the human chose to proceed).
+- **Q-A4: RATIFIED by poll — by construction.** Mid/side never crosses M and S, so the mono fold IS
+  the M line's output. S-only repeats vanishing in mono are not a B408 defect: the S line carries only
+  the input's own side content, which the dry also loses in mono. "Unintended cancellation" = the
+  output's fold losing more than the input's (ρ_out ≥ ρ_in per generation), tested on mono and seeded
+  decorrelated inputs; the S-only impulse row is labelled by construction (spec §4.1; the smoke proves
+  fold(out(L,R)) = fold(out(M,M)) with a planted S→M leak). Rejected: leaking S into M (changes the
+  mode's sound to cover a non-defect); deciding after listening.
+- **L/R offsets: RATIFIED by poll — % of the base time,** −50 … +50 % per side (spec §3.2). A ratio
+  survives tempo changes and reaches dotted (+50 %) and triplet (−33.3 %) patterns. Rejected: signed ms
+  per side (synced patterns drift off the grid on a tempo change); independent L/R times with a link
+  (more keys, and "offset" becomes implicit).
+- **PROPOSED, ratified with the spec** (the lead's choices, each stated where it lives in the spec):
+  routing conventions — ping-pong sums to mono into the left line, mid/side with M = (L+R)/2 so the
+  ceiling meets a mono input at the same level as stereo mode (§4); a routing switch is a 20 ms
+  equal-gain matrix crossfade that keeps and re-images the tail (§4); equal-power mix (§8); loop filter
+  one-pole 6 dB/oct, input/output two-pole Butterworth, no resonance anywhere in 1.0 (§6); ceiling
+  knee 0.9 → 1.0 (ADR-142's law, §5.1); DC blocker 5 Hz, gain-normalised (§5.1); D-007's retrigger
+  rule = **a queue, latest target wins** (§3.5); a load crossfades the head, never glides (§3.5); hard
+  read-speed bound s ∈ [0.25, 4] and a 3 s repitch fallback (§3.6); synced times past 12 s fold by
+  halving, free times clamp (§3.4); modulation slope cap ±25 % with 250 ms modulation ramps (§7); the
+  defaults in `params.json`.
+- **New open items, raised by the draft:** **Q-A5** — a bare "jump" (D-007 as ratified) cannot pass
+  horde's A11: no bare jump at a flip, no step under a morph (spec §3.7; the lab measures M2 ≈ 37 for
+  a bare jump, 0.3 for a 3 ms crossfade). **S-1** — D-000 Q4's "generation ratio = feedback
+  exactly" cannot hold with D-005's always-in-circuit DC blocker; measured 3 × 10⁻⁵ relative at
+  100 ms (spec §5.3).
+- **Findings recorded** (LIBRARY candidates L0005–L0007): the textbook DC blocker peaks at 2/(1+R) > 1
+  at Nyquist, so it alone breaches D-005's bound — use the gain-normalised form; D-009's M2 reads a
+  speed *kink* at a few (slew and log one-pole laws read 4.1), between a smooth glide (≤ 1) and a
+  jump (tens); a click probe commensurate with the test times is blind (440 Hz × 0.25 s = 110 cycles,
+  so a 0.5 → 0.25 s jump reads clean) — the lab probes at 431.7 Hz; a modulation ramp time is a read
+  *speed* (a 20 ms ramp to 20 ms depth moves the head at 2×), so modulation ramps are 250 ms.

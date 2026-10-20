@@ -3,17 +3,19 @@
 horde's standard delay module: a stereo delay library hosted in horde's FX rack, with a lab twin for listening.
 "Echo" is a working name; the module's name will be cleared before release.
 
-**Status: Phase 0 delivered 2026-10-19 — nothing built yet.** The survey is done, the harness is green and the
-prior-art landscape is in [`docs/prior-art.md`](docs/prior-art.md) (design proposals D-004–D-011 await the human);
-the next step is the spec and the lab (Phase A). horde's module cutoff is **2026-12-11**. Phase state lives in
-[`ROADMAP.md`](ROADMAP.md).
+**Status: Phase A in progress (2026-10-20).** The spec is drafted ([`spec/SPEC.md`](spec/SPEC.md),
+[`spec/params.json`](spec/params.json)) and the listening lab is built ([`lab/echo-lab.html`](lab/echo-lab.html):
+open it in a browser). The open choices — the repitch law (Q-A1), tempo changes (Q-A2), what "jump" means (Q-A5) —
+are made by ear in the lab, then the human ratifies the spec. No C++ yet. horde's module cutoff is **2026-12-11**.
+Phase state lives in [`ROADMAP.md`](ROADMAP.md).
 
 ## What it will do
 
-Free time (ms) or tempo sync by horde's division names, with left and right offsets (up to 12 s per channel).
-Standard, ping-pong and mid/side routing. Feedback with filters at the input, in the loop and at the output. Modulation
-modes, including repitch (the tape-style glide when the time changes). Visualizers, possibly the impulse response.
-**Status: planned** — every item above is spec work in Phase A.
+Free time (ms) or tempo sync by horde's division names, with left and right offsets as a percentage of the base time
+(up to 12 s per channel). Stereo, ping-pong and mid/side routing. Feedback to 120 % with a ceiling on the returning
+term only. Filters at the input, in the loop and at the output, each truly bypassed when off. Time changes that
+repitch, crossfade or jump, and a sine or seeded-drift modulation of the line. Visualizers, the impulse response
+first. **Status: specified in the Phase A draft and playable in the lab; the C++ starts at M1.**
 
 ## The map
 
@@ -29,7 +31,10 @@ modes, including repitch (the tape-style glide when the time changes). Visualize
 | `integrations/` | Inbound mailbox (`integrations/<sender>/`) and the outbound thread table | live |
 | `docs/prior-art.md` | Phase 0 landscape: interpolation, feedback, time changes, click and mono-fold metrics, IR display, competitors, name check | done 2026-10-19 |
 | `docs/filings/` | Drafts of what Echo files in other repos | live |
-| `spec/`, `lab/`, `tools/`, `core/` | Spec, listening twin, oracles, C++ core | not yet built |
+| `spec/` | The module spec and its parameter manifest (27 keys) | draft, awaiting ratification |
+| `lab/echo-lab.html` | The listening twin: A/B panels for Q-A1, Q-A2, Q-A5; free play with every key; an IR echogram | built |
+| `tools/lab_smoke.mjs` | The lab smoke in `./verify fast`, every detector with a planted control | green |
+| `core/` | The C++ core | M1, not started |
 | `verify` | The oracle: `./verify fast` / `full` / `report` | live |
 
 ## Neighbours
@@ -45,4 +50,4 @@ modes, including repitch (the tape-style glide when the time changes). Visualize
 ./verify fast
 ```
 
-_Last verified: 2026-10-19 (Phase 0 prior art; `./verify fast` green)._
+_Last verified: 2026-10-20 (Phase A draft; `./verify fast` green, lab smoke included)._

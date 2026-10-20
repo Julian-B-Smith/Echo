@@ -6,14 +6,18 @@ lives in `DECISIONS.md`; horde's shipping bar is `intake/module-1.0-bar.md`.
 
 ## Status
 
-- **Phase:** Phase 0 CLOSED 2026-10-20 (PR #1 merged; D-004–D-011 ratified by
-  poll, D-005 as amended, D-013). **Phase A (spec + lab) is next.** Nothing built.
+- **Phase:** Phase 0 CLOSED 2026-10-20 (D-013). **Phase A IN PROGRESS** (T-003):
+  `spec/` drafted, `lab/` built, the lab smoke in `./verify fast`; Q-A4 and the
+  offset model ruled (D-014); Q-A1, Q-A2, Q-A5, S-1 and the spec's ratification
+  await the human.
 - **Oracle:** `./verify fast` = kit integrity, leak gate, private-name gate,
-  structure, manifest, intake pin. No DSP gates yet — they arrive with the lab
-  (Phase A) and the C++ core (M1). `full` = `fast` for now.
+  structure, manifest, intake pin, **lab smoke** (`tools/lab_smoke.mjs`, every
+  detector with a planted must-fail control). The C++ invariant suite arrives at
+  M1. `full` = `fast` for now.
 - **Hard date:** horde's module cutoff **2026-12-11**. Every MUST row of the 1.0
   bar met by then, or Echo ships after 1.0.
-- **Last human ratification:** 2026-10-20 — Phase 0 rulings by poll (D-013).
+- **Last human ratification:** 2026-10-20 — Phase A's first polls (D-014):
+  the `./verify` wiring, Q-A4, the L/R offset model.
 
 ## Phases (each gate is a checkable condition)
 
@@ -98,6 +102,15 @@ commercial delay or borrow its mode names, presets or UI text.
 - **Acceptance criteria:** the Phase 0 gate above.
 - **Out of scope:** any spec or code.
 
+### T-003 — Phase A: spec + lab twin
+- **Status:** in progress 2026-10-20 (D-014). Drafted: `spec/SPEC.md`,
+  `spec/params.json` (27 keys), `lab/echo-lab.html` (Q-A1 / Q-A2 / Q-A5 A/B
+  panels, free play with every key, an IR echogram), `tools/lab_smoke.mjs` in
+  `./verify fast`. Awaiting: Q-A1, Q-A2, Q-A5 by ear; S-1; the spec ratification.
+- **Scope:** `spec/`, `lab/`, `tools/`, the `./verify` lab gate, CI's node step.
+- **Acceptance criteria:** the Phase A gate above.
+- **Out of scope:** any C++; `intake/`; the manifest.
+
 ### T-002 — Spin-up filings
 - **Status:** open (drafts in `docs/filings/`)
 - **Scope:** horde's `integrations/echo/notice-spinup.md`; autonomous's
@@ -113,12 +126,21 @@ commercial delay or borrow its mode names, presets or UI text.
   repitch mode (glide time constant / rate law). Decided in Phase A by listening
   in the lab against the click metric (survey poll, 2026-10-19).
 - **Q-A2 — Synced time on a tempo change mid-note:** glide or jump? Same venue.
-- **Q-A4 — Mid/side and B408.** Is S-only content in mid/side mode stated as
-  cancelling in mono *by construction* (and so not a B408 defect), with the
-  unintended-cancellation test run on mono and decorrelated inputs? Raised by
-  prior-art §5 (D-010). For Phase A's spec.
+- **Q-A5 — What "jump" means.** D-007's bare jump cannot pass horde's A11 (no
+  bare jump at a flip, no step under a morph). Proposed: jump = a 3 ms crossfade,
+  the bare jump kept only as the click metric's plant. Decided by ear in the
+  lab's Q-A5 panel. Raised by the spec draft (spec §3.7, D-014).
+- **S-1 — The generation ratio against the DC blocker.** D-000 Q4 says
+  "= feedback exactly"; D-005's DC blocker makes it g within 10⁻³ (spec §5.3).
+  Ruled with the spec.
 - **Q-A3 — Per-module CPU budget** for 1.0 is the human's to set (1.0 bar row 51);
   the appendix's ~2 % default / 4 % worst of a min-spec core is the working target.
+
+## Closed in Phase A
+
+- **Q-A4** — mid/side S-only content cancels in mono by construction, not a B408
+  defect; unintended cancellation = the output's fold losing more than the
+  input's. RATIFIED by poll 2026-10-20 (D-014; spec §4.1).
 
 ## Deferred / demoted
 
@@ -131,4 +153,4 @@ commercial delay or borrow its mode names, presets or UI text.
 
 Echo graduates from interactive design to autonomous queue work when the
 remaining open questions are infrastructure, not listening. Still in the
-judgment column: Q-A1, Q-A2, the factory presets, the screen style.
+judgment column: Q-A1, Q-A2, Q-A5, the factory presets, the screen style.
