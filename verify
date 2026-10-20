@@ -61,6 +61,7 @@ structure_gate() {
   for f in CLAUDE.md ROADMAP.md DECISIONS.md README.md CODEMAP.md INDEX.md LIBRARY.md \
            SPINUP-BRIEF.md project.manifest.json integrations/README.md traces/README.md \
            intake/MANIFEST intake/rack-slot-contract.md intake/module-1.0-bar.md \
+           spec/SPEC.md spec/params.json lab/echo-lab.html tools/lab_smoke.mjs \
            .gitattributes .github/workflows/ci.yml; do
     [ -e "$f" ] || { echo "verify: structure — missing $f" >&2; ok=1; }
   done
@@ -128,6 +129,16 @@ legal_gate() {
   return 1
 }
 
+need_node() {
+  command -v node >/dev/null 2>&1 || { echo "verify: node not found — the lab smoke cannot run (install Node; the gate does not skip)" >&2; return 1; }
+}
+
+# Lab smoke (ROADMAP Phase A gate; human-approved by poll 2026-10-20): the lab is
+# seeded and bit-identical, silence -> exact silence, finite, in step with
+# spec/params.json, and honest about the invariants its A/B choices rest on.
+# Every detector is first proven against a planted fault. ~7 s.
+lab_smoke_gate() { need_node && node tools/lab_smoke.mjs; }
+
 fast() {
   # ---- Layer-0: seconds, not minutes. CI-blocking. -------------------------
   local ok=0
@@ -138,7 +149,8 @@ fast() {
   manifest_gate     || ok=1
   intake_gate       || ok=1  # intake/ is read-only: pinned bytes
   legal_gate        || ok=1  # D-014: legal/IP analysis stays in local/legal/
-  # Grows per ROADMAP: the C++ invariant tests (M1) and the lab determinism scan.
+  lab_smoke_gate    || ok=1  # Phase A: the listening twin is fit to listen to
+  # Grows per ROADMAP: the C++ invariant tests (M1).
   return $ok
 }
 

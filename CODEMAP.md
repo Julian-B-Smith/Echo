@@ -12,7 +12,8 @@ Where things are. Update in the same change that moves them.
 | `integrations/` | Inbound mailbox + outbound thread table |
 | `docs/filings/` | Drafts of outbound filings |
 | `traces/` | One provenance entry per merged change |
-| `spec/` | _planned, Phase A_ — scope list + parameter manifest |
-| `lab/` | _planned, Phase A_ — single-file listening twin |
-| `tools/` | _planned_ — headless Node oracles |
+| `spec/SPEC.md` | The module spec: scope list, signal flow, time, routing, feedback, filters, modulation, declarations, memory (Phase A draft) |
+| `spec/params.json` | The parameter manifest (B439/RS-2.1), one key per line; the lab must match it (smoke-checked) |
+| `lab/echo-lab.html` | Single-file listening twin: DSP + ANALYSIS sections (sliced by the smoke, loaded into the AudioWorklet) then the UI |
+| `tools/lab_smoke.mjs` | The lab smoke, in `./verify fast`: determinism, silence, finite, manifest, invariants — each with a planted control |
 | `core/` | _planned, M1_ — C++20 library (CMake, Unix Makefiles) |
