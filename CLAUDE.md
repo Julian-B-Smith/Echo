@@ -112,6 +112,10 @@ Node oracles in `tools/`. Oracle: `./verify fast|full`.
 every tracked file; the map lives in untracked `PRIVATE-NOTES.md`, enforced by
 `private_name_gate` from untracked `.leakcheck-names`.
 
+**Legal note.** Legal and IP analysis (marks, patents, clearance readings) is
+never tracked: it lives in gitignored `local/legal/`, with a neutral pointer in
+tracked files (D-014), enforced by `legal_gate`.
+
 **Protected paths** (human gate to modify): `./verify` and `.kit/`;
 `project.manifest.json`; `intake/` (horde's record, sha256-pinned by
 `intake_gate` — annotate in docs/, never edit); `spec/` and `lab/` once the

@@ -108,6 +108,26 @@ intake_gate() {
   return $ok
 }
 
+# Legal/IP analysis is never tracked (D-014, the human's cross-project rule):
+# it lives in gitignored local/legal/. This fails on the SPECIFIC shapes such a
+# reading leaves behind — patent and registration numbers, trademark-office and
+# docket sources, a capitalised risk rating — not on the bare words "patent" or
+# "trademark", which ordinary planning prose needs ("B433 clearance"). intake/ is
+# horde's pinned copy (its 1.0 bar names the trademark rule) and this file holds
+# the patterns, so both are excluded. Perl regex (-P) for \b; the dash is an
+# ALTERNATION, not [–-]: the en-dash is 3 bytes and a class matches one, so the
+# class form silently never matched (caught by its plant, 2026-10-20); `--untracked` is
+# load-bearing: git grep skips new, unstaged files otherwise.
+legal_gate() {
+  local pat hits
+  pat='\bUS ?(Pat(ent)?\.? ?)?[0-9]{1,2},[0-9]{3},[0-9]{3}\b|patents\.google|\bReg(istration)?\.? ?(No\.? ?)?[0-9],[0-9]{3},[0-9]{3}\b|\b(USPTO|EUIPO|WIPO|TESS)\b|docketalarm|trademarks\.justia|\bclass[- ]9 marks?\b|\b(Low|Medium|High)\s*(–|-)\s*(Medium|High)\b'
+  hits=$(git grep --untracked -nIP "$pat" -- . ':(exclude)intake' ':(exclude)verify' 2>/dev/null || true)
+  [ -n "$hits" ] || return 0
+  echo "verify: LEGAL — legal/IP analysis in a tracked file (move it to local/legal/, leave a neutral line; D-014):" >&2
+  echo "$hits" | sed 's/^/    /' >&2
+  return 1
+}
+
 fast() {
   # ---- Layer-0: seconds, not minutes. CI-blocking. -------------------------
   local ok=0
@@ -117,6 +137,7 @@ fast() {
   structure_gate    || ok=1
   manifest_gate     || ok=1
   intake_gate       || ok=1  # intake/ is read-only: pinned bytes
+  legal_gate        || ok=1  # D-014: legal/IP analysis stays in local/legal/
   # Grows per ROADMAP: the C++ invariant tests (M1) and the lab determinism scan.
   return $ok
 }
