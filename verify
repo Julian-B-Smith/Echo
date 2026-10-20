@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+# verify — oracle dispatcher. The harness's only interface to project QC.
+# Usage: ./verify fast | full | report
+# Contract: exit 0 = green, nonzero = red. Writes .harness/last-verify.json.
+#
+# (This is the template a new or retrofitted project copies as its ./verify.
+# It carries NO gate code: until 2.4.0 it shipped an inline `leak_gate`, and
+# every repo born from it got a private copy that then drifted — ten variants,
+# nine missing the Windows pattern. The gate now lives in kit/vendor/kit-gates.sh,
+# which is canonical, vendored into .kit/, and pinned by sha256.)
+#
+# THIS FILE IS PROJECT-OWNED: edit `fast` and `full` freely, add project gates,
+# wire your test commands. The kit-owned gates live in `.kit/kit-gates.sh`,
+# which is vendored and checksummed — do not edit that one, and do not copy its
+# contents here. Update it with:  python3 <kit>/kit_sync.py .
+set -uo pipefail
+
+TARGET="${1:-fast}"
+HARNESS_DIR=".harness"
+mkdir -p "$HARNESS_DIR"
+
+# Kit-owned gates: record, leak_gate, kit_integrity. A repo missing this file
+# is not a lesser repo, it is an UNGATED one, so failing loudly beats degrading
+# quietly — a silently skipped privacy gate is exactly the shape of bug the
+# gate exists to prevent.
+if [ -r .kit/kit-gates.sh ]; then
+  . .kit/kit-gates.sh
+else
+  echo "verify: .kit/kit-gates.sh missing — run kit_sync.py (gates cannot be skipped)" >&2
+  exit 1
+fi
+
+# ---- Project-owned gates ----------------------------------------------------
+
+# Private-sibling alias rule (HYPERSAW ADR-014, inherited via Scape/Bulwark): a
+# private sibling's real name never enters a tracked file. This repo is PUBLIC.
+# Names come from the UNTRACKED .leakcheck-names (absent on CI, where the check
+# skips loudly, never silently).
+private_name_gate() {
+  if [ ! -f .leakcheck-names ]; then
+    echo "verify: .leakcheck-names absent — private-name leak check SKIPPED (expected off the dev Mac)" >&2
+    return 0
+  fi
+  local pat hits
+  pat=$(grep -vE '^[[:space:]]*(#|$)' .leakcheck-names | paste -sd'|' -)
+  [ -n "$pat" ] || return 0
+  # Case-SENSITIVE by design (a case-insensitive draft in Scape tripped on prose).
+  # `--untracked` is load-bearing: git grep skips new, unstaged files otherwise.
+  hits=$(git grep --untracked -nIP "($pat)" -- . \
+           ':(exclude)PRIVATE-NOTES.md' ':(exclude).leakcheck-names' 2>/dev/null || true)
+  [ -n "$hits" ] || return 0
+  echo "verify: LEAK — a private sibling's real name in a tracked file (alias it; map in PRIVATE-NOTES.md):" >&2
+  echo "$hits" | sed 's/^/    /' >&2
+  return 1
+}
+
+# Structure: the kit baseline every session assumes is present, plus the intake
+# packet the spec is written against. Grows as lab/, spec/ and core/ land.
+structure_gate() {
+  local ok=0 f
+  for f in CLAUDE.md ROADMAP.md DECISIONS.md README.md CODEMAP.md INDEX.md LIBRARY.md \
+           SPINUP-BRIEF.md project.manifest.json integrations/README.md traces/README.md \
+           intake/MANIFEST intake/rack-slot-contract.md intake/module-1.0-bar.md \
+           .gitattributes .github/workflows/ci.yml; do
+    [ -e "$f" ] || { echo "verify: structure — missing $f" >&2; ok=1; }
+  done
+  return $ok
+}
+
+# Manifest: valid JSON, the survey fields the kit expects, no status prose drift
+# (Decision 28: status is a date + "see ROADMAP", never a paragraph).
+manifest_gate() {
+  python3 - <<'PYG' || return 1
+import json, sys
+m = json.load(open("project.manifest.json"))
+req = ["what_is_it","architecture_rung","domain_core_llm_must_not_own","oracle_shape",
+       "second_implementation","consumers_and_providers","parallel_audit_thread",
+       "knowledge_loop_tags","lifespan_autonomy"]
+missing = [k for k in req if k not in m.get("survey", {})]
+if missing: print("verify: manifest — survey missing", missing, file=sys.stderr); sys.exit(1)
+if m["survey"]["architecture_rung"]["choice"] not in (1,2,3):
+    print("verify: manifest — rung must be 1|2|3", file=sys.stderr); sys.exit(1)
+if not 3 <= len(m["survey"]["knowledge_loop_tags"]) <= 6:
+    print("verify: manifest — 3..6 knowledge-loop tags", file=sys.stderr); sys.exit(1)
+if len(m.get("status","")) > 300:
+    print("verify: manifest — status is prose (>300 chars); phase state lives in ROADMAP", file=sys.stderr); sys.exit(1)
+PYG
+}
+
+# Intake pin: intake/ is horde's handed-over record, read-only here (§Domain).
+# Every file's sha256 must equal its intake/MANIFEST line, and every file must be
+# listed, so a hand edit or a silently added file goes red. Asserts the EFFECTIVE
+# bytes, not a "do not edit" note (kit README, gate rule). A re-pin is a human gate.
+intake_gate() {
+  local m=intake/MANIFEST ok=0 h f got n=0
+  [ -f "$m" ] || { echo "verify: intake — $m missing" >&2; return 1; }
+  while read -r h f; do
+    case "$h" in ''|'#'*) continue ;; esac
+    n=$((n + 1))
+    got=$(shasum -a 256 "intake/$f" 2>/dev/null | cut -c1-64)
+    [ "$got" = "$h" ] || { echo "verify: intake — $f does not match its MANIFEST hash (intake is read-only)" >&2; ok=1; }
+  done < "$m"
+  [ "$n" -gt 0 ] || { echo "verify: intake — no hashed files in $m" >&2; ok=1; }
+  # Unlisted files: everything under intake/ except the MANIFEST itself.
+  while IFS= read -r f; do
+    grep -qF "  $f" "$m" || { echo "verify: intake — $f is not pinned in $m" >&2; ok=1; }
+  done < <(cd intake && find . -type f ! -name MANIFEST ! -name .DS_Store | sed 's|^\./||' | sort)
+  return $ok
+}
+
+fast() {
+  # ---- Layer-0: seconds, not minutes. CI-blocking. -------------------------
+  local ok=0
+  kit_integrity     || ok=1  # kit-owned files must match .kit/MANIFEST
+  leak_gate         || ok=1  # privacy gate: kit-core, keep it first
+  private_name_gate || ok=1  # privacy gate: OURS (ADR-014 alias rule)
+  structure_gate    || ok=1
+  manifest_gate     || ok=1
+  intake_gate       || ok=1  # intake/ is read-only: pinned bytes
+  # Grows per ROADMAP: the C++ invariant tests (M1) and the lab determinism scan.
+  return $ok
+}
+
+full() {
+  fast || return $?
+  # ---- Layer-E: the whole gate. Run before closing a queue item. -----------
+  # Nothing beyond fast yet: goldens and sweeps arrive with the C++ core (ROADMAP).
+  # CPU (Release, ratio to a calibration loop) will be reported, NEVER gated.
+  return 0
+}
+
+case "$TARGET" in
+  fast)   fast;  record fast  $? ;;
+  full)   full;  record full  $? ;;
+  report) cat "$HARNESS_DIR/last-verify.json" 2>/dev/null || { echo '{"target":null,"exit":null}'; exit 1; } ;;
+  *)      echo "usage: ./verify fast|full|report" >&2; exit 64 ;;
+esac

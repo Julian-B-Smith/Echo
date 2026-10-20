@@ -1,0 +1,78 @@
+{
+  "schema": "project-manifest.0 (draft — kit v2 will formalize)",
+  "kit_version": "2.10.0",
+  "status": "RATIFIED 2026-10-19 (human, by poll, in the spin-up session; D-003). Phase state: see ROADMAP.",
+  "name": "Echo",
+  "naming_note": "Working name (HYPERSAW spin-out, 2026-10-19; the human reversed horde's B425 'no sibling' ruling by poll the same day). Any user-visible name passes horde's B433 clearance screen before 1.0; the Phase 0 prior-art pass runs the collision check. Directory `synthetic-worlds/Echo`; remote github.com/Julian-B-Smith/echo (PUBLIC). Mailbox slots are `integrations/echo/` in providers' trees. No plugin ids minted (Q1).",
+  "survey": {
+    "what_is_it": "library/engine — Echo, horde's standard delay: a C++ stereo delay engine library that horde hosts as one module in its FX rack, plus a browser lab twin for listening. NOT a standalone plugin for now (Q1; a plugin is a later, logged decision). Boundary ruled by horde: diffusion makes it Scape, discrete repeats make it Echo, morphing the graph makes it Sluice.",
+    "architecture_rung": {
+      "choice": 2,
+      "menu": [
+        "1: single thread",
+        "2: thread + subagents/verifier",
+        "3: organ fleet"
+      ],
+      "earned_by": "Impulse-response invariants (time accuracy in samples, generation ratio = feedback, the ceiling, exact-zero tails) give a fresh-context verifier mechanical ground truth from the first C++ build. Rung 1 rejected: no independent eye over a core that agrees with its author. Rung 3 rejected: one shared core, no independent verifiable seams, no demonstrated bottleneck."
+    },
+    "domain_core_llm_must_not_own": "Stereo delay lines with fractional reads; free (ms) or tempo-synced time by horde's division names, with L/R offsets; standard (dual mono / stereo), ping-pong and mid/side routing; feedback with a ceiling on the returning term only (ADR-142's fix — never divide loop gain by tap count, never limit the dry path); input, loop (delay-line) and output filters, truly bypassed when off; modulation modes, repitch among them; every test signal and detector. Deterministic code only: seeded mulberry32 streams, no wall-clock reads, tempo arrives as data, no model in the path. AI proposes and judges at design time only.",
+    "max_delay": {
+      "per_channel_seconds": 12,
+      "rationale": "Covers 2/1 at 40 bpm (12 s). Chosen by poll at survey (Q3b). Time + L/R offset clamp to the line length; the exact clamp behaviour is a Phase A spec item.",
+      "memory": "Delay lines alone, stereo float32: 12 s × SR × 2 ch × 4 B = 4.39 MiB at 48 kHz, 8.79 MiB at 96 kHz, 17.58 MiB at 192 kHz (the rack runs at the host rate, ADR-237). All of it allocated at prepare. The full per-instance worst-case figure (filter, modulation and visualizer state included) is stated at M1 — the 1.0 bar's MUST row."
+    },
+    "oracle_shape": {
+      "goldens": "INVARIANTS FIRST, then pinned goldens. Spec and impulse-response invariants, every detector with a must-fail (planted) control: time accuracy in samples; generation ratio equals the feedback exactly with filters bypassed; the ceiling holds past unity; sample-rate and block-size independence; silence in → exact zero out, and exact zero when the declared tail ends; modulation depth and repitch accuracy in cents; mono-fold metrics for ping-pong and mid/side; the click metric under moving time. Per-preset goldens pinned once the C++ exists, never before (ADR-142's lesson: parity must not enshrine a defect).",
+      "layer_0": "./verify fast — kit gates (integrity, leak) + private-name alias gate + structure/manifest sanity from day zero; grows the C++ invariant tests and the lab determinism scan as they land.",
+      "layer_e": "./verify full — fast + goldens + sweeps; CPU in Release as a ratio to a calibration loop, reported, NEVER a gate.",
+      "ci": "fast only (Linux runner; public repo, so no minutes budget); full is local."
+    },
+    "second_implementation": {
+      "port_pin": false,
+      "note": "The lab is a listening twin, never a parity target. The C++ core is the reference from day one, judged by its invariants. The legacy delay (intake/legacy/) is a reference only, never a parity target."
+    },
+    "consumers_and_providers": {
+      "consumed_by": [
+        "HYPERSAW / horde — hosts Echo as an FX-rack module under the rack slot contract (ADR-201, intake/rack-slot-contract.md) and the 1.0 bar (intake/module-1.0-bar.md); module cutoff 2026-12-11. Spin-up notice filed in horde's mailbox at integrations/echo/."
+      ],
+      "consumes": [
+        "FOUNDATIONS — the FX-operator ABI (vendor a pinned fx_operator.h, as Scape does). Brief filed when the C++ first touches the ABI, not at spin-up. Until then a local shim is the visibly-degraded placeholder behind the same surface.",
+        "autonomous — doctrine, harness kit (vendored gates, kit_sync), INTEGRATIONS policy, ecosystem-track registration (brief filed at spin-up)."
+      ],
+      "integrations_channel": "inbound: integrations/<sender>/ in THIS repo; outbound filings go in the provider's tree under integrations/echo/ via a PR touching only that path (writes stay home; the mailbox exception)."
+    },
+    "parallel_audit_thread": {
+      "earned": false,
+      "note": "No standing or one-off audit thread: the legacy delay is a reference, not a port source, so there is nothing to audit before porting."
+    },
+    "knowledge_loop_tags": [
+      "time-accuracy",
+      "feedback-stability",
+      "modulation-repitch",
+      "stereo-mono-safety",
+      "sample-rate-independence",
+      "performance-budget"
+    ],
+    "lifespan_autonomy": {
+      "lifespan": "long-lived product, hosted in horde (1.0 module cutoff 2026-12-11)",
+      "autonomy_tier": "medium — PR per batch on the resident's own branch; the human merges, never the resident; interactive at every phase gate and decision.",
+      "protected_paths": "`./verify` and `.kit/`; `project.manifest.json`; `intake/` (horde's copies, read-only here — annotate in docs/); `spec/` and `lab/` once the human ratifies them; goldens once cut.",
+      "repo_layout": "mono-repo: lab/ + spec/ + tools/ + the C++ core/ here."
+    }
+  },
+  "open_at_survey": {
+    "repitch_law_and_tempo_change": "Decide in Phase A (poll, 2026-10-19): by listening in the lab against the click metric, then an ADR in DECISIONS.",
+    "extras": "Freeze/infinite hold, reverse, ducking, smear (careful: diffusion is Scape's), swarm-modulated line — NOT in the core scope (Q3 kept the brief's list); carried in ROADMAP as deferred, post-core.",
+    "standalone_plugin": "No (Q1)."
+  },
+  "model_routing": {
+    "note": "doctrine: pin explicitly, never inherit; cap at latest Opus.",
+    "lead": "opus",
+    "critic": "opus (effort: high)",
+    "verifier": "haiku (verbatim gate reporting; judges nothing)",
+    "implementer": "sonnet (scoped execution from a self-contained brief)"
+  },
+  "dev_machine": {
+    "note": "Apple Silicon Mac, Command Line Tools only: CMake -G \"Unix Makefiles\", absolute build paths, Release for any perf number. Node LTS for the lab oracles. Identity-free by design."
+  }
+}

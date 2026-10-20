@@ -1,0 +1,70 @@
+# Kit v2 template — standard GitHub Actions CI.
+# Copy to `.github/workflows/ci.yml` in the target repo. CI here is not new
+# checks: it runs the project's ONE oracle (./verify) in the cloud on every
+# push/PR, mirroring the local Stop-hook gate. Green in CI == green locally.
+#
+# QUOTA (read this — free tier is 2000 private-repo minutes/month; PUBLIC repos
+# are unlimited). Only PRIVATE repos spend minutes. The economical defaults
+# below matter most for private + heavy (C++/JUCE) builds:
+#   1. Triggers: PRs + pushes to main only — NOT every push to every branch.
+#      (Feature-branch feedback still arrives via the PR.)
+#   2. concurrency: cancel superseded runs on the same ref (a big saver when
+#      you push several times quickly).
+#   3. paths-ignore: skip CI for docs-only changes.
+#   4. Heavy builds (JUCE plugin build, auval) are macOS-runner minutes at ~10×
+#      the Linux rate — keep `verify full` OUT of CI (run it locally/human) and
+#      CI only `verify fast`. See kit/README "CI is part of the core".
+#
+# Pick the toolchain setup block that matches the project (delete the rest).
+
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+
+# Cancel an in-progress run when a newer commit lands on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest        # macos-latest ONLY if verify needs Xcode/clang/auval — ~10× the minutes
+    steps:
+      # Action majors age on GITHUB's schedule, not ours: a pinned major goes
+      # from silently-forced-onto-a-new-node to hard failure on a date nobody
+      # here picks. v4 sat in this template until 2026-08-18, by which point 32
+      # repos had INHERITED it — the 2.4.0 shape (a copied artifact carrying a
+      # claim that ages out of true), with an external clock. Bumped only after
+      # a real run proved it, because a major bump cannot be checked locally.
+      - uses: actions/checkout@v7
+
+      # --- Python (stdlib verify: unittest/ruff) ------------------------------
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.x"
+      # If the project uses a venv + pinned deps, install them here:
+      #   run: python -m pip install -r requirements.txt   (or: -e .[dev])
+
+      # --- Node (delete Python block above) -----------------------------------
+      # - uses: actions/setup-node@v7
+      #   with: { node-version: "lts/*" }
+      # - run: npm ci
+
+      # --- C/C++ / CMake (delete Python block above) --------------------------
+      # - run: sudo apt-get update && sudo apt-get install -y cmake build-essential
+      #   # JUCE plugins: full()/auval is macOS-only + expensive + human-run —
+      #   # CI runs `verify fast` (ctests) on Linux, never `full`.
+
+      - name: verify fast
+        run: |
+          chmod +x verify
+          ./verify fast

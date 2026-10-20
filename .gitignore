@@ -1,0 +1,10 @@
+# machine-local / session state — never tracked
+PRIVATE-NOTES.md
+.leakcheck-names
+.harness/
+.claude/settings.local.json
+build*/
+.DS_Store
+__pycache__/
+node_modules/
+renders/

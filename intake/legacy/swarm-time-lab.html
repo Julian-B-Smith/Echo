@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SWARMTIME — tap swarm & sympathetic room lab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #0b0e14; --panel: #11151f; --panel2: #161b28; --line: #232a3a;
+    --text: #e8ecf2; --dim: #7c8698;
+    --swarm: #5ff2e0; --pull: #ff4fa3; --drift: #ffc24b;
+    --mono-f: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --disp-f: "Space Grotesk", system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--ink); color: var(--text); font-family: var(--mono-f); font-size: 13px; }
+  body { padding: 14px; min-height: 100vh; }
+  header { display: flex; align-items: baseline; gap: 14px; margin-bottom: 12px; flex-wrap: wrap; }
+  h1 { font-family: var(--disp-f); font-weight: 700; font-size: 22px; letter-spacing: 0.06em; }
+  h1 .star { color: var(--pull); }
+  .tagline { color: var(--dim); font-size: 11px; }
+  #power { margin-left: auto; font-family: var(--mono-f); font-size: 12px; letter-spacing: 0.08em;
+    background: var(--swarm); color: var(--ink); border: none; padding: 8px 18px; cursor: pointer; font-weight: 600; border-radius: 2px; }
+  #power.on { background: var(--panel2); color: var(--swarm); border: 1px solid var(--swarm); }
+  .grid { display: grid; grid-template-columns: 440px 1fr; gap: 12px; }
+  @media (max-width: 980px) { .grid { grid-template-columns: 1fr; } }
+  .scope { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 12px; }
+  .scope h2, .cluster h2 { font-family: var(--disp-f); font-size: 11px; font-weight: 500; letter-spacing: 0.18em;
+    color: var(--dim); text-transform: uppercase; margin-bottom: 8px; }
+  canvas { display: block; width: 100%; }
+  #timeCanvas { height: 250px; }
+  #meterline { color: var(--dim); font-size: 10px; margin-top: 8px; min-height: 28px; }
+  #meterline b { color: var(--text); font-weight: 500; }
+  .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(235px, 1fr)); gap: 12px; align-content: start; }
+  .cluster { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 12px; }
+  .cluster.pull h2 { color: var(--pull); }
+  .cluster.grav h2 { color: var(--drift); }
+  .row { display: grid; grid-template-columns: 92px 1fr 62px; align-items: center; gap: 8px; margin: 7px 0; }
+  .row label { color: var(--dim); font-size: 11px; }
+  .row output { text-align: right; font-size: 11px; color: var(--text); }
+  input[type=range] { -webkit-appearance: none; appearance: none; height: 4px; background: var(--line); border-radius: 2px; cursor: pointer; }
+  input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 13px; height: 13px; border-radius: 50%;
+    background: var(--swarm); border: 2px solid var(--ink); cursor: pointer; }
+  .pull input[type=range]::-webkit-slider-thumb { background: var(--pull); }
+  .grav input[type=range]::-webkit-slider-thumb { background: var(--drift); }
+  input[type=range]::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: var(--swarm); border: 2px solid var(--ink); cursor: pointer; }
+  select, input[type=number] { background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+    font-family: var(--mono-f); font-size: 11px; padding: 4px 6px; border-radius: 2px; width: 100%; }
+  .row.compact { grid-template-columns: 92px 1fr auto; }
+  button.mini { background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+    font-family: var(--mono-f); font-size: 11px; padding: 4px 8px; cursor: pointer; border-radius: 2px; }
+  button.mini:hover { border-color: var(--swarm); }
+  .kbd { margin-top: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 12px; }
+  .kbd .bar-top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+  .kbd .bar-top h2 { font-family: var(--disp-f); font-size: 11px; font-weight: 500; letter-spacing: 0.18em; color: var(--dim); text-transform: uppercase; }
+  #octlbl { color: var(--swarm); font-size: 11px; }
+  .keys { display: flex; height: 96px; position: relative; user-select: none; touch-action: none; }
+  .key { flex: 1; background: #e8ecf2; border: 1px solid var(--ink); border-radius: 0 0 3px 3px; position: relative; cursor: pointer; }
+  .key.black { position: absolute; width: 5.8%; height: 58%; background: #1a2030; border: 1px solid #000; z-index: 2; border-radius: 0 0 3px 3px; }
+  .key.held { background: var(--swarm); }
+  .key.black.held { background: var(--pull); }
+  .key span { position: absolute; bottom: 3px; left: 0; right: 0; text-align: center; font-size: 9px; color: #555; pointer-events: none; }
+  .key.black span { color: var(--dim); }
+  .key em { position: absolute; top: 3px; left: 0; right: 0; text-align: center; font-size: 9px; font-style: normal; color: #999; pointer-events: none; }
+  .key.black em { color: var(--dim); }
+  .hint { color: var(--dim); font-size: 10px; margin-top: 8px; line-height: 1.5; }
+  .hint b { color: var(--text); font-weight: 500; }
+  .hint .sw { color: var(--swarm); } .hint .pu { color: var(--pull); } .hint .dr { color: var(--drift); }
+  #status { color: var(--drift); font-size: 11px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>SWARMTIME</h1>
+  <div class="tagline">tap swarms · rhythmic gravity · sympathetic rooms · the room becomes a note</div>
+  <span id="status"></span>
+  <button id="power">POWER ON</button>
+</header>
+
+<div class="grid">
+  <div class="scope">
+    <h2 id="scopetitle">Timeline — cyan: taps · <span style="color:var(--drift)">amber: rhythmic targets</span> · <span style="color:var(--pull)">magenta: mean</span></h2>
+    <canvas id="timeCanvas" width="416" height="250"></canvas>
+    <div id="meterline"></div>
+  </div>
+
+  <div class="controls">
+    <div class="cluster">
+      <h2>Population</h2>
+      <div class="row compact"><label>engine</label>
+        <select id="mode">
+          <option value="0" selected>echo — tap swarm</option>
+          <option value="1">room — FDN swarm</option>
+        </select>
+      </div>
+      <div class="row"><label>count</label><input type="range" id="nb" min="4" max="12" step="1" value="8"><output id="nb_o">8</output></div>
+      <div class="row compact"><label>distribution</label>
+        <select id="dist">
+          <option value="0">even</option>
+          <option value="1" selected>gaussian (seeded)</option>
+          <option value="2">cauchy (seeded)</option>
+        </select>
+      </div>
+      <div class="row"><label>size</label><input type="range" id="size" min="0" max="1" step="0.01" value="0.55"><output id="size_o"></output></div>
+      <div class="row"><label>spread</label><input type="range" id="spread" min="0" max="1" step="0.01" value="0.6"><output id="spread_o">0.60</output></div>
+      <div class="row compact"><label>seed</label><input type="number" id="seed" value="1234" min="0" max="999999"><button class="mini" id="dice">⚄</button></div>
+    </div>
+
+    <div class="cluster pull">
+      <h2>Dynamics</h2>
+      <div class="row"><label>pull K ±</label><input type="range" id="K" min="-1" max="1" step="0.001" value="0"><output id="K_o">free</output></div>
+      <div class="row"><label>inertia</label><input type="range" id="inertia" min="0" max="1" step="0.01" value="0"><output id="inertia_o">off</output></div>
+      <div class="row"><label>drift depth</label><input type="range" id="driftDepth" min="0" max="200" step="1" value="30"><output id="driftDepth_o">30 ¢</output></div>
+      <div class="row"><label>drift rate</label><input type="range" id="driftRate" min="0" max="1" step="0.01" value="0.3"><output id="driftRate_o">0.30</output></div>
+    </div>
+
+    <div class="cluster grav">
+      <h2>Gravity — <span id="gravlabel">rhythmic (÷ of beat)</span></h2>
+      <div class="row"><label>gravity ±</label><input type="range" id="grav" min="-1" max="1" step="0.01" value="0"><output id="grav_o">off</output></div>
+      <div class="row"><label>basin</label><input type="range" id="basin" min="15" max="90" step="1" value="50"><output id="basin_o">±50 ¢</output></div>
+      <div class="row compact"><label>bpm</label><input type="number" id="bpm" value="120" min="40" max="240"></div>
+    </div>
+
+    <div class="cluster">
+      <h2>Exciter &amp; output</h2>
+      <div class="row"><label>noise mix</label><input type="range" id="noise" min="0" max="1" step="0.01" value="0.2"><output id="noise_o">0.20</output></div>
+      <div class="row"><label>regen</label><input type="range" id="regen" min="0" max="0.97" step="0.01" value="0.5"><output id="regen_o">0.50</output></div>
+      <div class="row"><label>damp</label><input type="range" id="damp" min="0" max="1" step="0.01" value="0.4"><output id="damp_o">0.40</output></div>
+      <div class="row"><label>mix</label><input type="range" id="mix" min="0" max="1" step="0.01" value="0.5"><output id="mix_o">0.50</output></div>
+      <div class="row"><label>volume</label><input type="range" id="vol" min="0" max="1" step="0.01" value="0.5"><output id="vol_o">0.50</output></div>
+    </div>
+  </div>
+</div>
+
+<div class="kbd">
+  <div class="bar-top">
+    <h2>Keyboard — Ableton layout · 4-voice poly exciter</h2>
+    <span id="octlbl"></span>
+  </div>
+  <div class="keys" id="keys"></div>
+  <div class="hint">
+    <b>A S D F G H J K L</b> whites, <b>W E · T Y U · O P</b> blacks, <b>Z / X</b> octave.<br>
+    <b>Echo</b>: tap times are the swarm. <span class="pu">K</span> positive collapses all taps to one slapback; negative enforces an even echo grid.
+    <span class="dr">Gravity</span> pulls tap times onto simple divisions of the beat (¼, ⅓, ½, ⅔, ¾, 1, 1½, 2, 3, 4 × beat) — a diffuse cloud settles into polyrhythm; negative refuses the grid.
+    <b>Drift</b> in time is literally wow &amp; flutter — moving taps chirp, that's the tape.
+    <b>Room</b>: FDN line lengths are the swarm. <span class="pu">K</span> positive collapses the room into a pitched comb — <i>the room becomes a note</i>.
+    <span class="dr">Gravity</span> pulls line lengths onto multiples of the played note's period — a sympathetic room that tunes itself to you and rings your note back.
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ================= DSP: time-domain swarms ================= */
+const NB_MAX = 12, POLY = 4, TICK = 16;
+const EX_DET = [-8, -4, 0, 4, 8];
+const RSET = [0.25, 1/3, 0.5, 2/3, 0.75, 1, 1.5, 2, 3, 4]; // rhythmic ratio set × beat
+
+class TimeLab {
+  constructor(sr) {
+    this.sr = sr;
+    this.p = { mode:0, nb:8, dist:1, size:0.55, spread:0.6, seed:1234,
+               K:0, inertia:0, driftDepth:30, driftRate:0.3, grav:0, basin:50, bpm:120,
+               noise:0.2, regen:0.5, damp:0.4, mix:0.5, vol:0.5 };
+    this.v = new Float64Array(NB_MAX);      // log2(time in seconds)
+    this.mom = new Float64Array(NB_MAX);
+    this.tHome = new Float64Array(NB_MAX);
+    this.dOff = new Float64Array(NB_MAX);
+    this.x = new Float64Array(NB_MAX);
+    this.tSm = new Float64Array(NB_MAX);    // smoothed time in samples (audio-rate slew)
+    this.lp = new Float64Array(NB_MAX);     // per-line damping state (room)
+    this.rng = 1;
+    this.collapse = 0; this.combReg = 0; this.gravErr = -1;
+    this.f0last = 110;
+    this.tick = 0;
+    // echo: one shared buffer; room: per-line buffers
+    this.EBUF = 1 << 17; // ~3 s at 44.1k
+    this.ebuf = new Float64Array(this.EBUF);
+    this.ew = 0;
+    this.wetPrev = 0; this.fbLp = 0; this.dcE = 0;
+    this.dcR = new Float64Array(NB_MAX);
+    this.RBUF = 1 << 13; // ~186 ms
+    this.rbuf = [];
+    for (let i = 0; i < NB_MAX; i++) this.rbuf.push(new Float64Array(this.RBUF));
+    this.rw = 0;
+    this.notes = [];
+    for (let i = 0; i < POLY; i++) {
+      this.notes.push({ midi: -1, f0: 110, gate: 0, env: 0, age: -1, phase: new Float64Array(EX_DET.length) });
+    }
+    this.noteCounter = 0;
+    this.rebuild();
+    for (let i = 0; i < NB_MAX; i++) { this.v[i] = this.tHome[i]; this.tSm[i] = Math.pow(2, this.v[i]) * sr; }
+    this.controlTick();
+  }
+  setParam(k, val) {
+    this.p[k] = val;
+    if (k === 'mode' || k === 'nb' || k === 'dist' || k === 'size' || k === 'spread' || k === 'seed') {
+      this.rebuild();
+      if (k === 'mode' || k === 'nb' || k === 'seed' || k === 'dist') {
+        for (let i = 0; i < NB_MAX; i++) {
+          this.v[i] = this.tHome[i]; this.mom[i] = 0; this.dOff[i] = 0;
+          this.tSm[i] = Math.pow(2, this.v[i]) * this.sr; this.lp[i] = 0;
+        }
+        if (k === 'mode') { this.ebuf.fill(0); for (const b of this.rbuf) b.fill(0); this.wetPrev = 0; this.fbLp = 0; this.dcE = 0; this.dcR.fill(0); }
+      }
+    }
+  }
+  rngNext() {
+    this.rng |= 0; this.rng = (this.rng + 0x6D2B79F5) | 0;
+    let t = Math.imul(this.rng ^ (this.rng >>> 15), 1 | this.rng);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  limits() {
+    return this.p.mode === 0
+      ? { lo: Math.log2(0.03), hi: Math.log2(1.8) }
+      : { lo: Math.log2(0.004), hi: Math.log2(0.17) };
+  }
+  centerSec() {
+    return this.p.mode === 0 ? 0.08 * Math.pow(2, this.p.size * 4.2) : 0.008 * Math.pow(2, this.p.size * 4.0);
+  }
+  rebuild() {
+    const n = this.p.nb;
+    this.rng = (this.p.seed | 0) + 1;
+    for (let i = 0; i < n; i++) {
+      const u = n === 1 ? 0.5 : i / (n - 1);
+      let x;
+      if (this.p.dist === 0) x = 2 * u - 1;
+      else if (this.p.dist === 1) {
+        const u1 = Math.max(this.rngNext(), 1e-9), u2 = this.rngNext();
+        x = Math.sqrt(-2 * Math.log(u1)) * Math.cos(6.283185307 * u2) / 2.5;
+        if (x > 1) x = 1; if (x < -1) x = -1;
+      } else {
+        x = Math.tan(3.14159265 * (this.rngNext() - 0.5)) / 4;
+        if (x > 1) x = 1; if (x < -1) x = -1;
+      }
+      this.x[i] = x;
+    }
+    const xs = Array.from(this.x.slice(0, n)).sort((a, b) => a - b);
+    for (let i = 0; i < n; i++) this.x[i] = xs[i];
+    const c = Math.log2(this.centerSec());
+    const halfOct = this.p.mode === 0 ? this.p.spread * 2.0 : this.p.spread * 1.3;
+    const lim = this.limits();
+    for (let i = 0; i < n; i++) {
+      this.tHome[i] = Math.min(lim.hi, Math.max(lim.lo, c + this.x[i] * halfOct));
+    }
+  }
+  noteOn(midi, f) {
+    let s = null;
+    for (const nt of this.notes) if (!nt.gate && nt.env < 1e-3) { if (!s || nt.age < s.age) s = nt; }
+    if (!s) for (const nt of this.notes) { if (!s || nt.age < s.age) s = nt; }
+    s.midi = midi; s.f0 = f; s.gate = 1; s.age = this.noteCounter++;
+    for (let i = 0; i < EX_DET.length; i++) s.phase[i] = 0;
+    this.f0last = f;
+  }
+  noteOff(midi) { for (const nt of this.notes) if (nt.gate && nt.midi === midi) nt.gate = 0; }
+  gravTarget(vi) {
+    // returns nearest attractor in log2-time, or null
+    const t = Math.pow(2, vi);
+    if (this.p.mode === 0) {
+      const beat = 60 / this.p.bpm;
+      let best = null, be = 1e9;
+      for (const r of RSET) {
+        const e = Math.abs(Math.log2(t / (r * beat)));
+        if (e < be) { be = e; best = Math.log2(r * beat); }
+      }
+      return best;
+    } else {
+      const P = 1 / this.f0last;
+      const m = Math.max(1, Math.round(t / P));
+      return Math.log2(m * P);
+    }
+  }
+  controlTick() {
+    const p = this.p, n = p.nb, dt = TICK / this.sr;
+    if (p.driftDepth > 0) {
+      const rate = 0.2 + p.driftRate * 8, amp = p.driftDepth / 1200;
+      for (let i = 0; i < n; i++) {
+        this.dOff[i] += (this.rngNext() - 0.5) * 2 * Math.sqrt(rate * dt) * amp;
+        this.dOff[i] -= this.dOff[i] * 0.4 * dt;
+      }
+    }
+    let mean = 0;
+    for (let i = 0; i < n; i++) mean += this.v[i];
+    mean /= n;
+    let hMin = 1e9, hMax = -1e9;
+    for (let i = 0; i < n; i++) { if (this.tHome[i] < hMin) hMin = this.tHome[i]; if (this.tHome[i] > hMax) hMax = this.tHome[i]; }
+    const span = Math.max(0.1, hMax - hMin);
+    const km = p.K;
+    const syncR = km > 0 ? 6 * km * km : 0;
+    const splayR = km < 0 ? 18 * km * km : 0;
+    const gravR = Math.abs(p.grav) * 6;
+    const lim = this.limits();
+    let gAcc = 0, gCnt = 0;
+    for (let i = 0; i < n; i++) {
+      let F = 1.5 * (this.tHome[i] + this.dOff[i] - this.v[i]);
+      if (syncR > 0) F += syncR * (mean - this.v[i]);
+      if (splayR > 0) {
+        const slot = mean - span / 2 + span * (n === 1 ? 0.5 : i / (n - 1));
+        F += splayR * (slot - this.v[i]);
+      }
+      if (gravR > 0) {
+        const tgt = this.gravTarget(this.v[i]);
+        if (tgt !== null) {
+          const errC = 1200 * (this.v[i] - tgt);
+          if (Math.abs(errC) < p.basin) {
+            F += (p.grav > 0 ? -1 : 1) * gravR * (this.v[i] - tgt);
+            gAcc += Math.abs(errC); gCnt++;
+          }
+        }
+      }
+      if (p.inertia <= 0.001) { this.v[i] += F * dt; this.mom[i] = 0; }
+      else {
+        const w0 = 6.283185307 * (4 * (1 - p.inertia) + 0.4);
+        this.mom[i] += F * w0 * dt;
+        this.mom[i] *= Math.exp(-0.9 * w0 * dt);
+        this.v[i] += this.mom[i] * dt * w0;
+      }
+      if (this.v[i] < lim.lo) this.v[i] = lim.lo;
+      if (this.v[i] > lim.hi) this.v[i] = lim.hi;
+    }
+    this.gravErr = gCnt ? gAcc / gCnt : -1;
+    let vv = 0, hv = 0, hMean = 0;
+    for (let i = 0; i < n; i++) { const d = this.v[i] - mean; vv += d * d; }
+    for (let i = 0; i < n; i++) hMean += this.tHome[i];
+    hMean /= n;
+    for (let i = 0; i < n; i++) { const d = this.tHome[i] - hMean; hv += d * d; }
+    this.collapse = 1 - Math.min(1, Math.sqrt(vv / n) / Math.max(0.03, Math.sqrt(hv / n)));
+    const sorted = Array.from(this.v.slice(0, n)).sort((a, b) => a - b);
+    let gm = 0; const gaps = [];
+    for (let i = 1; i < n; i++) { const g = sorted[i] - sorted[i - 1]; gaps.push(g); gm += g; }
+    gm /= Math.max(1, gaps.length);
+    let gv = 0;
+    for (const g of gaps) { const d = g - gm; gv += d * d; }
+    this.combReg = gm > 1e-6 ? Math.max(0, 1 - Math.sqrt(gv / gaps.length) / gm) : 0;
+  }
+  /* per-sample processing of the wet path; x = dry input */
+  processSample(x) {
+    const p = this.p, n = p.nb;
+    // audio-rate slew of tap/line times toward tick targets (limits zipper; residual motion = tape chirp)
+    for (let i = 0; i < n; i++) {
+      const target = Math.pow(2, this.v[i]) * this.sr;
+      this.tSm[i] += (target - this.tSm[i]) * 0.0015;
+    }
+    const dampC = 1 - Math.exp(-6.283185307 * (8000 * Math.pow(0.06, p.damp)) / this.sr);
+    if (p.mode === 0) {
+      // ECHO: shared buffer, N read taps, feedback of tap sum
+      this.ebuf[this.ew] = Math.tanh(x + this.fbLp * p.regen);
+      let wetRaw = 0;
+      for (let i = 0; i < n; i++) {
+        const d = Math.min(this.EBUF - 4, Math.max(1, this.tSm[i]));
+        let rp = this.ew - d;
+        if (rp < 0) rp += this.EBUF;
+        const i0 = rp | 0, fr = rp - i0;
+        const i1 = (i0 + 1) % this.EBUF;
+        wetRaw += this.ebuf[i0] * (1 - fr) + this.ebuf[i1] * fr;
+      }
+      const wet = wetRaw / Math.sqrt(n);
+      // feedback path: average (loop LF gain <= regen), DC-blocked — taps correlate at low
+      // frequencies, so a sqrt(N) feedback norm has LF loop gain regen*sqrt(N) and runs away
+      const fbSig = wetRaw / n;
+      this.dcE += 0.002 * (fbSig - this.dcE);
+      this.fbLp += dampC * ((fbSig - this.dcE) - this.fbLp);
+      this.ew = (this.ew + 1) % this.EBUF;
+      return wet;
+    } else {
+      // ROOM: FDN with Householder mixing
+      const outs = [];
+      let s = 0;
+      for (let i = 0; i < n; i++) {
+        const d = Math.min(this.RBUF - 4, Math.max(1, this.tSm[i]));
+        let rp = this.rw - d;
+        if (rp < 0) rp += this.RBUF;
+        const i0 = rp | 0, fr = rp - i0;
+        const i1 = (i0 + 1) % this.RBUF;
+        let o = this.rbuf[i][i0] * (1 - fr) + this.rbuf[i][i1] * fr;
+        this.lp[i] += dampC * (o - this.lp[i]);
+        o = this.lp[i];
+        this.dcR[i] += 0.0006 * (o - this.dcR[i]);
+        o -= this.dcR[i];
+        outs.push(o); s += o;
+      }
+      const h = 2 / n, g = p.regen;
+      const inG = x * (1 / Math.sqrt(n));
+      let wet = 0;
+      for (let i = 0; i < n; i++) {
+        this.rbuf[i][this.rw] = Math.tanh(inG + g * (h * s - outs[i]));
+        wet += outs[i];
+      }
+      this.rw = (this.rw + 1) % this.RBUF;
+      return wet * 0.8;
+    }
+  }
+  render(outL, outR) {
+    const sr = this.sr, p = this.p;
+    // watchdog: a NaN anywhere in feedback state would render as permanent silence — self-heal instead
+    if (!Number.isFinite(this.v[0] + this.fbLp + this.lp[0] + this.dcE)) {
+      for (let i = 0; i < NB_MAX; i++) { this.v[i] = this.tHome[i]; this.mom[i] = 0; this.dOff[i] = 0;
+        this.tSm[i] = Math.pow(2, this.v[i]) * sr; this.lp[i] = 0; this.dcR[i] = 0; }
+      this.ebuf.fill(0); for (const b of this.rbuf) b.fill(0);
+      this.fbLp = 0; this.dcE = 0;
+    }
+    const atk = 1 - Math.exp(-1 / (0.002 * sr));
+    const rel = 1 - Math.exp(-1 / (0.09 * sr));
+    for (let smp = 0; smp < outL.length; smp++) {
+      if (this.tick === 0) this.controlTick();
+      this.tick = (this.tick + 1) & (TICK - 1);
+      let dry = 0;
+      for (const nt of this.notes) {
+        if (!nt.gate && nt.env < 1e-4) continue;
+        let vsum = 0;
+        for (let i = 0; i < EX_DET.length; i++) {
+          const f = nt.f0 * Math.pow(2, EX_DET[i] / 1200);
+          const dph = f / sr;
+          let ph = nt.phase[i] + dph; ph -= Math.floor(ph);
+          nt.phase[i] = ph;
+          const naive = 2 * ph - 1;
+          const d = Math.max(dph, 1e-6);
+          let bl = 0;
+          if (ph < d) { const t = ph / d; bl = t + t - t * t - 1; }
+          else if (ph > 1 - d) { const t = (ph - 1) / d; bl = t * t + t + t + 1; }
+          vsum += naive - bl;
+        }
+        vsum *= 0.2;
+        if (p.noise > 0) vsum = vsum * (1 - p.noise) + (Math.random() * 2 - 1) * p.noise;
+        nt.env += ((nt.gate ? 1 : 0) - nt.env) * (nt.gate ? atk : rel);
+        dry += vsum * nt.env * 0.5;
+      }
+      const wet = this.processSample(dry);
+      const y = Math.tanh(((1 - p.mix) * dry + p.mix * wet) * p.vol * 1.6);
+      outL[smp] = y; outR[smp] = y;
+    }
+  }
+}
+
+/* ================= Audio graph ================= */
+let ctx = null, spn = null, lab = null;
+const $ = id => document.getElementById(id);
+const statusEl = $('status');
+
+function powerOn() {
+  if (ctx) {
+    ctx.close(); ctx = null; spn = null; lab = null;
+    $('power').textContent = 'POWER ON'; $('power').classList.remove('on');
+    return;
+  }
+  try {
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    lab = new TimeLab(ctx.sampleRate);
+    pushAllParams();
+    spn = ctx.createScriptProcessor(1024, 0, 2);
+    spn.onaudioprocess = e => lab.render(e.outputBuffer.getChannelData(0), e.outputBuffer.getChannelData(1));
+    spn.connect(ctx.destination);
+    if (ctx.state === 'suspended') ctx.resume();
+    $('power').textContent = 'POWER OFF'; $('power').classList.add('on');
+    statusEl.textContent = '';
+  } catch (err) {
+    statusEl.textContent = 'Audio failed to start: ' + err.message;
+    ctx = null;
+  }
+}
+$('power').addEventListener('click', powerOn);
+function send(k, v) { if (lab) lab.setParam(k, v); }
+
+const fmt = {
+  nb: v => v,
+  size: v => {
+    const mode = +$('mode').value;
+    const s = mode === 0 ? 0.08 * Math.pow(2, v * 4.2) : 0.008 * Math.pow(2, v * 4.0);
+    return s >= 1 ? s.toFixed(2) + ' s' : Math.round(s * 1000) + ' ms';
+  },
+  spread: v => (+v).toFixed(2),
+  K: v => { const a = Math.abs(+v); if (a < 0.005) return 'free'; return (v > 0 ? 'gather ' : 'grid ') + a.toFixed(2); },
+  inertia: v => (+v) < 0.005 ? 'off' : (+v).toFixed(2),
+  driftDepth: v => v + ' ¢',
+  driftRate: v => (+v).toFixed(2),
+  grav: v => { const a = Math.abs(+v); if (a < 0.005) return 'off'; return (v > 0 ? 'attract ' : 'repel ') + a.toFixed(2); },
+  basin: v => '±' + v + ' ¢',
+  noise: v => (+v).toFixed(2),
+  regen: v => (+v).toFixed(2),
+  damp: v => (+v).toFixed(2),
+  mix: v => (+v).toFixed(2),
+  vol: v => (+v).toFixed(2)
+};
+const ranges = ['nb','size','spread','K','inertia','driftDepth','driftRate','grav','basin','noise','regen','damp','mix','vol'];
+const updaters = {};
+ranges.forEach(k => {
+  const el = $(k), out = $(k + '_o');
+  const update = () => {
+    const v = +el.value;
+    if (out && fmt[k]) out.textContent = fmt[k](v);
+    send(k, v);
+  };
+  updaters[k] = update;
+  el.addEventListener('input', update);
+  update();
+});
+function modeUI() {
+  const m = +$('mode').value;
+  $('gravlabel').textContent = m === 0 ? 'rhythmic (÷ of beat)' : 'sympathetic (× note period)';
+  $('scopetitle').innerHTML = m === 0
+    ? 'Timeline — cyan: taps · <span style="color:var(--drift)">amber: beat divisions</span> · <span style="color:var(--pull)">magenta: mean</span>'
+    : 'Line lengths — cyan: FDN lines · <span style="color:var(--drift)">amber: multiples of note period</span> · <span style="color:var(--pull)">magenta: mean</span>';
+  updaters['size']();
+}
+$('mode').addEventListener('change', () => { send('mode', +$('mode').value); modeUI(); });
+$('dist').addEventListener('change', () => send('dist', +$('dist').value));
+$('seed').addEventListener('change', () => send('seed', +$('seed').value));
+$('dice').addEventListener('click', () => { $('seed').value = Math.floor(Math.random() * 100000); send('seed', +$('seed').value); });
+$('bpm').addEventListener('change', () => send('bpm', +$('bpm').value));
+
+function pushAllParams() {
+  ranges.forEach(k => send(k, +$(k).value));
+  send('mode', +$('mode').value);
+  send('dist', +$('dist').value);
+  send('seed', +$('seed').value);
+  send('bpm', +$('bpm').value);
+}
+modeUI();
+
+/* ================= Keyboard ================= */
+const KMAP = { 'a':0,'w':1,'s':2,'e':3,'d':4,'f':5,'t':6,'g':7,'y':8,'h':9,'u':10,'j':11,'k':12,'o':13,'l':14,'p':15,';':16 };
+const CAPS_BY_SEMITONE = { 0:'A',1:'W',2:'S',3:'E',4:'D',5:'F',6:'T',7:'G',8:'Y',9:'H',10:'U',11:'J',12:'K',13:'O',14:'L',15:'P',16:';' };
+let octaveBase = 36;
+const OCT_MIN = 12, OCT_MAX = 96;
+const heldNotes = [];
+const WHITE = [0,2,4,5,7,9,11];
+const BLACK = { 0:1, 1:3, 3:6, 4:8, 5:10 };
+const NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const keysEl = $('keys');
+function buildKeys() {
+  keysEl.innerHTML = '';
+  const whites = [];
+  for (let o = 0; o < 2; o++) for (let w = 0; w < 7; w++) whites.push(octaveBase + o * 12 + WHITE[w]);
+  whites.push(octaveBase + 24);
+  whites.forEach(m => {
+    const k = document.createElement('div');
+    k.className = 'key'; k.dataset.midi = m;
+    const off = m - octaveBase;
+    const cap = CAPS_BY_SEMITONE[off] !== undefined ? '<em>' + CAPS_BY_SEMITONE[off] + '</em>' : '';
+    k.innerHTML = cap + '<span>' + NAMES[m % 12] + (Math.floor(m / 12) - 1) + '</span>';
+    keysEl.appendChild(k);
+  });
+  const wCount = whites.length;
+  whites.forEach((m, idx) => {
+    const w = WHITE.indexOf(m % 12);
+    if (w !== -1 && BLACK[w] !== undefined && idx < wCount - 1) {
+      const midiB = m + (BLACK[w] - WHITE[w]);
+      const b = document.createElement('div');
+      b.className = 'key black'; b.dataset.midi = midiB;
+      b.style.left = ((idx + 1) / wCount * 100 - 2.9) + '%';
+      const off = midiB - octaveBase;
+      const cap = CAPS_BY_SEMITONE[off] !== undefined ? '<em>' + CAPS_BY_SEMITONE[off] + '</em>' : '';
+      b.innerHTML = cap + '<span>' + NAMES[midiB % 12] + '</span>';
+      keysEl.appendChild(b);
+    }
+  });
+  const lo = Math.floor(octaveBase / 12) - 1;
+  $('octlbl').textContent = 'octave: C' + lo + '–C' + (lo + 2) + ' (Z − / X +)';
+}
+buildKeys();
+const mtof = m => 440 * Math.pow(2, (m - 69) / 12);
+function noteOn(m) {
+  if (!lab) return;
+  if (heldNotes.includes(m)) return;
+  heldNotes.push(m);
+  lab.noteOn(m, mtof(m));
+  paintKeys();
+}
+function noteOff(m) {
+  const i = heldNotes.indexOf(m);
+  if (i !== -1) heldNotes.splice(i, 1);
+  if (lab) lab.noteOff(m);
+  paintKeys();
+}
+function paintKeys() {
+  keysEl.querySelectorAll('.key').forEach(k => k.classList.toggle('held', heldNotes.includes(+k.dataset.midi)));
+}
+const pointerNotes = [];
+keysEl.addEventListener('pointerdown', e => {
+  const k = e.target.closest('.key'); if (!k) return;
+  keysEl.setPointerCapture(e.pointerId);
+  const m = +k.dataset.midi;
+  pointerNotes.push(m);
+  noteOn(m);
+});
+window.addEventListener('pointerup', () => { pointerNotes.splice(0).forEach(noteOff); });
+function shiftOctave(dir) {
+  const next = octaveBase + dir * 12;
+  if (next < OCT_MIN || next > OCT_MAX) return;
+  [...heldNotes].forEach(noteOff);
+  octaveBase = next;
+  buildKeys();
+}
+window.addEventListener('keydown', e => {
+  if (e.repeat || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  const key = e.key.toLowerCase();
+  if (key === 'z') { shiftOctave(-1); return; }
+  if (key === 'x') { shiftOctave(1); return; }
+  const off = KMAP[key];
+  if (off !== undefined) noteOn(octaveBase + off);
+});
+window.addEventListener('keyup', e => {
+  const off = KMAP[e.key.toLowerCase()];
+  if (off !== undefined) noteOff(octaveBase + off);
+});
+
+/* ================= Visualization ================= */
+const tc = $('timeCanvas'), tx = tc.getContext('2d');
+function limitsUI() { return lab ? lab.limits() : (+$('mode').value === 0 ? { lo: Math.log2(0.03), hi: Math.log2(1.8) } : { lo: Math.log2(0.004), hi: Math.log2(0.17) }); }
+function txX(logT, lim) { return (logT - lim.lo) / (lim.hi - lim.lo) * tc.width; }
+function drawTime() {
+  const w = tc.width, h = tc.height;
+  tx.fillStyle = 'rgba(11,14,20,0.35)';
+  tx.fillRect(0, 0, w, h);
+  const lim = limitsUI();
+  tx.fillStyle = '#7c8698'; tx.font = '9px monospace';
+  const mode = lab ? lab.p.mode : +$('mode').value;
+  const marks = mode === 0 ? [0.05, 0.1, 0.25, 0.5, 1.0] : [0.005, 0.01, 0.025, 0.05, 0.1];
+  tx.strokeStyle = '#1a2030';
+  for (const m of marks) {
+    const x = txX(Math.log2(m), lim);
+    tx.beginPath(); tx.moveTo(x, 0); tx.lineTo(x, h); tx.stroke();
+    tx.fillText(m >= 1 ? m + 's' : (m * 1000) + 'ms', x + 3, h - 4);
+  }
+  if (!lab) return;
+  // gravity targets
+  tx.strokeStyle = 'rgba(255,194,75,0.5)';
+  if (mode === 0) {
+    const beat = 60 / lab.p.bpm;
+    for (const r of RSET) {
+      const lt = Math.log2(r * beat);
+      if (lt < lim.lo || lt > lim.hi) continue;
+      const x = txX(lt, lim);
+      tx.beginPath(); tx.moveTo(x, h - 26); tx.lineTo(x, h - 8); tx.stroke();
+    }
+  } else {
+    const P = 1 / lab.f0last;
+    for (let m = 1; m <= 128; m++) {
+      const lt = Math.log2(m * P);
+      if (lt > lim.hi) break;
+      if (lt < lim.lo) continue;
+      const x = txX(lt, lim);
+      tx.beginPath(); tx.moveTo(x, h - 24); tx.lineTo(x, h - 8); tx.stroke();
+    }
+  }
+  // mean
+  const n = lab.p.nb;
+  let mean = 0;
+  for (let i = 0; i < n; i++) mean += lab.v[i];
+  mean /= n;
+  tx.strokeStyle = 'rgba(255,79,163,0.6)';
+  tx.beginPath(); tx.moveTo(txX(mean, lim), 10); tx.lineTo(txX(mean, lim), h - 30); tx.stroke();
+  // population
+  for (let i = 0; i < n; i++) {
+    const x = txX(lab.v[i], lim);
+    tx.strokeStyle = 'rgba(95,242,224,0.9)'; tx.lineWidth = 2;
+    tx.beginPath(); tx.moveTo(x, 24); tx.lineTo(x, h - 30); tx.stroke();
+    tx.fillStyle = 'rgba(95,242,224,0.9)';
+    tx.beginPath(); tx.arc(x, 20, 3, 0, Math.PI * 2); tx.fill();
+  }
+  $('meterline').innerHTML = 'gather <b>' + lab.collapse.toFixed(2) + '</b> · grid regularity <b>' + lab.combReg.toFixed(2) +
+    '</b>' + (lab.gravErr >= 0 ? ' · in-basin error <b>' + lab.gravErr.toFixed(1) + ' ¢</b>' : '') +
+    (mode === 1 ? ' · f0 <b>' + lab.f0last.toFixed(1) + ' Hz</b> (P = ' + (1000 / lab.f0last).toFixed(1) + ' ms)' : ' · beat <b>' + (60000 / lab.p.bpm).toFixed(0) + ' ms</b>');
+}
+function loop() { drawTime(); requestAnimationFrame(loop); }
+loop();
+
+/* focus-trap fix: sliders and selects release keyboard focus after use so the
+   musical keyboard never goes silently dead; Escape = panic (all notes off) */
+document.addEventListener('pointerup', () => {
+  const t = document.activeElement;
+  if (t && t.tagName === 'INPUT' && t.type === 'range') t.blur();
+});
+document.addEventListener('change', e => {
+  if (e.target.tagName === 'SELECT') e.target.blur();
+});
+window.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    if (document.activeElement) document.activeElement.blur();
+    [...heldNotes].forEach(noteOff);
+  }
+}, true);
+</script>
+</body>
+</html>
