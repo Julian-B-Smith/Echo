@@ -6,7 +6,9 @@ lives in `DECISIONS.md`; horde's shipping bar is `intake/module-1.0-bar.md`.
 
 ## Status
 
-- **Phase:** spun up 2026-10-19 — Phase 0 (prior art) is next. Nothing built.
+- **Phase:** Phase 0 (prior art) delivered 2026-10-19 in `docs/prior-art.md`,
+  awaiting the human's merge and the D-004–D-011 rulings; Phase A is next.
+  Nothing built.
 - **Oracle:** `./verify fast` = kit integrity, leak gate, private-name gate,
   structure, manifest, intake pin. No DSP gates yet — they arrive with the lab
   (Phase A) and the C++ core (M1). `full` = `fast` for now.
@@ -91,7 +93,8 @@ commercial delay or borrow its mode names, presets or UI text.
 ## Queue
 
 ### T-001 — Phase 0 prior-art swarm
-- **Status:** open
+- **Status:** delivered 2026-10-19, in review (PR): `docs/prior-art.md`;
+  DECISIONS D-004–D-011 PROPOSED, D-012 (name) RATIFIED by poll.
 - **Scope:** `docs/prior-art.md`, DECISIONS
 - **Acceptance criteria:** the Phase 0 gate above.
 - **Out of scope:** any spec or code.
@@ -111,6 +114,10 @@ commercial delay or borrow its mode names, presets or UI text.
   repitch mode (glide time constant / rate law). Decided in Phase A by listening
   in the lab against the click metric (survey poll, 2026-10-19).
 - **Q-A2 — Synced time on a tempo change mid-note:** glide or jump? Same venue.
+- **Q-A4 — Mid/side and B408.** Is S-only content in mid/side mode stated as
+  cancelling in mono *by construction* (and so not a B408 defect), with the
+  unintended-cancellation test run on mono and decorrelated inputs? Raised by
+  prior-art §5 (D-010). For Phase A's spec.
 - **Q-A3 — Per-module CPU budget** for 1.0 is the human's to set (1.0 bar row 51);
   the appendix's ~2 % default / 4 % worst of a min-spec core is the working target.
 

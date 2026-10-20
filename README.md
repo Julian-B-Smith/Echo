@@ -3,8 +3,9 @@
 horde's standard delay module: a stereo delay library hosted in horde's FX rack, with a lab twin for listening.
 "Echo" is a working name; the module's name will be cleared before release.
 
-**Status: spun up 2026-10-19 — nothing built yet.** The survey is done and the harness is green; the next step is
-Phase 0 (prior art), then the spec and the lab (Phase A). horde's module cutoff is **2026-12-11**. Phase state lives in
+**Status: Phase 0 delivered 2026-10-19 — nothing built yet.** The survey is done, the harness is green and the
+prior-art landscape is in [`docs/prior-art.md`](docs/prior-art.md) (design proposals D-004–D-011 await the human);
+the next step is the spec and the lab (Phase A). horde's module cutoff is **2026-12-11**. Phase state lives in
 [`ROADMAP.md`](ROADMAP.md).
 
 ## What it will do
@@ -26,6 +27,7 @@ modes, including repitch (the tape-style glide when the time changes). Visualize
 | `intake/` | horde's contract packet (rack slot contract, 1.0 bar, I/O gain, macros, tempo divisions). Read-only, hash-pinned | done |
 | `intake/legacy/` | What Echo absorbs from horde Legacy: ADR-142's delay and its oracle, the swarm time lab. References only, never parity targets | done |
 | `integrations/` | Inbound mailbox (`integrations/<sender>/`) and the outbound thread table | live |
+| `docs/prior-art.md` | Phase 0 landscape: interpolation, feedback, time changes, click and mono-fold metrics, IR display, competitors, name check | done 2026-10-19 |
 | `docs/filings/` | Drafts of what Echo files in other repos | live |
 | `spec/`, `lab/`, `tools/`, `core/` | Spec, listening twin, oracles, C++ core | not yet built |
 | `verify` | The oracle: `./verify fast` / `full` / `report` | live |
@@ -43,4 +45,4 @@ modes, including repitch (the tape-style glide when the time changes). Visualize
 ./verify fast
 ```
 
-_Last verified: 2026-10-19 (spin-up; `./verify fast` green)._
+_Last verified: 2026-10-19 (Phase 0 prior art; `./verify fast` green)._
