@@ -1,0 +1,16 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "plan-map",
+      "comment": "Serves the repo root so docs/design/echo-plan-map.html can fetch ../../ROADMAP.md live (opened as a file it cannot). Then open /docs/design/echo-plan-map.html. The page stores nothing, so the port is free to move. python3 -m http.server takes the port positionally and does not read $PORT, hence the sh -c wrapper.",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "exec python3 -m http.server \"$PORT\" --bind 127.0.0.1"
+      ],
+      "port": 59521,
+      "autoPort": true
+    }
+  ]
+}

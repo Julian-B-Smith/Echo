@@ -26,3 +26,6 @@ Where things are. Update in the same change that moves them.
 | `core/tools/render_hash.cpp` | The fp-contract probe: one fixed render, hashed; built as `echo_hash_ref` / `echo_hash` / `echo_hash_nopragma` |
 | `core/tests/guard_probe.cpp` | Compiled under -ffast-math / -ffinite-math-only by `./verify`: must hit the engine's `#error` |
 | `tools/check_manifest.py` | C++ table == `spec/params.json`, proven on 4 planted drifts |
+| `docs/design/echo-plan-map.html` | The plan map: MODEL section (pure ROADMAP.md parser + self-checks, sliced by the smoke) then the UI. Reads `../../ROADMAP.md` when the repo root is served |
+| `tools/plan_map_smoke.mjs` | Runs the plan map's MODEL against ROADMAP.md headlessly, each check with a planted control |
+| `.claude/launch.json` | `plan-map`: a static server on the repo root for the plan map |

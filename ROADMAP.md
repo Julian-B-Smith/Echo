@@ -161,7 +161,8 @@ commercial delay or borrow its mode names, presets or UI text.
 - **Items:** a check that cutoff glides take 10 ms (an instant glide survives the
   suite); `check_manifest.py` to compare `rate` and `smoothing` too (the C++ table
   has neither yet); the ABI shim's 4-pointer `process` vs the shims' in-place L/R
-  (a call-site change, not a rename, at M3).
+  (a call-site change, not a rename, at M3); why GCC's pragma-less probe render
+  stays bit-identical despite 153 fused ops in `process` (D-022).
 - **Acceptance criteria:** each item lands with a planted control, or is ruled out
   in DECISIONS.
 

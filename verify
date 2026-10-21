@@ -63,6 +63,7 @@ structure_gate() {
            intake/MANIFEST intake/rack-slot-contract.md intake/module-1.0-bar.md \
            spec/SPEC.md spec/params.json lab/echo-lab.html tools/lab_smoke.mjs \
            core/CMakeLists.txt core/include/echo/engine.h core/tests/core_tests.cpp tools/check_manifest.py \
+           docs/design/echo-plan-map.html tools/plan_map_smoke.mjs \
            .gitattributes .github/workflows/ci.yml; do
     [ -e "$f" ] || { echo "verify: structure — missing $f" >&2; ok=1; }
   done
@@ -148,7 +149,8 @@ lab_smoke_gate() { need_node && node tools/lab_smoke.mjs; }
 #                a check does not catch makes that check vacuous, and red
 #   check_manifest.py  the C++ parameter table equals spec/params.json
 #   fp-contract  the header's pragma holds: a contracting build hashes equal to
-#                the reference, and the pragma-less control must DIFFER
+#                the reference and the pragma-less control DIFFERS; where the
+#                render cannot show it (GCC), by fused-op counts in echo:: code
 #   guard probe  -ffast-math / -ffinite-math-only must hit the engine's #error
 # A missing cmake or compiler is red, never a skip.
 core_gate() {
@@ -167,34 +169,42 @@ core_gate() {
   href="$("$b/echo_hash_ref")"; hfpc="$("$b/echo_hash")"; hnop="$("$b/echo_hash_nopragma")"
   if [ "$hfpc" != "$href" ]; then echo "verify: core — fp-contract: a contracting build renders differently ($hfpc vs $href): the header's pragma does not hold" >&2; ok=1
   elif [ "$hnop" = "$href" ]; then
-    # The control rendered identically. That is vacuity ONLY if this compiler,
-    # with the probe's flags, fuses at all: compile a bare a*b+c and look for a
-    # fused op. If it emits none, the planted fault cannot exist here, so the
-    # probe is not applicable (said loudly, never counted as proof). If it does
-    # fuse and the render is still unchanged, the probe is blind: red.
-    local fl cxxp asm; cxxp="$(command -v c++ || command -v g++)"
-    case "$("$cxxp" --version 2>&1)" in *clang*) fl="-ffp-contract=on" ;; *) fl="-ffp-contract=fast" ;; esac
-    case "$(uname -m)" in x86_64|amd64) fl="$fl -mfma" ;; esac
-    asm="$(printf 'double f(double a,double b,double c){return a*b+c;}\n' | "$cxxp" -O3 $fl -x c++ -S -o - - 2>&1)"
-    case "$asm" in
-      *fmadd*|*vfmadd*|*fmla*)
-        echo "verify: core — fp-contract probe is vacuous: this compiler fuses a*b+c with '$fl', yet removing the pragma changed nothing" >&2
-        # Diagnose from the binaries themselves: fused ops in each probe build.
-        local t dis
-        for t in echo_hash_ref echo_hash echo_hash_nopragma; do
-          if command -v objdump >/dev/null 2>&1; then dis="$(objdump -d "$b/$t" 2>/dev/null)"; else dis="$(otool -tv "$b/$t" 2>/dev/null)"; fi
-          echo "    $t: $(printf '%s\n' "$dis" | grep -ciE 'vfmadd|vfmsub|vfnmadd|fmadd|fmsub|fmla') fused-op instructions" >&2
-          # ...and the functions they sit in (objdump only), so a fused op left
-          # in a pragma build can be traced to engine code or to the caller.
-          if command -v objdump >/dev/null 2>&1; then
-            printf '%s\n' "$dis" | awk '/^[0-9a-f]+ <.*>:$/ {fn=$2} tolower($0) ~ /vfmadd|vfmsub|vfnmadd/ {print fn}' \
-              | sort | uniq -c | sort -rn | head -6 | sed 's/^/      /' >&2
-          fi
-        done
-        ok=1 ;;
-      *)
-        echo "fp-contract: NOT APPLICABLE here — '$fl' emits no fused op for a bare a*b+c, so contraction cannot occur on this compiler; the pragma is proven on clang (dev Mac), not here" ;;
-    esac
+    # The control rendered identically, so the render cannot settle it here
+    # (GCC on CI: 153 fused ops in process(), same bits). Prove it from the
+    # INSTRUCTIONS instead: fused ops inside echo:: functions must be 0 with the
+    # pragma and > 0 without it. Fused ops in the caller (render_hash's main)
+    # are reported, not counted: on GCC, engine code INLINED into a contracting
+    # caller can be fused (the optimize pragma travels with the function, not
+    # the inlined body), so GCC includers compile with -ffp-contract=off, which
+    # ISO -std=c++20 already defaults to (CLAUDE.md §Domain, D-022).
+    local t dis ep en cp
+    fused_in() {  # $1 binary, $2 = engine|caller: fused-op count by enclosing symbol
+      if command -v objdump >/dev/null 2>&1; then dis="$(objdump -d "$1" 2>/dev/null)"; else dis="$(otool -tv "$1" 2>/dev/null)"; fi
+      printf '%s\n' "$dis" | awk -v want="$2" '
+        /^[0-9a-f]+ <.*>:$/ || /^[_A-Za-z].*:$/ {fn=$0}
+        tolower($0) ~ /vfmadd|vfmsub|vfnmadd|fmadd|fmsub|fmla/ {
+          eng = (fn ~ /4echo/); if ((want=="engine" && eng) || (want=="caller" && !eng)) n++ }
+        END {print n+0}'
+    }
+    if ! command -v objdump >/dev/null 2>&1 && ! command -v otool >/dev/null 2>&1; then
+      echo "verify: core — fp-contract: the render cannot see contraction and no disassembler is available to look" >&2; ok=1
+    else
+      ep="$(fused_in "$b/echo_hash" engine)"; en="$(fused_in "$b/echo_hash_nopragma" engine)"; cp="$(fused_in "$b/echo_hash" caller)"
+      if [ "$ep" -gt 0 ]; then
+        echo "verify: core — fp-contract: the pragma build holds $ep fused op(s) inside echo:: functions: the pragma does not hold" >&2; ok=1
+      elif [ "$en" -gt 0 ]; then
+        echo "fp-contract: OK (instruction level) — echo:: functions hold 0 fused ops with the pragma, $en without; the render did not show it; $cp fused op(s) in the caller (GCC: includers use -ffp-contract=off)"
+      else
+        local fl cxxp asm; cxxp="$(command -v c++ || command -v g++)"
+        case "$("$cxxp" --version 2>&1)" in *clang*) fl="-ffp-contract=on" ;; *) fl="-ffp-contract=fast" ;; esac
+        case "$(uname -m)" in x86_64|amd64) fl="$fl -mfma" ;; esac
+        asm="$(printf 'double f(double a,double b,double c){return a*b+c;}\n' | "$cxxp" -O3 $fl -x c++ -S -o - - 2>&1)"
+        case "$asm" in
+          *fmadd*|*vfmadd*|*fmla*) echo "verify: core — fp-contract probe is vacuous: this compiler fuses a*b+c with '$fl', yet the pragma-less engine holds no fused op" >&2; ok=1 ;;
+          *) echo "fp-contract: NOT APPLICABLE here — '$fl' emits no fused op for a bare a*b+c; the pragma is proven on clang (dev Mac), not here" ;;
+        esac
+      fi
+    fi
   else echo "fp-contract: OK — pragma holds ($href); without it the render differs ($hnop)"; fi
   local cxx probe; cxx="$(command -v c++ || command -v g++ || command -v clang++)"
   "$cxx" -std=c++20 -fsyntax-only -I core/include core/tests/guard_probe.cpp >/dev/null 2>&1 \
@@ -212,6 +222,13 @@ core_gate() {
   return $ok
 }
 
+# Plan map smoke (human-approved by poll 2026-10-20, PR #6): the plan map has no
+# data of its own, it PARSES ROADMAP.md on load, so the way it goes wrong is the
+# parser falling behind the ROADMAP's shape and drawing a quietly wrong picture.
+# This runs the page's own MODEL against ROADMAP.md: its self-checks, all seven
+# phases found, a pure model; each detector with a planted control. Under 1 s.
+plan_map_gate() { need_node && node tools/plan_map_smoke.mjs; }
+
 fast() {
   # ---- Layer-0: seconds, not minutes. CI-blocking. -------------------------
   local ok=0
@@ -224,6 +241,7 @@ fast() {
   legal_gate        || ok=1  # D-014: legal/IP analysis stays in local/legal/
   lab_smoke_gate    || ok=1  # Phase A: the listening twin is fit to listen to
   core_gate         || ok=1  # M1: the C++ core's invariant suite, each check proven on its plants
+  plan_map_gate     || ok=1  # the plan map still reads ROADMAP.md
   return $ok
 }
 

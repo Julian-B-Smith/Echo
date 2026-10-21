@@ -105,7 +105,9 @@ headless by plain Node oracles in `tools/`. Oracle: `./verify fast|full`.
 - Stereo is mono-safe (B408): ping-pong and mid/side fold to mono without
   unintended cancellation — measured and stated.
 - No fused multiply-add in the core: the header scopes `fp-contract` off itself
-  (never a CMake INTERFACE flag, which would leak into horde), proven by a hash probe.
+  (never a CMake INTERFACE flag, which would leak into horde), proven by a hash
+  probe (clang) or by fused-op counts in `echo::` code (GCC). On GCC, includers
+  compile with `-ffp-contract=off` (the ISO default): inlined bodies lose the pragma (D-022).
 - Every detector has a must-fail planted control before it gates anything; a
   plant no check guards is itself a failure (`echo_plants` cross-checks).
   Goldens are pinned only once the C++ exists (ADR-142: parity never enshrines

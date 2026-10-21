@@ -464,3 +464,20 @@ Phase A closed without it, which the plan map (PR #6) flagged. The human ruled: 
 it as an open question (ROADMAP Q-M4). Nothing in 1.0 waits on it: the 1.0 bar's face-and-expanded-view MUST row is
 met in M3 with horde's house-style UI if Echo's own screen is not ready (ROADMAP M4).
 
+## D-022 — fp-contract: the header's pragma, and GCC's one caveat (lead's record, 2026-10-21)
+
+The core scopes fp-contract off inside `echo/engine.h` instead of a CMake INTERFACE flag that would change horde's
+own numerics (critic M7). Evidence from the probe builds (`core/tools/render_hash.cpp`, `./verify` core gate):
+- **Apple clang 16 (dev Mac):** the reference and the pragma build render bit-identically; the pragma-less control
+  differs. Fused ops: engine 0 / 0 / 118, caller 0 / 0 / 0. Clang applies the pragma per expression in the front end,
+  so it survives inlining into any caller.
+- **GCC 13, x86-64 with -mfma (CI):** the pragma build holds **0** fused ops in `echo::` functions (the pragma-less
+  control: 153 in `process` alone), so the pragma holds for the engine's own functions. But **1** fused op appeared
+  in the probe's `main`, most likely engine arithmetic inlined into a caller compiled without the pragma: GCC's
+  `optimize` pragma travels with a function, not with its body once inlined.
+- **Unexplained, recorded rather than explained away:** on GCC the pragma-less render is bit-identical to the
+  reference despite those fused ops. The gate therefore proves GCC at the instruction level. ROADMAP T-007 carries it.
+
+**Rule for consumers on GCC:** compile translation units that include `echo/engine.h` with `-ffp-contract=off`;
+ISO `-std=c++20` already defaults to it, and only `-std=gnu++20` turns it on. On clang nothing is needed.
+
