@@ -104,8 +104,8 @@ commercial delay or borrow its mode names, presets or UI text.
   HIGH findings; the human's listening sign-off (presets + max-feedback stress
   case) recorded here; readiness notice filed in horde's `integrations/echo/`.
   **Due 2026-12-11.**
-- **Plan: PROPOSED 2026-10-21, awaiting the human's poll** (T-010 – T-027 below; nothing is
-  built before the poll). Written by an M3 planning session from the 1.0 bar, the
+- **Plan: APPROVED by poll 2026-10-21 (D-028)** (T-010 – T-027 below; each item still asks its
+  own human gates). Written by an M3 planning session from the 1.0 bar, the
   rack-slot contract (§1, §2.2, §4–§8, §11–§12), the I/O gain standard, SPEC-MODULE-MACROS,
   this repo's spec, decisions, traces and `core/`, and a read of FOUNDATIONS, Scape and horde
   as they stand on 2026-10-21.
@@ -158,7 +158,7 @@ commercial delay or borrow its mode names, presets or UI text.
   | 13 CPU cost, default / worst | informal ns figures (M1) | T-020 |
   | 14 automated + morphing cost | none | T-020 |
   | 15 memory figure | 18.71 MiB at 192 kHz (M2) | T-020 (restated after M3's additions) |
-  | 16 face + expanded view | display names and laws in `params.json` | T-022 (who builds it is a poll) |
+  | 16 face + expanded view | display names and laws in `params.json` | T-022 (Echo specifies, horde draws; D-028) |
   | 17 undo of every control | none | T-015 |
   | 18 factory presets | none | T-021 |
   | 19 critic review, no open HIGH | M1, M2 critics | T-026 |
@@ -292,7 +292,7 @@ commercial delay or borrow its mode names, presets or UI text.
   `integrations/README.md` updated.
 - **Out of scope:** the FOUNDATIONS brief (M3, when the ABI is first touched).
 
-**The M3 queue, T-010 – T-027 (PROPOSED 2026-10-21; the human approves it by poll before any item is built).**
+**The M3 queue, T-010 – T-027 (approved by poll 2026-10-21, D-028).**
 
 Every item: its new checks each get a planted fault in `plants.h` that `echo_plants` must
 catch (charter §Domain); `./verify fast` green; a trace in `traces/`. An edit to `./verify`,
@@ -463,24 +463,24 @@ filings need the human's go-ahead each time.
   sine: `time.ms` in repitch, and `fb.amount`); morph-swept (the slot's blended `setParam`
   targets at control rate between two corner patches). Each row as a ratio to the
   calibration loop and as % of an M3 core and of min-spec (× 1.5, labelled an assumption),
-  against the approved 2 % / 4 % (Q-A3). Memory per instance at 44.1–192 kHz, worst case,
+  against the approved 2 % / 4 % (Q-A3, closed by D-028). Memory per instance at 44.1–192 kHz, worst case,
   all allocated at prepare, restated after M3's additions.
 - **Out of scope:** optimisation, unless a row is over budget (then a new item; ADR-236:
   over budget does not cut a module).
 
 ### T-021 — M3: The factory bank: an init plus a small set
-- **Status:** open (the bank's size is a poll; needs T-017).
+- **Status:** open (init + 7, D-028; needs T-017).
 - **Scope:** `presets/echo-factory.json`.
-- **Acceptance criteria:** an init (the manifest defaults, no macros) and the size the human
-  rules, chosen to show the range: a slap, a synced dotted ping-pong, a dark dub loop near
+- **Acceptance criteria:** an init (the manifest defaults, no macros) and seven presets (D-028),
+  chosen to show the range: a slap, a synced dotted ping-pong, a dark dub loop near
   unity, a modulated chorus-like line, a mid/side wide, a tape-repitch throw, a past-unity
   edge patch. Each passes T-017's validator and T-015's size check and carries up to 8
   labelled macros. The human picks the final set by listening (T-023).
 - **Out of scope:** horde's presets lab and its library size (B395/B409).
 
 ### T-022 — M3: The face and expanded view (bar row 16)
-- **Status:** open (who builds it is a poll).
-- **Scope (proposed):** `docs/face.md`: which keys sit on the face and which in the
+- **Status:** open (Echo specifies, horde's workshop draws, D-028).
+- **Scope:** `docs/face.md`: which keys sit on the face and which in the
   expanded view, their grouping and order, a keyboard order; the ADR-203 check that every
   key has a display name and a normalised law that maps [0, 1] onto its range and back
   (plant: a key with no law). horde's FX screens workshop draws the house-style UI from it
@@ -538,20 +538,14 @@ filings need the human's go-ahead each time.
 
 ## Open questions (blocking — ask the human)
 
-- **Q-A3 — Per-module CPU budget** for 1.0 is the human's to set (1.0 bar row 51);
-  the appendix's ~2 % default / 4 % worst of a min-spec core is the working target.
-  **Proposed reading (M3 plan, 2026-10-21):** the bar's appendix records it as approved
-  by the human on 2026-10-04 ("Budget approved"), with ADR-236's 4 % ceiling for the
-  automated and morphing rows, so it closes on that reading unless the human sets an
-  Echo-specific figure.
-- **Q-M3P — Approve the M3 plan** (T-010 – T-027 and the batches).
-- **Q-M3B — The factory bank's size** (T-021): the bar asks for an init plus "a small set";
-  horde's presets lab has not set a size.
-- **Q-M3F — Who builds the face and expanded view** (T-022): Echo supplies a face spec and
-  horde's workshop draws it (proposed), or Echo builds a house-style face itself.
+- (none open; the M3 plan's questions closed 2026-10-21, D-028)
 
 ## Closed since
 
+- **Q-M3P — the M3 plan:** approved as written, by poll 2026-10-21 (D-028).
+- **Q-M3B — the factory bank:** an init plus 7 (D-028; T-021).
+- **Q-M3F — the face:** Echo specifies it, horde's workshop draws it (D-028; T-022).
+- **Q-A3 — the CPU budget:** closed on the bar's approved 2 % / 4 % (D-028; T-020).
 - **Q-M4 — M4's gate:** set at M2 close, 2026-10-21, by poll (D-027; ROADMAP M4).
 
 ## Closed in Phase A
