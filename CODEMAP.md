@@ -16,11 +16,11 @@ Where things are. Update in the same change that moves them.
 | `spec/params.json` | The parameter manifest (B439/RS-2.1), one key per line; the lab must match it (smoke-checked) |
 | `lab/echo-lab.html` | Single-file listening twin: DSP + ANALYSIS sections (sliced by the smoke, loaded into the AudioWorklet) then the UI |
 | `tools/lab_smoke.mjs` | The lab smoke, in `./verify fast`: determinism, silence, finite, manifest, invariants — each with a planted control |
-| `core/include/echo/engine.h` | The M1 engine, header-only C++20 behind a local ABI shim (Bulwark's shape): lines, reads, time, routing, feedback, filters, mix, gains, tail/rest/load, non-finite guards |
+| `core/include/echo/engine.h` | The engine, header-only C++20 behind a local ABI shim (Bulwark's shape). M1: lines, reads, time, routing, feedback, filters, mix, gains, tail/rest/load, non-finite guards. M2: `stepHead` (moves, §3.5-3.8), the tape law (`tapeStep`/`tapeP`/`tapeSolve`, a quadratic 32-sample history), the exponential law, `backstop` (the speed invariant), `modStep`/`modTargets`/`reseed` (§7) |
 | `core/include/echo/params.h` | The 29-key table (handles = indices) and horde's division list; mirrors `spec/params.json` |
 | `core/include/echo/plants.h` | The planted faults: constexpr false in production, switchable in `echo_plants` only |
 | `core/include/echo/ftz.h` | FTZ/DAZ RAII scope (RS-7.8), restores the host's control word |
-| `core/tests/core_tests.cpp` | The invariant suite (39 checks); one source built as `echo_tests` (clean) and `echo_plants` (each check under its faults; every plant must be guarded) |
+| `core/tests/core_tests.cpp` | The invariant suite (52 checks, M1 + M2); one source built as `echo_tests` (clean) and `echo_plants` (each check under its faults; every plant must be guarded). `--click-report` prints the click readings the D-023 threshold rests on |
 | `core/tests/alloc_probe.h` | Allocation probe (operator new + Darwin malloc_logger); also measures the prepare() memory figure; stands down under ASan |
 | `core/tools/manifest.cpp` | `echo_manifest`: prints the C++ table as JSON for `tools/check_manifest.py` |
 | `core/tools/render_hash.cpp` | The fp-contract probe: one fixed render, hashed; built as `echo_hash_ref` / `echo_hash` / `echo_hash_nopragma` |

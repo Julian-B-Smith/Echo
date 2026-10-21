@@ -73,6 +73,31 @@ ECHO_PLANT(noMinFloor)           // the 1 ms floor on the resolved time is remov
 ECHO_PLANT(wakeLeftOnly)         // only the left input wakes a resting instance
 ECHO_PLANT(noOutputGuard)        // a non-finite output sample is passed through
 ECHO_PLANT(tailFormulaShort)     // the tail's pass count n is 7x too small (a log-base slip)
+// ---- M2 ----
+ECHO_PLANT(modSlewOff)           // the modulation offset is not slew-limited (SPEC §7)
+ECHO_PLANT(driftOvershoot)       // the drift curve is not clamped to [-1, 1] (Catmull-Rom reaches 1.25)
+ECHO_PLANT(unseededSeed)         // a mod.seed change restarts the streams from fresh points (a step)
+ECHO_PLANT(shapeInstant)         // a mod.shape switch flips with no 250 ms blend
+ECHO_PLANT(modDepthUnlimited)    // the depth is not limited by the curve's slope (SPEC §7)
+ECHO_PLANT(noLawCap)             // the repitch laws' 12 st cap is removed
+ECHO_PLANT(noFallback)           // a repitch move longer than 3 s at the cap glides instead of crossfading
+ECHO_PLANT(tapeNoHistory)        // the tape law reads D = 1/v: no history, so no recorded-speed memory
+ECHO_PLANT(expLawLinear)         // the exponential law is a fixed-tau one-pole on D (D-006's rejected law)
+ECHO_PLANT(tempoModeIgnored)     // every tempo move crossfades, whatever time.tempoMode
+ECHO_PLANT(followNoCap)          // tempo "follow" follows any move, past its 50-cent cap
+ECHO_PLANT(integerRead)          // the read position is rounded to a whole sample (stepped D)
+ECHO_PLANT(blockSteppedD)        // the read position is held for a whole process() call, then steps
+// ---- M2, after the critic ----
+ECHO_PLANT(tailClockIgnoresMotion) // the tail clock runs while a head still glides or fades (D-025)
+ECHO_PLANT(seedResendRestarts)   // re-sending an unchanged mod.seed reseeds (a frozen drift)
+ECHO_PLANT(loadKeepsModState)    // a load keeps the old modulation phase and streams (D-026)
+ECHO_PLANT(tempoStealsKeyMove)   // a tempo ramp turns a key move in flight into a tempo move
+ECHO_PLANT(followNoTrackInFade)  // a follow crossfade's destination does not track the grid
+ECHO_PLANT(followKeepsResidual)  // follow keeps a residual offset from the grid forever
+ECHO_PLANT(modNoFloorBound)      // a slewing offset may read under the 3-sample floor
+ECHO_PLANT(wakeOffsetFromZero)   // after a wake the offset slews in from 0
+ECHO_PLANT(tapeLinearHistory)    // the tape history is linearly interpolated (the pre-critic form)
+ECHO_PLANT(glideFixedRate)       // the repitch laws' time constant is counted in 48 kHz samples
 }  // namespace echo::plant
 
 #undef ECHO_PLANT

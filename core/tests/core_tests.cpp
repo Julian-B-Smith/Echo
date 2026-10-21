@@ -1,4 +1,4 @@
-// core_tests.cpp — Echo's M1 invariant suite (ROADMAP M1; SPEC revision 2).
+// core_tests.cpp — Echo's invariant suite, M1 + M2 (ROADMAP M1, M2; SPEC revision 2).
 //
 // ONE SOURCE, TWO BINARIES (core/CMakeLists.txt):
 //   echo_tests   built WITHOUT ECHO_PLANTS: every plant is constexpr false, so
@@ -383,16 +383,18 @@ bool blockIndependence(Detail& d) {
     return std::vector<Event>{set(2400, "route.mode", 1), set(7200, "filt.out.on", 1), set(9000, "filt.out.lpHz", 3000),
                               set(12000, "time.ms", 250), set(20000, "fb.amount", 80), set(30000, "mix", 60),
                               set(40000, "time.change", 2), set(40001, "time.ms", 180), set(50000, "route.mode", 2),
-                              set(52000, "filt.loop.hpHz", 400), set(60000, "io.outGain", -6), set(61000, "io.inGain", 3)};
+                              set(52000, "filt.loop.hpHz", 400), set(60000, "io.outGain", -6), set(61000, "io.inGain", 3),
+                              set(64000, "mod.shape", 1), set(66000, "mod.seed", 42), set(68000, "time.law", 1), set(68001, "time.ms", 300)};
   };
-  auto ref = mk({{"time.sync", 0}, {"time.ms", 120}, {"fb.amount", 40}});
+  // Modulation on (sine on line 0, spread to line 1) and a drift switch mid-render: M2's state must be block-size independent too.
+  auto ref = mk({{"time.sync", 0}, {"time.ms", 120}, {"fb.amount", 40}, {"mod.depthMs", 3}, {"mod.rateHz", 1.7}, {"mod.spread", 60}});
   const auto o0 = run(*ref, inL, inR, evs(), 120.0, [](long) { return 4096; });
   std::uint32_t seed = 5;
   const std::vector<std::function<int(long)>> pats = {
       [](long) { return 1; }, [](long) { return 7; }, [](long) { return 64; }, [](long) { return 333; },
       [&seed](long) { seed = seed * 1664525u + 1013904223u; return 1 + static_cast<int>(seed % 4096u); }};
   for (std::size_t p = 0; p < pats.size(); ++p) {
-    auto e = mk({{"time.sync", 0}, {"time.ms", 120}, {"fb.amount", 40}});
+    auto e = mk({{"time.sync", 0}, {"time.ms", 120}, {"fb.amount", 40}, {"mod.depthMs", 3}, {"mod.rateHz", 1.7}, {"mod.spread", 60}});
     const auto o = run(*e, inL, inR, evs(), 120.0, pats[p]);
     for (long i = 0; i < n; ++i)
       REQUIRE(o.L[i] == o0.L[i] && o.R[i] == o0.R[i], "block pattern %zu differs at sample %ld", p, i);
@@ -407,10 +409,10 @@ bool determinism(Detail& d) {
   const long n = S(1);
   Vec in(n);
   for (auto& v : in) v = 0.4 * noise();
-  auto solo = mk({{"fb.amount", 60}, {"time.sync", 0}, {"time.ms", 90}});
+  auto solo = mk({{"fb.amount", 60}, {"time.sync", 0}, {"time.ms", 90}, {"mod.depthMs", 4}, {"mod.shape", 1}});
   const auto os = run(*solo, in, in);
-  auto a = mk({{"fb.amount", 60}, {"time.sync", 0}, {"time.ms", 90}});
-  auto b = mk({{"fb.amount", 60}, {"time.sync", 0}, {"time.ms", 90}});
+  auto a = mk({{"fb.amount", 60}, {"time.sync", 0}, {"time.ms", 90}, {"mod.depthMs", 4}, {"mod.shape", 1}});
+  auto b = mk({{"fb.amount", 60}, {"time.sync", 0}, {"time.ms", 90}, {"mod.depthMs", 4}, {"mod.shape", 1}});
   Out oa{zeros(n), zeros(n)}, ob{zeros(n), zeros(n)};
   for (long p = 0; p < n; p += 256) {
     const int len = static_cast<int>(std::min<long>(256, n - p));
@@ -632,6 +634,9 @@ bool noAlloc(Detail& d) {
   e->setParam("filt.out.on", 1);
   e->setParam("time.sync", 0);
   e->setParam("time.ms", 250);
+  e->setParam("mod.depthMs", 8);
+  e->setParam("mod.shape", 1);
+  e->setParam("time.law", 1);
   for (long p = 0; p < n; p += 480) e->process(in.data() + p, in.data() + p, out.data() + p, out.data() + p, 480, 120);
   e->loadState(patch);
   e->process(in.data(), in.data(), out.data(), out.data(), 480, 100);
@@ -875,8 +880,8 @@ bool loadLeavesDevice(Detail& d) {
 // Sleep and wake (RS-7.6, A16): an instance horde stopped calling equals its
 // never-slept twin from the wake on, parameters changed while asleep landed.
 bool sleepTwin(Detail& d) {
-  auto a = mk({{"mix", 50}, {"fb.amount", 50}, {"time.sync", 0}, {"time.ms", 120}});
-  auto b = mk({{"mix", 50}, {"fb.amount", 50}, {"time.sync", 0}, {"time.ms", 120}});
+  auto a = mk({{"mix", 50}, {"fb.amount", 50}, {"time.sync", 0}, {"time.ms", 120}, {"mod.depthMs", 6}, {"mod.rateHz", 0.9}});
+  auto b = mk({{"mix", 50}, {"fb.amount", 50}, {"time.sync", 0}, {"time.ms", 120}, {"mod.depthMs", 6}, {"mod.rateHz", 0.9}});
   Vec burst = zeros(S(4));
   for (long i = 0; i < S(0.2); ++i) burst[i] = 0.5 * std::sin(2 * kPi * 330 * i / kSr);
   run(*a, burst, burst);  // real audio runs into rest in both
@@ -914,6 +919,578 @@ bool paramValidation(Detail& d) {
   return true;
 }
 
+// ---- M2: moving time and modulation ---------------------------------------------
+
+struct SpeedStatsView { double sMin, sMax; unsigned long long clamps, floors; };
+
+// Process one sample at a time, calling `each(i, e)` after each, with events
+// and a per-sample tempo (block = 1, so the tempo is exactly bpmAt(i)).
+Out runEach(Echo& e, const Vec& inL, const Vec& inR, std::vector<Event> ev, const std::function<double(long)>& bpmAt,
+            const std::function<void(long, Echo&)>& each) {
+  const long n = static_cast<long>(inL.size());
+  Out o{zeros(n), zeros(n)};
+  std::stable_sort(ev.begin(), ev.end(), [](const Event& a, const Event& b) { return a.at < b.at; });
+  std::size_t ei = 0;
+  for (long i = 0; i < n; ++i) {
+    while (ei < ev.size() && ev[ei].at <= i) ev[ei++].fn(e);
+    e.process(&inL[i], &inR[i], &o.L[i], &o.R[i], 1, bpmAt(i));
+    each(i, e);
+  }
+  return o;
+}
+double cents(double ratio) { return 1200.0 * std::log2(ratio); }
+Vec clickProbeUntil(long n, long until);  // the click probe (below), silent from `until` on
+
+// The tape law (SPEC §3.6) against an INDEPENDENT full-rate model written here
+// from the spec: tape speed v lags 1/T with time constant glide; the write
+// position is integrated every sample; the read head sits one tape unit behind
+// the write head, so the delay is how long ago the tape now under it was
+// written; |pitch| <= 12 st. The engine keeps the history at control rate (one
+// point per 32 samples); the two must agree within 1e-3 sample.
+bool tapeLaw(Detail& d) {
+  struct Move { double from, to; };
+  for (double glide : {0.01, 0.03, 0.3})
+    for (const Move mv : {Move{500, 250}, Move{250, 500}, Move{2, 1}}) {
+      auto e = mk({{"time.sync", 0}, {"time.ms", mv.from}, {"time.change", 0}, {"time.law", 0}, {"time.glide", glide}, {"fb.amount", 0},
+                   {"filt.loop.on", 0}});
+      const long n = S(2.5), at = S(1.0);
+      const Vec in(n, 0.1);
+      const double D0 = mv.from / 1000 * kSr, T = mv.to / 1000 * kSr, tau = glide * kSr, a = 1 - std::exp(-1 / tau);
+      std::vector<double> P;  // the reference write position, EVERY sample
+      P.reserve(static_cast<std::size_t>(n));
+      double v = 1 / D0, Dref = D0, c = 0, worst = 0, worstCents = 0, prevE = D0, prevR = D0;
+      long wAt = 0;
+      runEach(*e, in, in, {set(at, "time.ms", mv.to)}, [](long) { return 120.0; }, [&](long i, Echo& x) {
+        if (i < at) { P.push_back(static_cast<double>(i) / D0); return; }  // a steady tape at v = 1/D0
+        v += (1 / T - v) * a;
+        P.push_back(P.back() + v);
+        const double target = P.back() - 1.0;
+        if (i == at) c = static_cast<double>(i) - D0;
+        long j = static_cast<long>(std::floor(c));
+        while (j + 1 <= i && P[static_cast<std::size_t>(j + 1)] <= target) ++j;
+        const double pj = P[static_cast<std::size_t>(j)], pk = j + 1 <= i ? P[static_cast<std::size_t>(j + 1)] : pj;
+        const double cs = pk > pj ? j + (target - pj) / (pk - pj) : static_cast<double>(j);
+        const double V = std::clamp((static_cast<double>(i) - std::max(cs, c)) - Dref, -1.0, 0.5);
+        Dref += V;
+        c = static_cast<double>(i) - Dref;
+        const double E = x.headDelay(0);
+        const double err = std::fabs(E - Dref);
+        if (err > worst) { worst = err; wAt = i; }
+        if (i > at) worstCents = std::max(worstCents, std::fabs(cents((1 - (E - prevE)) / (1 - (Dref - prevR)))));
+        prevE = E;
+        prevR = Dref;
+      });
+      // The engine keeps the history one point per 32 samples, QUADRATIC
+      // between them (SPEC §11): measured <= 0.008 sample and <= 2 cents of
+      // read speed at the fastest glide (10 ms), 0.01 cent at 0.3 s. Linear
+      // interpolation erred by ~50 cents at 10 ms (critic M2-M5).
+      REQUIRE(worst < 0.01 && worstCents < 2.5, "glide %.2f, %g -> %g ms: off the full-rate model by %.4g samples (at %ld), %.2f cents of speed", glide,
+              mv.from, mv.to, worst, wAt, worstCents);
+    }
+  return true;
+}
+
+// The exponential law (SPEC §3.6): a one-pole on ln D with time constant
+// time.glide, D_{n+1} = D_n + D_n ln(T/D_n)/tau, uncapped for a small move; a
+// big one runs at the cap (+12 st: read speed exactly 2) and never past it.
+bool expLaw(Detail& d) {
+  {
+    auto e = mk({{"time.sync", 0}, {"time.ms", 500}, {"time.law", 1}, {"time.glide", 0.3}, {"fb.amount", 0}, {"filt.loop.on", 0}});
+    const long n = S(2.0), at = S(0.5);
+    const Vec in(n, 0.1);
+    const double T = 0.45 * kSr, tau = 0.3 * kSr;
+    double D = 0.5 * kSr, worst = 0;
+    runEach(*e, in, in, {set(at, "time.ms", 450)}, [](long) { return 120.0; }, [&](long i, Echo& x) {
+      if (i < at) return;
+      D += D * (std::log(T) - std::log(D)) / tau;
+      if (std::fabs(T - D) < 1e-9) D = T;
+      worst = std::max(worst, std::fabs(x.headDelay(0) - D));
+    });
+    REQUIRE(worst < 1e-6, "500 -> 450 ms: the exponential law departs from its recurrence by %.3g samples", worst);
+  }
+  {
+    auto e = mk({{"time.sync", 0}, {"time.ms", 500}, {"time.law", 1}, {"time.glide", 0.3}, {"fb.amount", 0}, {"filt.loop.on", 0}});
+    const long n = S(2.0), at = S(0.5);
+    const Vec in(n, 0.1);
+    e->resetStats();
+    run(*e, in, in, {set(at, "time.ms", 50)});
+    const auto st = e->speedStats(0);
+    REQUIRE(std::fabs(st.sMax - 2.0) < 1e-9 && st.clamps == 0, "500 -> 50 ms must run at the cap (speed 2): max speed %.6f, %llu backstop hits",
+            st.sMax, static_cast<unsigned long long>(st.clamps));
+  }
+  return true;
+}
+
+// Repitch accuracy in cents (ROADMAP M2 gate): during a glide the output's
+// pitch, measured from its zero crossings over 5 ms windows, equals the read
+// speed the head's motion implies, s = 1 - dD/dt, within 1 cent.
+bool repitchCents(Detail& d) {
+  for (int law : {0, 1})
+  for (double glide : {0.05, 1.0}) {
+    auto e = mk({{"time.sync", 0}, {"time.ms", 500}, {"time.law", static_cast<double>(law)}, {"time.glide", glide}, {"fb.amount", 0},
+                 {"filt.loop.on", 0}, {"mix", 100}});
+    const long n = S(3.0), at = S(0.8);
+    const Vec in = sine(n, kProbeHz, 0.5);
+    Vec D(static_cast<std::size_t>(n));
+    const auto o = runEach(*e, in, in, {set(at, "time.ms", 400)}, [](long) { return 120.0; }, [&](long i, Echo& x) { D[static_cast<std::size_t>(i)] = x.headDelay(0); });
+    const long W = S(0.005);
+    double worst = 0, wAt = 0;
+    // from the move's own start (the onset, the cap, the settling), not after it
+    for (long a = at + S(0.0005); a + W < at + S(1.6); a += W) {
+      // zero crossings (upward), linearly interpolated
+      std::vector<double> zc;
+      for (long i = a; i < a + W; ++i)
+        if (o.L[i - 1] < 0 && o.L[i] >= 0) zc.push_back(i - 1 + o.L[i - 1] / (o.L[i - 1] - o.L[i]));
+      if (zc.size() < 2) continue;
+      const double fMeas = (zc.size() - 1) / (zc.back() - zc.front()) * kSr;
+      const long i0 = static_cast<long>(zc.front()), i1 = static_cast<long>(zc.back());
+      const double sMean = 1.0 - (D[static_cast<std::size_t>(i1)] - D[static_cast<std::size_t>(i0)]) / (i1 - i0);
+      const double err = std::fabs(cents(fMeas / (kProbeHz * sMean)));
+      if (err > worst) { worst = err; wAt = a / kSr; }
+    }
+    REQUIRE(worst < 1.0, "law %s, glide %.2f: the output's pitch departs from 1 - dD/dt by %.2f cents at %.2f s", law ? "exponential" : "tape", glide, worst, wAt);
+  }
+  return true;
+}
+
+// The hard read-speed invariant (D-006), over laws x moves x modulation:
+// s in [0.25, 2.25] by construction (so the [0.25, 4] backstop never acts),
+// never reversed, never past the line; a move longer than 3 s at the cap
+// crossfades (the fallback) instead of gliding.
+bool speedInvariant(Detail& d) {
+  struct Move { double from, to; bool fallback; };
+  const Move moves[] = {{500, 250, false}, {250, 500, false}, {12000, 10, true}, {10, 12000, true}, {300, 300.5, false}};
+  struct Mod { double depth, rate, shape, spread; };
+  const Mod mods[] = {{0, 0.6, 0, 0}, {20, 10, 0, 0}, {20, 10, 1, 100}};
+  for (int law : {0, 1, 2, 3})  // repitch tape, repitch exponential, crossfade, jump
+    for (const Move& mv : moves)
+      for (const Mod& md : mods) {
+        if (law >= 2 && mv.fallback) continue;  // a crossfade has no fallback to show
+        auto e = mk({{"time.sync", 0}, {"time.ms", mv.from}, {"time.law", law == 1 ? 1.0 : 0.0}, {"time.change", law >= 2 ? law - 1.0 : 0.0},
+                     {"time.glide", 0.3}, {"fb.amount", 0},
+                     {"mod.depthMs", md.depth}, {"mod.rateHz", md.rate}, {"mod.shape", md.shape}, {"mod.spread", md.spread}});
+        const long n = S(mv.from > 1000 || mv.to > 1000 ? 13.5 : 3.0), at = n - S(1.4);
+        const Vec in(n, 0.1);
+        e->resetStats();
+        run(*e, in, in, {set(at, "time.ms", mv.to)});
+        for (int k = 0; k < 2; ++k) {
+          const auto st = e->speedStats(k);
+          REQUIRE(st.sMin >= 0.25 - 1e-12 && st.sMax <= 2.25 + 1e-9 && st.reverse == 0 && st.clamps == 0 && st.overruns == 0 && st.floors == 0,
+                  "law %d, %g -> %g ms, mod %g ms @ %g Hz shape %g: speed [%.4f, %.4f], %llu reverse, %llu backstop, %llu overruns", law,
+                  mv.from, mv.to, md.depth, md.rate, md.shape, st.sMin, st.sMax, static_cast<unsigned long long>(st.reverse),
+                  static_cast<unsigned long long>(st.clamps), static_cast<unsigned long long>(st.overruns));
+          REQUIRE((st.fallbacks > 0) == mv.fallback, "law %d, %g -> %g ms: fallback %s", law, mv.from, mv.to, mv.fallback ? "expected, not taken" : "taken, not expected");
+        }
+      }
+  return true;
+}
+
+// The modulation (SPEC §7): a sine of depth A moves the read by exactly +-A
+// (after the 250 ms ramp), and the output IS the input read at that moving
+// position; the depth is limited by the curve's slope (10 Hz caps a sine at
+// 0.25 / (2 pi f / fs) samples); drift stays inside its depth; the offset never
+// moves more than 0.25 sample a sample; mod.spread puts the right line's sine
+// 90 degrees later.
+bool modulation(Detail& d) {
+  {  // depth and read
+    auto e = mk({{"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}, {"mod.depthMs", 5},
+                 {"mod.rateHz", 2}, {"mod.spread", 100}});
+    const long n = S(2.0);
+    const Vec in = sine(n, 100, 0.5);
+    double lo = 1e9, hi = -1e9, worst = 0, maxStep = 0, prev = 0, r1AtPeak = 0;
+    runEach(*e, in, in, {}, [](long) { return 120.0; }, [&](long i, Echo& x) {
+      const double m = x.modOffset(0);
+      if (i > 0) maxStep = std::max(maxStep, std::fabs(m - prev));
+      prev = m;
+      if (i < S(0.6)) return;
+      if (m > hi) { hi = m; r1AtPeak = x.modOffset(1); }
+      lo = std::min(lo, m);
+    });
+    REQUIRE(std::fabs(hi - 240) < 1.2 && std::fabs(lo + 240) < 1.2, "a 5 ms sine moves the read [%.2f, %.2f] samples, expected +-240", lo, hi);
+    REQUIRE(std::fabs(r1AtPeak) < 3.0, "spread 100 %%: the right line's offset at the left's peak is %.2f, expected ~0 (90 degrees later)", r1AtPeak);
+    REQUIRE(maxStep <= 0.25 + 1e-12, "the offset moved %.4f samples in one sample (slew limit 0.25)", maxStep);
+    // the output is the input read at the moving position (Hermite at 100 Hz: < 1e-4)
+    auto g = mk({{"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}, {"mod.depthMs", 5}, {"mod.rateHz", 2}});
+    Vec pos(static_cast<std::size_t>(n));
+    const auto og = runEach(*g, in, in, {}, [](long) { return 120.0; }, [&](long i, Echo& x) { pos[static_cast<std::size_t>(i)] = x.readPosition(0); });
+    for (long i = S(0.6); i < n; ++i) {
+      const double want = 0.5 * std::sin(2 * kPi * 100 * (i - pos[static_cast<std::size_t>(i)]) / kSr);
+      worst = std::max(worst, std::fabs(og.L[i] - want));
+    }
+    REQUIRE(worst < 1e-4, "the output departs from the input read at the reported position by %.3g", worst);
+  }
+  {  // the slope limit: 20 ms at 10 Hz is capped at 0.25 / (2 pi 10 / fs)
+    auto e = mk({{"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 0}, {"mod.depthMs", 20}, {"mod.rateHz", 10}});
+    const long n = S(1.5);
+    const Vec in(n, 0.1);
+    double hi = 0;
+    runEach(*e, in, in, {}, [](long) { return 120.0; }, [&](long i, Echo& x) { if (i > S(0.6)) hi = std::max(hi, std::fabs(x.modOffset(0))); });
+    const double A = 0.25 / (2 * kPi * 10 / kSr);
+    REQUIRE(std::fabs(hi - A) < 0.01 * A, "a 20 ms sine at 10 Hz reaches %.1f samples, the slope limit is %.1f", hi, A);
+  }
+  {  // drift: inside its (slope-limited) depth, every sample
+    auto e = mk({{"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 0}, {"mod.depthMs", 20}, {"mod.rateHz", 10}, {"mod.shape", 1}, {"mod.seed", 7}});
+    const long n = S(3.0);
+    const Vec in(n, 0.1);
+    double hi = 0;
+    runEach(*e, in, in, {}, [](long) { return 120.0; }, [&](long i, Echo& x) { if (i > S(0.3)) hi = std::max(hi, std::fabs(x.modOffset(0))); });
+    const double A = 0.25 / (3.5 * 10 / kSr);
+    REQUIRE(hi <= A + 1e-9, "drift reached %.2f samples, its depth is %.2f (the Catmull-Rom overshoot must be clamped)", hi, A);
+  }
+  {  // a lifted depth limit (10 ms -> 100 ms) is slewed in, never stepped
+    auto e = mk({{"time.sync", 0}, {"time.ms", 10}, {"time.change", 1}, {"fb.amount", 0}, {"mod.depthMs", 20}, {"mod.rateHz", 0.05}, {"mod.shape", 1}});
+    const long n = S(2.0);
+    const Vec in(n, 0.1);
+    double maxStep = 0, prev = 0;
+    runEach(*e, in, in, {set(S(0.6), "time.ms", 100)}, [](long) { return 120.0; }, [&](long i, Echo& x) {
+      if (i > 0) maxStep = std::max(maxStep, std::fabs(x.modOffset(0) - prev));
+      prev = x.modOffset(0);
+    });
+    REQUIRE(maxStep <= 0.25 + 1e-12, "a lifted depth limit moved the offset %.3f samples in one sample", maxStep);
+  }
+  return true;
+}
+
+// Seeded modulation (SPEC §7, §9): the drift comes from mod.seed alone (two
+// instances agree; another seed differs; reset reproduces), and a seed change
+// or a shape switch starts from the value being output, so the offset never
+// jumps (its step stays at the curve's own tiny slope, far under the 0.25 slew).
+bool modSeeded(Detail& d) {
+  // Depth 5 ms (240 samples): a 250 ms blend between the sine and the drift
+  // moves the offset at most 2*240/12000 = 0.04 sample a sample; a switch with
+  // no blend saturates the 0.25 slew instead.
+  auto render = [](double seed, std::vector<Event> ev, double shape = 1) {
+    auto e = mk({{"time.sync", 0}, {"time.ms", 200}, {"fb.amount", 0}, {"mod.depthMs", 5}, {"mod.rateHz", 0.05}, {"mod.shape", shape}, {"mod.seed", seed}});
+    const long n = S(2.0);
+    const Vec in(n, 0.1);
+    Vec m(static_cast<std::size_t>(n));
+    runEach(*e, in, in, std::move(ev), [](long) { return 120.0; }, [&](long i, Echo& x) { m[static_cast<std::size_t>(i)] = x.modOffset(0); });
+    return m;
+  };
+  const Vec a = render(7, {}), b = render(7, {}), c = render(8, {});
+  REQUIRE(a == b, "the same seed gave different drift");
+  REQUIRE(a != c, "a different seed gave the same drift");
+  auto stepAfter = [](const Vec& m, long at) {
+    double s = 0;
+    for (long i = at; i < at + S(0.3); ++i) s = std::max(s, std::fabs(m[static_cast<std::size_t>(i)] - m[static_cast<std::size_t>(i - 1)]));
+    return s;
+  };
+  const Vec sc = render(7, {set(S(1.0), "mod.seed", 99)});
+  REQUIRE(stepAfter(sc, S(1.0)) < 0.02, "a seed change moved the offset %.3f samples in one sample (a step, slewing)", stepAfter(sc, S(1.0)));
+  const Vec sh = render(7, {set(S(1.0), "mod.shape", 0)});
+  REQUIRE(stepAfter(sh, S(1.0)) < 0.1, "a shape switch moved the offset %.3f samples in one sample (no blend)", stepAfter(sh, S(1.0)));
+  return true;
+}
+
+// Tempo moves (SPEC §3.8): on a 1.25 %/s ramp, "follow" tracks the grid time
+// exactly with no crossfade, "glide" moves by the repitch law with no
+// crossfade, "crossfade" crossfades and never bends the pitch; a 2x tempo step
+// crossfades in "follow" (past its 50-cent cap). A KEY move under "follow"
+// still obeys time.change (a repitch glide here).
+bool tempoModes(Detail& d) {
+  const long n = S(3.0), r0 = S(0.5), r1 = S(1.5);
+  auto ramp = [=](long i) { return i < r0 ? 120.0 : i < r1 ? 120.0 + 1.5 * (i - r0) / static_cast<double>(r1 - r0) : 121.5; };
+  const Vec in(n, 0.1);
+  for (int mode : {0, 1, 2}) {  // crossfade, glide, follow
+    auto e = mk({{"time.sync", 1}, {"time.div", 9}, {"time.tempoMode", static_cast<double>(mode)}, {"fb.amount", 0}, {"time.glide", 0.05}});
+    double worstFollow = 0;
+    e->resetStats();
+    runEach(*e, in, in, {}, ramp, [&](long i, Echo& x) {
+      if (mode == 2 && i > r0 && i < r1) worstFollow = std::max(worstFollow, std::fabs(x.headDelay(0) - x.resolvedTimes()[0] * kSr));
+    });
+    const auto st = e->speedStats(0);
+    const auto fades = e->fadeCount(0);
+    if (mode == 0) REQUIRE(fades > 10 && std::fabs(st.sMax - 1) < 1e-12 && std::fabs(st.sMin - 1) < 1e-12,
+                           "crossfade: %llu fades, speed [%.6f, %.6f] (must crossfade and never bend)", static_cast<unsigned long long>(fades), st.sMin, st.sMax);
+    if (mode == 1) REQUIRE(fades == 0 && st.sMax > 1.0, "glide: %llu fades, max speed %.6f (must glide by the law, no crossfade)", static_cast<unsigned long long>(fades), st.sMax);
+    if (mode == 2) REQUIRE(fades == 0 && worstFollow < 1e-6, "follow: %llu fades, off the grid time by %.3g samples", static_cast<unsigned long long>(fades), worstFollow);
+  }
+  {  // follow: a 2x step crossfades; a key move glides
+    auto e = mk({{"time.sync", 1}, {"time.div", 9}, {"time.tempoMode", 2}, {"fb.amount", 0}});
+    e->resetStats();
+    run(*e, in, in, {}, 120.0, [](long) { return 480; });
+    run(*e, in, in, {}, 240.0, [](long) { return 480; });
+    // The step arrives as a one-block ramp (the tempo is interpolated per
+    // sample, §3.3), so the queue may fade twice (to an early target, then the
+    // latest): what matters is that it crossfades, never follows past the cap.
+    const auto f1 = e->fadeCount(0);
+    REQUIRE(f1 >= 1 && e->speedStats(0).clamps == 0 && e->speedStats(0).sMax <= std::pow(2.0, 50.0 / 1200) + 1e-9 && e->headDelay(0) == 12000.0,
+            "follow: a 2x tempo step must crossfade (%llu fades, %llu backstop hits, max speed %.4f, head %.1f)",
+            static_cast<unsigned long long>(f1), static_cast<unsigned long long>(e->speedStats(0).clamps), e->speedStats(0).sMax, e->headDelay(0));
+    run(*e, in, in, {set(S(0.5), "time.div", 12)}, 240.0, [](long) { return 480; });
+    REQUIRE(e->fadeCount(0) == f1, "follow: a key move must obey time.change (repitch), not crossfade");
+  }
+  return true;
+}
+
+// The tail clock holds while a head moves (D-025, critic M2-H1): a shortening
+// glide still sounds repeats from the old, longer time, and the declared tail
+// is built from the target. At fb 0 a 2900 -> 300 ms move is never cut.
+bool tailDuringGlide(Detail& d) {
+  for (int law : {0, 1})
+    for (double glide : {0.3, 2.0}) {
+      auto e = mk({{"time.sync", 0}, {"time.ms", 2900}, {"time.law", static_cast<double>(law)}, {"time.glide", glide}, {"fb.amount", 0}, {"mix", 100}});
+      const long n = S(10.0), at = S(3.0);
+      Vec in = clickProbeUntil(n, at);
+      const auto o = run(*e, in, in, {set(at, "time.ms", 300)});
+      const long z = finalZeroRun(o);
+      REQUIRE(z < n && std::fabs(o.L[z - 1]) < 1e-6, "law %d, glide %.1f: rest cut a sounding repeat at %.3g (sample %ld)", law, glide, o.L[z - 1], z);
+    }
+  return true;
+}
+
+// mod.seed (critic M2-H2): re-sending an unchanged seed changes nothing, and a
+// load derives the drift from the patch's seed alone (D-026): two instances
+// with different histories that load the same patch modulate identically.
+bool seedRules(Detail& d) {
+  auto offsets = [](double seed0, bool resend, bool load) {
+    auto e = mk({{"time.sync", 0}, {"time.ms", 200}, {"fb.amount", 0}, {"mod.depthMs", 5}, {"mod.rateHz", 3}, {"mod.shape", 1}, {"mod.seed", seed0}});
+    const long n = S(2.0);
+    const Vec in(n, 0.1);
+    std::vector<Event> ev;
+    if (resend)
+      for (long i = 0; i < n; i += 64) ev.push_back(set(i, "mod.seed", seed0));
+    if (load) ev.push_back({S(0.5), [](Echo& x) { const std::array<echo::KeyValue, 1> kv{{{"mod.seed", 9}}}; x.loadState(kv); }});
+    Vec m(static_cast<std::size_t>(n));
+    runEach(*e, in, in, ev, [](long) { return 120.0; }, [&](long i, Echo& x) { m[static_cast<std::size_t>(i)] = x.modOffset(0); });
+    return m;
+  };
+  REQUIRE(offsets(7, true, false) == offsets(7, false, false), "re-sending an unchanged mod.seed changed the drift");
+  const Vec a = offsets(1, false, true), b = offsets(2, false, true);
+  double diff = 0;
+  for (long i = S(0.6); i < S(2.0); ++i) diff = std::max(diff, std::fabs(a[static_cast<std::size_t>(i)] - b[static_cast<std::size_t>(i)]));
+  REQUIRE(diff < 1e-9, "two instances that loaded the same seed modulate %.1f samples apart (history leaked into the patch)", diff);
+  return true;
+}
+
+// Key moves and follow (§3.8, critic M2-H4, M1, M2): a tempo ramp never turns a
+// key move in flight into a tempo move; after a 10 bpm step, follow returns to
+// exact following on a slow ramp (it crossfades the step, not the ramp); and
+// it never keeps a residual off the grid.
+bool keyAndFollow(Detail& d) {
+  {  // a key glide in flight under tempoMode crossfade, then a tempo ramp: no crossfade
+    auto e = mk({{"time.sync", 1}, {"time.div", 6}, {"time.tempoMode", 0}, {"time.glide", 0.5}, {"fb.amount", 0}});
+    const long n = S(2.0);
+    const Vec in(n, 0.1);
+    runEach(*e, in, in, {set(S(0.3), "time.div", 9)}, [](long i) { return i < S(0.35) ? 120.0 : 120.0 + 2.0 * (i - S(0.35)) / kSr; },
+            [](long, Echo&) {});
+    REQUIRE(e->fadeCount(0) == 0, "a key glide in flight crossfaded when the tempo moved (%llu fades)", static_cast<unsigned long long>(e->fadeCount(0)));
+  }
+  {  // follow: a 120 -> 130 step, then a +1 bpm/s ramp inside the cap
+    auto e = mk({{"time.sync", 1}, {"time.div", 9}, {"time.tempoMode", 2}, {"fb.amount", 0}});
+    const long n = S(4.0);
+    const Vec in(n, 0.1);
+    double worst = 0;
+    runEach(*e, in, in, {}, [](long i) { return i < S(0.5) ? 120.0 : 130.0 + 1.0 * (i - S(0.5)) / kSr; }, [&](long i, Echo& x) {
+      if (i > S(1.5)) worst = std::max(worst, std::fabs(x.headDelay(0) - x.resolvedTimes()[0] * kSr));
+    });
+    REQUIRE(e->fadeCount(0) <= 2 && worst < 1e-6, "follow after a step: %llu fades, off the grid by %.3g samples (it must resume exact following)",
+            static_cast<unsigned long long>(e->fadeCount(0)), worst);
+  }
+  {  // follow: a key glide, then a ramp, then a steady tempo: no residual left
+    // glide 0.05: the key move's own law finishes it (D-025's key rule) well
+    // before the steady stretch, so any offset left there is follow's.
+    auto e = mk({{"time.sync", 1}, {"time.div", 9}, {"time.tempoMode", 2}, {"time.glide", 0.05}, {"fb.amount", 0}});
+    const long n = S(5.0);
+    const Vec in(n, 0.1);
+    runEach(*e, in, in, {set(S(0.2), "time.div", 12)},
+            [](long i) { return i < S(0.25) ? 120.0 : i < S(2.0) ? 120.0 + 1.0 * (i - S(0.25)) / kSr : 121.75; }, [](long, Echo&) {});
+    const double off = std::fabs(e->headDelay(0) - e->resolvedTimes()[0] * kSr);
+    REQUIRE(off < 1e-6, "follow left the head %.4f samples off the grid at a steady tempo", off);
+  }
+  return true;
+}
+
+// The read floor and the wake (critic M2-M3, M4): a move to 1 ms under 20 ms
+// of modulation never reads under 3 samples from the write head (counted); and
+// after a wake the first repeat plays at the modulation's own speed, not
+// slewing in from 0 (the offset lands on the curve at rest).
+bool floorAndWake(Detail& d) {
+  for (double ch : {0.0, 1.0, 2.0}) {
+    // The move lands at 2.5 s, where the 0.3 Hz sine's offset is at -A (the
+    // read pulled TOWARD the write head): the only side the floor can bind.
+    auto e = mk({{"time.sync", 0}, {"time.ms", 500}, {"time.change", ch}, {"fb.amount", 0}, {"mod.depthMs", 20}, {"mod.rateHz", 0.3}});
+    const long n = S(3.5);
+    const Vec in(n, 0.1);
+    e->resetStats();
+    run(*e, in, in, {set(S(2.5), "time.ms", 1)});
+    const auto f = e->speedStats(0).floors + e->speedStats(1).floors;
+    REQUIRE(f == 0, "time.change %g, 500 -> 1 ms under 20 ms modulation: %llu reads under the 3-sample floor", ch, static_cast<unsigned long long>(f));
+  }
+  {
+    const long n = S(3.0);
+    Vec in = zeros(n);
+    for (long i = 0; i < S(0.3); ++i) in[i] = 0.1;
+    for (long i = S(2.0); i < n; ++i) in[i] = 0.1;  // silence long enough to rest, then a wake
+    // the speed right after the wake: from the speed statistics of a fresh window
+    auto g = mk({{"time.sync", 0}, {"time.ms", 30}, {"fb.amount", 0}, {"mod.depthMs", 10}, {"mod.rateHz", 0.6}});
+    const Vec pre(in.begin(), in.begin() + S(2.0)), post(in.begin() + S(2.0), in.end());
+    run(*g, pre, pre);
+    REQUIRE(g->atRest(), "the instance did not come to rest before the wake");
+    g->resetStats();
+    run(*g, Vec(post.begin(), post.begin() + S(0.05)), Vec(post.begin(), post.begin() + S(0.05)));
+    const double lo = g->speedStats(0).sMin;
+    REQUIRE(lo > 0.95, "after a wake the read played at speed %.3f: the offset slewed in from 0 instead of landing on the curve", lo);
+  }
+  return true;
+}
+
+// Sample-rate independence of moving time (1.0 bar row 40, critic M2-M6): the
+// same exponential glide, tape glide and modulation at 48 and 96 kHz trace the
+// same delay in SECONDS within a sample's worth.
+bool movingTimeSr(Detail& d) {
+  for (int law : {0, 1}) {
+    std::vector<double> ref;
+    for (double sr : {48000.0, 96000.0}) {
+      auto e = mk({{"time.sync", 0}, {"time.ms", 500}, {"time.law", static_cast<double>(law)}, {"time.glide", 0.2}, {"fb.amount", 0}}, sr);
+      const long n = S(2.0, sr);
+      const Vec in(n, 0.1);
+      std::vector<double> tr;
+      runEach(*e, in, in, {set(S(0.5, sr), "time.ms", 300)}, [](long) { return 120.0; }, [&](long i, Echo& x) {
+        if (i % S(0.01, sr) == 0) tr.push_back(x.headDelay(0) / sr);
+      });
+      if (ref.empty()) { ref = tr; continue; }
+      double worst = 0;
+      for (std::size_t i = 0; i < std::min(ref.size(), tr.size()); ++i) worst = std::max(worst, std::fabs(tr[i] - ref[i]));
+      REQUIRE(worst < 2.0 / 48000, "law %d: the glide at 96 kHz departs from 48 kHz's by %.3g ms", law, worst * 1000);
+    }
+  }
+  return true;
+}
+
+// The click metric (D-009 M2): max|d2y| / (A (omega s / fs)^2) over a render
+// of the 431.7 Hz probe, with s FIXED at the declared bound 2.25 (critic
+// M2-H3: normalising by the render's own measured top speed let a speed fault
+// hide itself). A smooth sine read at any speed up to 2.25 reads <= 1.
+constexpr double kSDecl = 2.25;
+double clickM2(const Vec& y, long a, long b, double A) {
+  const double w = 2 * kPi * kProbeHz / kSr * kSDecl;
+  double m = 0;
+  for (long i = std::max(a, 1L); i < b - 1; ++i) m = std::max(m, std::fabs(y[i + 1] - 2 * y[i] + y[i - 1]));
+  return m / (A * w * w);
+}
+// The smallest single-sample click the metric sees at threshold th, in dBFS
+// (an impulse of size a reads |d2y| = 2a).
+double clickFloorDbfs(double th, double A) {
+  const double w = 2 * kPi * kProbeHz / kSr * kSDecl;
+  return 20 * std::log10(th * A * w * w / 2);
+}
+
+// The threshold: PROPOSED (D-023), ONE value for every mode, set between the
+// measured clean and faulted readings (`echo_plants --click-report`, s fixed at
+// 2.25): every clean scenario reads <= 1.91 (jump's back-to-back 3 ms
+// crossfades under the full sweep 1.89, the tape law's cap kink 1.91); every
+// fault reads >= 3.5 (integer-rounded reads 3.5, a planted 0.02 click 4.9, a
+// read held per block 120). Its floor: a single-sample click of -40 dBFS.
+constexpr double kClickProposed = 2.5;
+double kClickMax = kClickProposed;      // every mode
+double kClickMaxJump = kClickProposed;  // jump (the same value; kept separate for the record)
+bool g_report = false;
+
+// One click scenario: the reading, and the speed invariants during it.
+struct ClickRun { double m2; SpeedStatsView st; };
+
+// The probe fades in (raised cosine, 50 ms): a sine that starts abruptly
+// writes a slope break into the line at its first sample, and any head that
+// later reads across it plays that break back as a "click" the engine never
+// made (it read 10.2 in the crossfade tempo mode before this ramp).
+Vec clickProbe(long n) {
+  Vec in = sine(n, kProbeHz, 0.5);
+  for (long i = 0; i < S(0.05); ++i) in[i] *= 0.5 - 0.5 * std::cos(kPi * i / S(0.05));
+  return in;
+}
+
+struct ClickCase {
+  const char* name;
+  bool jump;                                       // judged against the jump threshold
+  std::vector<std::pair<const char*, double>> kv;  // owned: an initializer_list here would dangle
+  std::function<std::vector<Event>(long)> events;  // given n
+  std::function<double(long)> bpm;                 // per-sample tempo, or null
+  double seconds;
+};
+
+ClickRun clickRun(const ClickCase& c) {
+  const long n = S(c.seconds);
+  const Vec in = clickProbe(n);
+  auto e = mk({});
+  for (const auto& [key, v] : c.kv)
+    if (!e->setParam(key, v)) { std::fprintf(stderr, "click case %s: setParam(%s) refused\n", c.name, key); std::abort(); }
+  e->resetStats();
+  Out o;
+  if (c.bpm) o = runEach(*e, in, in, c.events ? c.events(n) : std::vector<Event>{}, c.bpm, [](long, Echo&) {});
+  else o = run(*e, in, in, c.events ? c.events(n) : std::vector<Event>{}, 120.0, [](long) { return 512; });
+  const auto st = e->speedStats(0), st1 = e->speedStats(1);
+  SpeedStatsView v{std::min(st.sMin, st1.sMin), std::max(st.sMax, st1.sMax), st.clamps + st1.clamps, st.floors + st1.floors + st.overruns + st1.overruns};
+  return {clickM2(o.L, S(0.2), n, 0.5), v};
+}
+
+Vec clickProbeUntil(long n, long until) {
+  Vec in = clickProbe(n);
+  for (long i = until; i < n; ++i) in[i] = 0.0;
+  return in;
+}
+
+std::vector<ClickCase> clickCases() {
+  auto sweep = [](double lo, double hi) {
+    return [lo, hi](long n) {
+      std::vector<Event> ev;
+      for (long i = 0; i < n; i += 64) {
+        const double ph = std::sin(2 * kPi * 1.0 * i / kSr);
+        ev.push_back(set(i, "time.ms", std::exp(std::log(lo) + (std::log(hi) - std::log(lo)) * (0.5 + 0.5 * ph))));
+      }
+      return ev;
+    };
+  };
+  auto move = [](double at, double ms) { return [at, ms](long) { return std::vector<Event>{set(S(at), "time.ms", ms)}; }; };
+  auto tempo = [](long i) { return 120.0 + 60.0 * std::sin(2 * kPi * i / kSr); };
+  return {
+      {"full sweep, repitch tape", false, {{"time.sync", 0}, {"time.ms", 500}, {"time.change", 0}, {"time.law", 0}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, sweep(1, 12000), nullptr, 3.0},
+      {"full sweep, repitch exponential", false, {{"time.sync", 0}, {"time.ms", 500}, {"time.change", 0}, {"time.law", 1}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, sweep(1, 12000), nullptr, 3.0},
+      {"full sweep, crossfade", false, {{"time.sync", 0}, {"time.ms", 500}, {"time.change", 1}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, sweep(1, 12000), nullptr, 3.0},
+      {"full sweep, jump", true, {{"time.sync", 0}, {"time.ms", 500}, {"time.change", 2}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, sweep(1, 12000), nullptr, 3.0},
+      {"200-400 ms sweep, tape, glide 0.05", false, {{"time.sync", 0}, {"time.ms", 300}, {"time.law", 0}, {"time.glide", 0.05}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, sweep(200, 400), nullptr, 3.0},
+      {"200-400 ms sweep, exponential, glide 0.05", false, {{"time.sync", 0}, {"time.ms", 300}, {"time.law", 1}, {"time.glide", 0.05}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, sweep(200, 400), nullptr, 3.0},
+      {"tempo sweep, crossfade", false, {{"time.sync", 1}, {"time.div", 9}, {"time.tempoMode", 0}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, nullptr, tempo, 3.0},
+      {"tempo sweep, glide", false, {{"time.sync", 1}, {"time.div", 9}, {"time.tempoMode", 1}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, nullptr, tempo, 3.0},
+      {"tempo sweep, follow", false, {{"time.sync", 1}, {"time.div", 9}, {"time.tempoMode", 2}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, nullptr, tempo, 3.0},
+      {"move 250 -> 500 ms, exponential", false, {{"time.sync", 0}, {"time.ms", 250}, {"time.law", 1}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, move(1.0, 500), nullptr, 2.5},
+      {"move 300 -> 200 ms, exponential, glide 0.05", false, {{"time.sync", 0}, {"time.ms", 300}, {"time.law", 1}, {"time.glide", 0.05}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, move(1.0, 200), nullptr, 2.0},
+      {"move 500 -> 100 ms, tape, glide 0.05", false, {{"time.sync", 0}, {"time.ms", 500}, {"time.law", 0}, {"time.glide", 0.05}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, move(1.0, 100), nullptr, 2.0},
+      {"move 500 -> 250 ms, tape", false, {{"time.sync", 0}, {"time.ms", 500}, {"time.law", 0}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, move(1.0, 250), nullptr, 2.5},
+      {"move 500 -> 250 ms, jump", true, {{"time.sync", 0}, {"time.ms", 500}, {"time.change", 2}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, move(1.0, 250), nullptr, 1.5},
+  };
+}
+
+// The ROADMAP M2 gate: every time-change mode under a 1 Hz full-range time
+// sweep, the laws under a sweep they can follow, every tempo mode under a 1 Hz
+// tempo sweep, and Q-A1's single moves, each under its threshold AND inside the
+// speed invariants (no backstop hit, no floor or overrun, s <= 2.25: a bare
+// jump is caught here, where the backstop turns it into a counted glide). The
+// metric's own control: a planted click in a clean render must read over.
+bool clickSweep(Detail& d) {
+  for (const auto& c : clickCases()) {
+    const ClickRun r = clickRun(c);
+    if (g_report)
+      std::printf("  REPORT click M2 %-45s %6.3f  (speed %.3f..%.3f, %llu backstop, %llu floor/overrun)\n", c.name, r.m2, r.st.sMin, r.st.sMax,
+                  static_cast<unsigned long long>(r.st.clamps), static_cast<unsigned long long>(r.st.floors));
+    REQUIRE(r.st.clamps == 0 && r.st.floors == 0 && r.st.sMax <= kSDecl + 1e-9 && r.st.sMin >= 0.25 - 1e-12,
+            "%s: speed %.3f..%.3f, %llu backstop hits, %llu floor/overrun reads", c.name, r.st.sMin, r.st.sMax,
+            static_cast<unsigned long long>(r.st.clamps), static_cast<unsigned long long>(r.st.floors));
+    const double lim = c.jump ? kClickMaxJump : kClickMax;
+    REQUIRE(r.m2 <= lim, "%s reads M2 %.3f (threshold %.3f)", c.name, r.m2, lim);
+  }
+  auto e = mk({{"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}});
+  const long n = S(2.0);
+  auto o = run(*e, clickProbe(n), clickProbe(n));
+  o.L[S(1.0)] += 0.02;
+  const double c = clickM2(o.L, S(0.2), n, 0.5);
+  if (g_report)
+    std::printf("  REPORT click M2 planted 0.02 click (control): %.3f; at the threshold %.2f the floor is a %.1f dBFS single-sample click\n", c,
+                kClickProposed, clickFloorDbfs(kClickProposed, 0.5));
+  REQUIRE(c > std::min(kClickMax, kClickProposed), "a planted 0.02 click reads only M2 %.3f: the metric cannot see clicks", c);
+  return true;
+}
+
 // ---- the registry ---------------------------------------------------------------
 
 struct Check {
@@ -932,7 +1509,7 @@ const std::vector<Check> kChecks = {
     {"true bypass: settled-off filters are bit-identical whatever their cutoffs", trueBypass, {"loopFilterInCircuit"}},
     {"loop bound: measured |H_loop| <= 1 at 4 rates x 7 loop settings (D-005)", loopBound, {"loopGainOverOne", "dcTextbook"}},
     {"sample-rate independence: time exact, loop filter within 0.5 dB at 44.1-192 kHz", srIndependence, {"fixedCoefRate"}},
-    {"block-size independence: blocks 1, 7, 64, 333, 4096 and random render bit-identically", blockIndependence, {"rampPerBlock"}},
+    {"block-size independence: blocks 1, 7, 64, 333, 4096 and random render bit-identically", blockIndependence, {"rampPerBlock", "blockSteppedD"}},
     {"determinism: interleaved instances = solo; reset() = fresh", determinism, {"sharedState", "resetKeepsLine"}},
     {"silence: exact zero in, exact zero out (9 routing x change modes at 120 %; awake engine)", silence, {"antiDenormalDc"}},
     {"tail: exact zero from the declared tail on; kInfiniteTail at g >= 1", tailExactZero, {"noTailGate"}},
@@ -964,6 +1541,29 @@ const std::vector<Check> kChecks = {
     {"load: Device gain ramps run on through a load (RS-4.5)", loadLeavesDevice, {"loadSnapsDevice"}},
     {"sleep: a slept instance equals its never-slept twin from the wake on", sleepTwin, {"restRamps"}},
     {"parameters: unknown / non-finite / out-of-range / fractional values refused", paramValidation, {"rangeClamps"}},
+    // ---- M2 ----
+    {"tape law = an independent full-rate tape model: <= 0.01 sample, <= 2.5 cents of speed (3 glides x 3 moves)", tapeLaw,
+     {"tapeNoHistory", "tapeLinearHistory"}},
+    {"exponential law = its ln-D recurrence; a big move runs at the 12 st cap", expLaw, {"expLawLinear", "noLawCap"}},
+    {"repitch accuracy: output pitch = 1 - dD/dt within 1 cent from the move's start, both laws, fast and slow glides", repitchCents,
+     {"integerRead"}},
+    {"read speed in [0.25, 2.25], no reverse, backstop, overrun or floor: 4 modes x 5 moves x 3 mods; fallback past 3 s", speedInvariant,
+     {"noLawCap", "noFallback"}},
+    {"tail clock holds while a head moves: a 2900 -> 300 ms glide at fb 0 is never cut (D-025)", tailDuringGlide, {"tailClockIgnoresMotion"}},
+    {"mod.seed: an unchanged re-send changes nothing; a load derives the drift from the patch's seed (D-026)", seedRules,
+     {"seedResendRestarts", "loadKeepsModState"}},
+    {"key moves keep time.change through a tempo ramp; follow resumes after a step and leaves no residual", keyAndFollow,
+     {"tempoStealsKeyMove", "followNoTrackInFade", "followKeepsResidual"}},
+    {"read floor under modulation (counted, zero); the offset lands on the curve at rest (no slew-in after a wake)", floorAndWake,
+     {"modNoFloorBound", "wakeOffsetFromZero"}},
+    {"moving time is sample-rate independent: both laws trace the same delay in seconds at 48 and 96 kHz", movingTimeSr, {"glideFixedRate"}},
+    {"modulation: depth exact, read = input at the moving position, slope limit, drift clamp, slew 0.25, spread 90 deg", modulation,
+     {"modDepthUnlimited", "driftOvershoot", "modSlewOff"}},
+    {"seeded modulation: reproducible from mod.seed; seed change and shape switch never step", modSeeded, {"unseededSeed", "shapeInstant"}},
+    {"tempo modes: follow exact, glide by the law, crossfade never bends; 2x step crossfades; key moves obey time.change", tempoModes,
+     {"tempoModeIgnored", "followNoCap"}},
+    {"click metric (M2 gate, s fixed at 2.25): sweeps, tempo sweeps and single moves under 2.5 and inside the speed invariants; a planted click over",
+     clickSweep, {"integerRead", "blockSteppedD", "bareJump", "noLawCap"}},
 };
 
 #ifdef ECHO_PLANTS
@@ -988,6 +1588,14 @@ bool* plantFlag(std::string_view n) {
       {"dcFixedRate", &dcFixedRate}, {"rampFixedSamples", &rampFixedSamples}, {"ftzNeverSet", &ftzNeverSet},
       {"msSideGain2", &msSideGain2}, {"noMinFloor", &noMinFloor}, {"wakeLeftOnly", &wakeLeftOnly},
       {"noOutputGuard", &noOutputGuard}, {"tailFormulaShort", &tailFormulaShort},
+      {"modSlewOff", &modSlewOff}, {"driftOvershoot", &driftOvershoot}, {"unseededSeed", &unseededSeed}, {"shapeInstant", &shapeInstant},
+      {"modDepthUnlimited", &modDepthUnlimited}, {"noLawCap", &noLawCap}, {"noFallback", &noFallback}, {"tapeNoHistory", &tapeNoHistory},
+      {"expLawLinear", &expLawLinear}, {"tempoModeIgnored", &tempoModeIgnored}, {"followNoCap", &followNoCap},
+      {"integerRead", &integerRead}, {"blockSteppedD", &blockSteppedD},
+      {"tailClockIgnoresMotion", &tailClockIgnoresMotion}, {"seedResendRestarts", &seedResendRestarts}, {"loadKeepsModState", &loadKeepsModState},
+      {"tempoStealsKeyMove", &tempoStealsKeyMove}, {"followNoTrackInFade", &followNoTrackInFade}, {"followKeepsResidual", &followKeepsResidual},
+      {"modNoFloorBound", &modNoFloorBound}, {"wakeOffsetFromZero", &wakeOffsetFromZero}, {"tapeLinearHistory", &tapeLinearHistory},
+      {"glideFixedRate", &glideFixedRate},
   };
   for (const auto& p : table)
     if (n == p.n) return p.f;
@@ -1007,16 +1615,33 @@ bool* plantFlag(std::string_view n) {
     alloc_probe::disarm();
     const double mib = static_cast<double>(alloc_probe::g_bytes.load()) / (1024.0 * 1024.0);
     const double lines = 2.0 * e.lineLength() * sizeof(float) / (1024.0 * 1024.0);
-    std::printf("  REPORT memory at %6.0f Hz: %.2f MiB allocated at prepare (lines %.2f MiB); sizeof(Echo) %zu B\n", sr, mib, lines,
-                sizeof(Echo));
-    if (sr == 192000.0 && mib > 17.7) ok = false;
+    std::printf("  REPORT memory at %6.0f Hz: %.2f MiB allocated at prepare (lines %.2f MiB, tape history %.2f MiB); sizeof(Echo) %zu B\n", sr,
+                mib, lines, mib - lines, sizeof(Echo));
+    if (sr == 192000.0 && mib > 18.75) ok = false;  // SPEC §11: 17.61 MiB of lines + ~1.1 MiB of tape history
   }
   return ok;
 }
 
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
+  // --click-report: print every click reading (threshold lifted), clean and,
+  // in echo_plants, under each click plant. The numbers the threshold is set on.
+  if (argc > 1 && std::string_view(argv[1]) == "--click-report") {
+    kClickMax = kClickMaxJump = 1e300;
+    g_report = true;
+    Detail d;
+    clickSweep(d);
+#ifdef ECHO_PLANTS
+    for (const char* p : {"bareJump", "integerRead", "blockSteppedD", "noLawCap"}) {
+      std::printf("  -- under plant %s\n", p);
+      *plantFlag(p) = true;
+      clickSweep(d);
+      *plantFlag(p) = false;
+    }
+#endif
+    return 0;
+  }
   int fails = 0;
 #ifdef ECHO_PLANTS
   // The plant table and the checks must cover each other: an unguarded plant is
@@ -1029,7 +1654,11 @@ int main() {
                         "tailClockFromSilence", "tailInt32", "loadRestartsFade", "loadSnapsDevice", "loadClearsInstantly",
                         "loadNewSettingsOnOld", "tempoGlidesAtRest", "jumpUsesXfade", "xfadeIgnored", "ceilingBeforeGain",
                         "ceilingHardClip", "dcFixedRate", "rampFixedSamples", "ftzNeverSet", "msSideGain2", "noMinFloor",
-                        "wakeLeftOnly", "noOutputGuard", "tailFormulaShort"}) {
+                        "wakeLeftOnly", "noOutputGuard", "tailFormulaShort", "modSlewOff", "driftOvershoot", "unseededSeed",
+                        "shapeInstant", "modDepthUnlimited", "noLawCap", "noFallback", "tapeNoHistory", "expLawLinear",
+                        "tempoModeIgnored", "followNoCap", "integerRead", "blockSteppedD", "tailClockIgnoresMotion",
+                        "seedResendRestarts", "loadKeepsModState", "tempoStealsKeyMove", "followNoTrackInFade",
+                        "followKeepsResidual", "modNoFloorBound", "wakeOffsetFromZero", "tapeLinearHistory", "glideFixedRate"}) {
     bool guarded = false;
     for (const auto& c : kChecks)
       for (const char* p : c.plants) guarded = guarded || std::string_view(p) == n;
@@ -1055,7 +1684,7 @@ int main() {
 #endif
   }
 #ifndef ECHO_PLANTS
-  if (ECHO_ALLOC_PROBE && !memoryReport()) { std::printf("  FAIL  memory at 192 kHz exceeds the spec's 17.7 MiB\n"); ++fails; }
+  if (ECHO_ALLOC_PROBE && !memoryReport()) { std::printf("  FAIL  memory at 192 kHz exceeds the spec's 18.75 MiB (lines + tape history)\n"); ++fails; }
 #endif
   std::printf("%s: %s (%d failing)\n",
 #ifdef ECHO_PLANTS

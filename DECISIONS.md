@@ -481,3 +481,57 @@ own numerics (critic M7). Evidence from the probe builds (`core/tools/render_has
 **Rule for consumers on GCC:** compile translation units that include `echo/engine.h` with `-ffp-contract=off`;
 ISO `-std=c++20` already defaults to it, and only `-std=gnu++20` turns it on. On clang nothing is needed.
 
+## D-023 — The M2 click gate: s fixed at 2.25, one threshold 2.5, zero backstop hits (RATIFIED by poll, 2026-10-21)
+
+The ROADMAP M2 gate needs a pass criterion for D-009's click metric. The first version, which normalised by each render's
+own measured top speed with thresholds 3 and 12, was rejected by the independent critic: a bare jump's backstop-made
+4× speed normalised it down to 3.4, under the correct jump; the repitch sweep pinned both laws at the cap; and the
+"controls" mostly did not fire (critic M2-H3). Measured after the redesign (`build-core/echo_tests --click-report`):
+- **Normalise by the declared bound** s = 2.25, not the render's own maximum, so a speed fault cannot hide itself.
+- **Every scenario must also hold the speed invariants:** zero backstop hits, zero floor or overrun reads, s in
+  [0.25, 2.25]. A bare jump (which the backstop turns into a counted 4× glide) fails here.
+- **Scenarios:** the four time-change modes under a 1 Hz full-range sweep (1 ms .. 12 s); both laws under a sweep they
+  can follow (200-400 ms); the three tempo modes under a 1 Hz tempo sweep (60-180 bpm); and Q-A1's single moves.
+- **One threshold, 2.5, for every mode.** Clean readings: max 1.91 (the tape law's cap kink on a 500 → 100 ms move at
+  glide 0.05); jump's back-to-back 3 ms crossfades under the full sweep, 1.89. Faults: integer-rounded reads 3.5, a
+  planted 0.02 click 4.9, a read held per block 120. The floor: a −40 dBFS single-sample click on the −6 dBFS probe.
+- **The probe fades in (50 ms).** An abrupt sine writes a slope break into the line that heads later replay. It read 10.2
+  and was mistaken for a design kink until it was traced (LIBRARY L0013).
+- D-009's other two readings (M1 residual, M3 AR-whitened) are **not built** for M2: ROADMAP T-008.
+
+Rejected: thresholds 3/12 on the render's own speed (the critic's finding); building M1/M3 before closing M2.
+
+## D-024 — M2's engineering choices (lead's record, 2026-10-21)
+
+Implementation choices inside ratified rules (D-006–D-008, D-016, §3, §7), recorded so they are not re-derived:
+- **Tape history:** one point per 32 samples (§11: 1.10 MiB at 192 kHz), interpolated **quadratically** with a
+  secant-refined inverse. Linear interpolation erred by about 50 cents of read speed at a 10 ms glide; quadratic
+  measures ≤ 2 cents and ≤ 0.008 samples there, and 0.01 cent at 0.3 s (critic M2-M5). Before the first recorded point
+  the history is a steady line, so starting the law is O(1). Once a glide snaps, the next tape move rebuilds a steady
+  tape, which is exact (the keep-alive was dead code, critic L2).
+- **Key moves keep time.change:** a tempo move never takes over a key move still gliding or crossfading; only a
+  settled head hands a move to time.tempoMode (§3.8; critic M2-H4).
+- **Follow:** a settled head moves toward the grid time by at most the 50-cent cap a sample, so it follows exactly
+  and absorbs residuals (critic M2-M2). While a follow crossfade runs, its destination tracks the grid within the cap,
+  so following resumes when it ends (critic M2-M1).
+- **Modulation:** each line's depth is limited by its own heads (§7); and after the slew the offset is bounded so no
+  read falls under the 3-sample floor (critic M2-M3). Floor reads are counted and must be zero.
+- **Cost:** the modulation rate, the tape coefficient and ln T are cached, not recomputed every sample (critic L3).
+
+## D-025 — The tail clock restarts while a head moves (RATIFIED by poll, 2026-10-21; amends SPEC §10)
+
+The declared tail is built from the target times. A shortening glide (2900 → 300 ms at fb 0) still sounds repeats from
+the old, longer time, and the tail clock rested it at 0.850 s with the output at full level (critic M2-H1). Ruled: the
+tail clock also restarts while any head glides or crossfades. Rest can only come later than before, and the declaration
+stays exact by construction. Guarded by "tail clock holds while a head moves" with the plant `tailClockIgnoresMotion`.
+Rejected: building T_max from the live head times (a tighter tail, but a longer formula and a moving declaration).
+
+## D-026 — mod.seed reseeds only on a change; a load restarts the modulation from its seed (RATIFIED by poll, 2026-10-21; amends SPEC §7, §10)
+
+Two findings (critic M2-H2). First, re-sending an unchanged seed reseeded every time: a host re-sending stepped values
+every 64 samples froze the drift into a narrow band. Second, a load never reseeded, so two instances that loaded the same
+patch modulated 353 samples apart. Ruled: only a changed value reseeds, and a load restarts the modulation from the
+patch's seed at phase 0, so a preset's drift is derived from its seed alone. Nothing audible steps, because the old
+repeats have faded by then. Guarded by "mod.seed" with the plants `seedResendRestarts` and `loadKeepsModState`.
+Rejected: keeping the modulation running through loads.
+
