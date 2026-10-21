@@ -178,7 +178,14 @@ core_gate() {
     asm="$(printf 'double f(double a,double b,double c){return a*b+c;}\n' | "$cxxp" -O3 $fl -x c++ -S -o - - 2>&1)"
     case "$asm" in
       *fmadd*|*vfmadd*|*fmla*)
-        echo "verify: core — fp-contract probe is vacuous: this compiler fuses a*b+c with '$fl', yet removing the pragma changed nothing" >&2; ok=1 ;;
+        echo "verify: core — fp-contract probe is vacuous: this compiler fuses a*b+c with '$fl', yet removing the pragma changed nothing" >&2
+        # Diagnose from the binaries themselves: fused ops in each probe build.
+        local t dis
+        for t in echo_hash_ref echo_hash echo_hash_nopragma; do
+          if command -v objdump >/dev/null 2>&1; then dis="$(objdump -d "$b/$t" 2>/dev/null)"; else dis="$(otool -tv "$b/$t" 2>/dev/null)"; fi
+          echo "    $t: $(printf '%s\n' "$dis" | grep -ciE 'vfmadd|vfmsub|vfnmadd|fmadd|fmsub|fmla') fused-op instructions" >&2
+        done
+        ok=1 ;;
       *)
         echo "fp-contract: NOT APPLICABLE here — '$fl' emits no fused op for a bare a*b+c, so contraction cannot occur on this compiler; the pragma is proven on clang (dev Mac), not here" ;;
     esac
