@@ -80,3 +80,18 @@ add_executable(echo_hash_nopragma tools/render_hash.cpp)
 target_link_libraries(echo_hash_nopragma PRIVATE echocore)
 target_compile_definitions(echo_hash_nopragma PRIVATE ECHO_FP_PRAGMA_OFF=1)
 target_compile_options(echo_hash_nopragma PRIVATE ${ECHO_WARN} ${ECHO_FPC_ISA} ${ECHO_FPC_PROBE})
+
+# M4 (ROADMAP T-030, D-030): the one offline IR renderer's suite, in its own
+# source so M4 never edits M3's core_tests.cpp. Same two-binary shape:
+# echo_ir_tests clean, echo_ir_plants with every M4 plant switchable.
+add_executable(echo_ir_tests tests/ir_tests.cpp)
+target_link_libraries(echo_ir_tests PRIVATE echocore)
+target_compile_options(echo_ir_tests PRIVATE ${ECHO_WARN})
+if(ECHO_SANITIZE)
+  target_compile_options(echo_ir_tests PRIVATE -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer)
+  target_link_options(echo_ir_tests PRIVATE -fsanitize=address,undefined)
+endif()
+add_executable(echo_ir_plants tests/ir_tests.cpp)
+target_link_libraries(echo_ir_plants PRIVATE echocore)
+target_compile_definitions(echo_ir_plants PRIVATE ECHO_PLANTS=1)
+target_compile_options(echo_ir_plants PRIVATE ${ECHO_WARN})

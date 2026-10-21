@@ -98,6 +98,13 @@ ECHO_PLANT(modNoFloorBound)      // a slewing offset may read under the 3-sample
 ECHO_PLANT(wakeOffsetFromZero)   // after a wake the offset slews in from 0
 ECHO_PLANT(tapeLinearHistory)    // the tape history is linearly interpolated (the pre-critic form)
 ECHO_PLANT(glideFixedRate)       // the repitch laws' time constant is counted in 48 kHz samples
+// ---- M4 (core/tests/ir_tests.cpp guards these; echo_ir_plants) ----
+ECHO_PLANT(irHashSkipsKey)       // the IR cache hash skips the last key: a changed mod.seed serves a stale drawing
+ECHO_PLANT(irReusesState)        // the renderer's clone is not reset between renders: the last patch's repeats leak in
+ECHO_PLANT(irDropsDevice)        // the renderer never sends the Device keys: the drawing ignores the I/O gains
+ECHO_PLANT(irLevelIgnored)       // the renderer's impulse is always 0 dBFS, whatever the stated level
+ECHO_PLANT(irSkipsOutputFilter)  // the renderer forces the output filter off (T-019's named plant)
+ECHO_PLANT(irAllocsInRender)     // render() allocates a scratch buffer: unsafe to run from a preallocated service
 }  // namespace echo::plant
 
 #undef ECHO_PLANT
