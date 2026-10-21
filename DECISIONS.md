@@ -576,3 +576,14 @@ session said beforehand that it hoped for exactly that, so these rulings deserve
   2026-10-04): ≤ 2 % of a min-spec core at defaults and ≤ 4 % at worst per FX module, with ADR-236's 4 % ceiling
   for the automated and morphing rows. Echo is reported against it and never gated (RS-8.3). Rejected: an
   Echo-specific figure.
+
+## D-029 — T-019 builds the one offline IR renderer; M4 adopts it (RATIFIED by the human, 2026-10-21)
+
+M4's gate 1 (D-027) says ONE renderer feeds the display, the tail oracle and D-010's mono-fold metric. M3's B408
+report (T-019) needs that metric in B3, before M4 would exist. The M3 plan flagged the overlap rather than adjusting
+either gate. The human ruled: **T-019 builds the offline impulse-response renderer in its own file,
+`core/include/echo/ir_render.h`**, a non-real-time clone of the engine on the public API (D-011: deterministic,
+never probed from a live line), and the stereo report measures through it. M4 adopts that file for the display,
+so one renderer holds from M3 on. M4 keeps its own gate rows 2–4 (the snapshot label, off the audio thread, the
+100 ms redraw) and whatever caching or worker thread they need. Rejected: T-019 measuring on a plain offline
+instance and M4 re-pointing the metric later (two renderers until M4 closes).
