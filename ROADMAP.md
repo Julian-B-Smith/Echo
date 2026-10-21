@@ -9,8 +9,10 @@ lives in `DECISIONS.md`; horde's shipping bar is `intake/module-1.0-bar.md`.
 - **Phase:** Phase 0 CLOSED 2026-10-20 (D-013). Phase A CLOSED 2026-10-20 (PR #4;
   D-015–D-017). **M1 CLOSED 2026-10-21** (PR #7 merged, 5c3e822; T-006;
   D-018–D-022): the C++ core and its 39-check suite, 52 planted faults caught,
-  green on Mac/clang and Linux/GCC, ASan + UBSan clean in CI. **M2 gate MET on its
-  branch 2026-10-21** (T-009; D-023–D-026): closes when its PR lands on main. **M3 is next.**
+  green on Mac/clang and Linux/GCC, ASan + UBSan clean in CI. **M2 CLOSED 2026-10-21**
+  (PR #10 merged, 4c68da4; T-009; D-023–D-026): both repitch laws, the tempo modes and
+  modulation; 52 checks, 75 planted faults caught. **M3 (rack admission, the 1.0 bar,
+  due 2026-12-11) is next.**
 - **Oracle:** `./verify fast` = kit integrity, leak gate, private-name gate,
   structure, manifest, intake pin, legal gate, **lab smoke** (`tools/lab_smoke.mjs`,
   ~7 s), and the **core gate**: a warning-free Release build of `core/`, the M1
@@ -78,7 +80,7 @@ commercial delay or borrow its mode names, presets or UI text.
 - **Gate:** repitch accuracy in cents and modulation depth tested; the click
   metric (with a planted-click control) passes under a 1 Hz full-range time
   sweep in every mode.
-- **Status: gate MET 2026-10-21 on branch `m2`** (T-009): both repitch laws
+- **Status: CLOSED 2026-10-21** (PR #10, 4c68da4; T-009): both repitch laws
   (tape: a varispeed model with a quadratic 32-sample history; exponential),
   the 12 st cap, the 3 s fallback, the speed backstop (zero hits required),
   the three tempo modes, sine and seeded-drift modulation. The suite is 52
@@ -175,8 +177,7 @@ commercial delay or borrow its mode names, presets or UI text.
   in DECISIONS.
 
 ### T-009 — M2: moving time and modulation
-- **Status:** in progress 2026-10-21: the M2 gate is met on branch `m2`, in review
-  (PR); done when it lands on main. Trace: `traces/2026-10-21-m2.md`.
+- **Status:** done 2026-10-21 (PR #10, 4c68da4; trace: `traces/2026-10-21-m2.md`).
 - **Scope:** `core/include/echo/{engine,plants}.h`, `core/tests/core_tests.cpp`;
   SPEC §7 and §10 amended by D-025 and D-026.
 - **Acceptance criteria:** the M2 gate above.
