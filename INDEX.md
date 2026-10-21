@@ -14,3 +14,6 @@ performance-budget.
 - [L0007](LIBRARY.md#L0007) — a click probe commensurate with the test delays is blind to jumps (time-accuracy, modulation-repitch) · candidate
 - [L0008](LIBRARY.md#L0008) — a modulation ramp's length is a read speed; and M2 reads speed kinks between glides and jumps (modulation-repitch) · candidate
 - [L0009](LIBRARY.md#L0009) — once a module can rest, silence-fed checks can pass vacuously; prove each run stayed awake (time-accuracy, modulation-repitch) · candidate
+- [L0010](LIBRARY.md#L0010) — never wrap a ring-buffer read position in floating point; split D into int + fraction (time-accuracy) · candidate
+- [L0011](LIBRARY.md#L0011) — scope fp-contract in the header; clang "fast" overrides the pragma, so probe with "on" plus a pragma-less control · candidate
+- [L0012](LIBRARY.md#L0012) — pipefail makes `cmd | grep -q` take cmd's status: capture first when cmd must fail (gates) · candidate

@@ -59,12 +59,21 @@ jobs:
         with:
           node-version: "lts/*"
 
-      # --- C/C++ / CMake (delete Python block above) --------------------------
-      # - run: sudo apt-get update && sudo apt-get install -y cmake build-essential
-      #   # JUCE plugins: full()/auval is macOS-only + expensive + human-run —
-      #   # CI runs `verify fast` (ctests) on Linux, never `full`.
+      # --- C/C++ / CMake: the core (M1) ----------------------------------------
+      # ubuntu-latest ships cmake and g++ (C++20), so ./verify's core_gate builds
+      # and runs the suite with no install step: Linux/GCC beside the Mac's clang
+      # is the portability check. A missing toolchain is red there, never a skip.
 
       - name: verify fast
         run: |
           chmod +x verify
           ./verify fast
+
+      # ASan + UBSan on the core suite (critic H1: an out-of-bounds read that
+      # was harmless by luck on arm64). Linux only: on the dev Mac ASan cannot
+      # start inside the agent sandbox, so this step is the sanitizers' home.
+      - name: core under sanitizers
+        run: |
+          cmake -S core -B "$PWD/build-asan" -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=RelWithDebInfo -DECHO_SANITIZE=ON
+          cmake --build "$PWD/build-asan" --target echo_tests -j4
+          "$PWD/build-asan/echo_tests"

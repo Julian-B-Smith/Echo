@@ -72,11 +72,13 @@ Q1). Boundary ruled by horde: diffusion is Scape's, graph morphing is Sluice's,
 `SPINUP-BRIEF.md`; the contract itself: `intake/rack-slot-contract.md` and
 `intake/module-1.0-bar.md` (horde module cutoff **2026-12-11**).
 
-**Stack & entrypoints.** Not yet built (see ROADMAP). Planned: C++20 core in
-`core/` (CMake `-G "Unix Makefiles"`, ABSOLUTE build paths, Release for any
-perf number — global CLAUDE.md audio section), behind FOUNDATIONS' FX-operator
-ABI (vendored, sha256-pinned); single-file lab in `lab/`, run headless by plain
-Node oracles in `tools/`. Oracle: `./verify fast|full`.
+**Stack & entrypoints.** C++20 header-only core `core/include/echo/engine.h`
+(`echo::Echo`, behind a local ABI shim until FOUNDATIONS' FX-operator ABI lands
+in M3), its suite `core/tests/core_tests.cpp` (built twice: `echo_tests` clean,
+`echo_plants` with every planted fault in `plants.h` switchable). CMake
+`-G "Unix Makefiles"`, ABSOLUTE build paths (`build-core/`), Release for any perf
+number (global CLAUDE.md audio section). The single-file lab `lab/` is run
+headless by plain Node oracles in `tools/`. Oracle: `./verify fast|full`.
 
 **Domain invariants** (the critic checks against these):
 - Deterministic: seeded mulberry32 streams only; no `Math.random`, no wall-clock
@@ -102,7 +104,12 @@ Node oracles in `tools/`. Oracle: `./verify fast|full`.
   against the click metric.
 - Stereo is mono-safe (B408): ping-pong and mid/side fold to mono without
   unintended cancellation — measured and stated.
-- Every detector has a must-fail planted control before it gates anything.
+- No fused multiply-add in the core: the header scopes `fp-contract` off itself
+  (never a CMake INTERFACE flag, which would leak into horde), proven by a hash
+  probe (clang) or by fused-op counts in `echo::` code (GCC). On GCC, includers
+  compile with `-ffp-contract=off` (the ISO default): inlined bodies lose the pragma (D-022).
+- Every detector has a must-fail planted control before it gates anything; a
+  plant no check guards is itself a failure (`echo_plants` cross-checks).
   Goldens are pinned only once the C++ exists (ADR-142: parity never enshrines
   a defect). The legacy delay and swarm lab are references, never parity targets.
 - CPU is measured in Release as a ratio to a calibration loop, never gated.
@@ -121,9 +128,12 @@ tracked files (D-014), enforced by `legal_gate`.
 `intake_gate` — annotate in docs/, never edit); `spec/` and `lab/` once the
 human ratifies them; goldens once cut.
 
-**Verify targets.** `fast` (~1 s): kit integrity, leak gate, private-name gate,
-structure, manifest, intake pin. `full`: = fast until the C++ core lands; then
-invariant tests, goldens, sweeps. CI runs `fast` on Linux.
+**Verify targets.** `fast` (~20 s warm, ~90 s from a cold build): kit integrity,
+leak, private-name, structure, manifest, intake pin, legal gate, the lab smoke,
+and the core gate (`-Werror` Release build of `core/`; the M1 suite clean and
+under each of its planted faults; the C++ table against `spec/params.json`; the
+fp-contract probe; the fast-math guard). `full` = `fast` until M3's goldens and
+sweeps. CI runs `fast` on Linux/GCC, then the core suite under ASan + UBSan.
 
 ---
 
