@@ -127,6 +127,65 @@ commercial delay or borrow its mode names, presets or UI text.
   6. **The screen** gets the human's sign-off on Echo's own design in horde's FX
      screens workshop, plus checkable rows: keyboard-reachable, every key
      display-named (ADR-203), legible in light and dark, no audio-thread work.
+- **Plan: APPROVED by poll 2026-10-21 (D-030)** (T-030 – T-035 below; each item still asks
+  its own human gates as it reaches them: the `./verify` edits, the toolchain, the filing to horde). Written by an M4 planning session from D-011, D-027, SPEC §1
+  and §15, prior-art §6–7, `core/`, the M3 planning session's draft (its T-010 – T-027,
+  uncommitted on `m3-plan`), and a read of horde as it stands on 2026-10-21.
+- **Found while planning (each changes the plan):**
+  1. **horde's screens are HTML and canvas in a webview** (gui2 today; GUI 3, horde's
+     stage S6, is specified but not built). No C++ painter exists. So the IR the screen
+     draws must cross from the C++ renderer into a page.
+  2. **The FX screens workshop is one horde-owned page** (`docs/design/fx-screens-workshop.html`
+     in horde, last edited 2026-10-01), with no per-module slot. A module's glass is
+     a 160 × 144 screen with four soft keys and four knobs, drawn by canvas and CSS only,
+     deterministic, with must-fail self-checks. Modules get in when horde's lead edits
+     them into the page. **Echo is already there, as a horde-authored mock:** a "SONAR
+     SCOPE" glass, tagged ON TRIAL, written before Echo was a sibling and fed mock values.
+     horde's ADR-259 ruling 5 says Echo auditions one of the remaining styles. The workshop
+     has no sign-off procedure: the human picks, and the pick is recorded.
+  3. **Sibling precedent:** Sluice's and Shriek's screens live in horde's tree, drawn
+     from what the module rendered offline ("rendered, not live"). Scape and Bulwark ship
+     no screen code.
+  4. **horde's GUI rules bind the display:** the GUI reads only published atomics, never
+     working buffers (contract §8, RC-8); no display feed while the editor is closed
+     (B432; 0 % CPU); keyboard mode is opt-in with a visible lamp (ADR-259, B449).
+  5. **The renderer is fast enough, but not for a whole tail at once.** Measured on the
+     dev Mac (Release, 2026-10-21): 95–245 ns per sample, so a 10 s IR takes 40–120 ms
+     at 48 kHz and 180–280 ms at 192 kHz. The display must draw the head of the
+     response first and extend it, or the 100 ms gate fails at high rates.
+  6. **The mono-fold metric is M3's** (its T-019, B3, from 2026-11-09) and D-011 says it
+     uses this renderer. D-029 gave the renderer to T-019; D-030 amends that: M4 builds
+     `core/include/echo/ir_render.h` first, by 2026-11-06, to T-019's own criteria, and
+     T-019 measures through it. If it has not landed by 2026-11-09, T-019 builds it itself
+     and does not wait.
+  7. **The engine has no ceiling count and no live status.** Gate 2 needs both. Today
+     `headsMoving()` is private, and nothing counts ceiling engagements. That is an
+     `engine.h` change. It lands after M3's T-014 (meters, published atomics) and reuses
+     T-014's publishing; one implementer at a time on `engine.h`.
+  8. **The display names exist already.** All 29 keys have a display name, unit and law in
+     `params.h` and `params.json`, so the ADR-203 row is a check, not new work.
+- **Where things live:**
+  - **Echo's repo:** the renderer and its service (C++, `core/include/echo/ir_render.h`, `ir_service.h`, `ir_view.h`), the
+    display model (C++), Echo's screen as the source of truth (`screen/`), and every
+    oracle.
+  - **horde's repo:** only a filing in its `integrations/echo/` slot, asking horde's lead
+    to edit Echo's glass into the workshop, with the human's go-ahead.
+  - **In the product,** the renderer runs natively in horde's process, on a worker
+    thread. The page receives finished frames.
+  - **In the workshop and the screen page,** there is no native host, so the same C++ is
+    compiled to WebAssembly and run in a Web Worker (if the poll rules so).
+- **Batches** (one branch and PR each; the human merges; M3 keeps priority):
+  - **B4-1, the renderer (to 2026-11-06):** T-030. New files only, plus an M4 section
+    appended to `plants.h`, and the one-time `./verify` edit (approved by D-030).
+  - **B4-2, the service and the display model (to 2026-11-20):** T-031, T-032. New files
+    only.
+  - **B4-3, the engine hooks (after M3's T-014 lands):** T-033. Small; in sequence with
+    M3's implementer on `engine.h`.
+  - **B4-4, the screen (to 2026-12-04):** T-034. `screen/`, the WebAssembly build, and its
+    smoke.
+  - **B4-5, the workshop and close:** T-035. The filing to horde, the human's sign-off,
+    and an independent critic review. If it is not done by 2026-12-11, Echo ships with
+    the house-style UI (D-027).
 
 ### Phase N (pre-ship) — Prior-art re-scan + name clearance
 - Re-run the prior-art swarm; the legal and IP checks and horde's B433 screen
@@ -214,6 +273,129 @@ commercial delay or borrow its mode names, presets or UI text.
   only that path, with the human's go-ahead; the outbound table in
   `integrations/README.md` updated.
 - **Out of scope:** the FOUNDATIONS brief (M3, when the ABI is first touched).
+
+### T-030 — M4: the offline IR renderer (B4-1)
+- **Status:** open (approved 2026-10-21, D-030; in progress on its own branch).
+- **Scope:** new `core/include/echo/ir_render.h` (the one renderer, D-029 as amended by D-030), new `core/tests/ir_tests.cpp` (built as
+  `echo_ir_tests` and `echo_ir_plants`), `core/CMakeLists.txt`, an M4 section appended to
+  `plants.h`, and the `./verify` core gate running both new binaries (a human gate).
+- **Acceptance criteria:**
+  1. `echo::renderIr(patch, sr, bpm, level, n)` renders through a private `echo::Echo`
+     instance: prepared at the host rate, every patch and Device value landed at rest,
+     an impulse at the stated level, a fixed tempo. It returns L/R float64 buffers and
+     whether the render reached rest. It is pure: no clock, no global state, and the
+     same inputs always give bit-identical output.
+  2. The render equals, bit for bit, an independent `Echo` driven by the suite's own
+     `run()` with the same impulse. This holds for 12 patches covering every routing,
+     every filter position, feedback 0 / 50 / 99 / 120 %, synced and free time, and
+     modulation.
+  3. The cache key is a hash of every input the render reads: all 29 keys, the rate,
+     the tempo, the level and the length. Changing any one key changes the hash.
+  4. The tail oracle uses it: from the declared `tail()` on, the render is exact zero.
+     The mono-fold metric (M3's T-019) takes its input from it: a mono, an S-only or a
+     seeded-noise input renders through the same path as the impulse.
+  5. Each criterion is proven on a plant first. The plants are `irHashSkipsKey`,
+     `irRendersFromLive` (the clone shares state with a live instance),
+     `irLevelIgnored`, `irDropsDevice` (the render ignores the I/O gains) and T-019's own
+     `irSkipsOutputFilter`.
+- **Out of scope:** threads, the display, `engine.h`.
+
+### T-031 — M4: the render service (B4-2)
+- **Status:** open (approved 2026-10-21, D-030).
+- **Scope:** new `core/include/echo/ir_service.h`, `core/tests/ir_tests.cpp`, `plants.h`
+  (M4 section).
+- **Acceptance criteria:**
+  1. **Worker.** A UI-thread `request(patch)` returns at once, and one worker thread
+     renders. The cache is allocated at start, holds the last 8 renders and is keyed by
+     the T-030 hash.
+  2. **Head first.** Each response arrives head first: frame 1 covers the first 2 s (or
+     the whole response, if that is shorter), and later frames extend it to the display
+     window. A new request cancels the render in flight at its next chunk.
+  3. **Off the audio thread (gate 3).** While the service renders flat out on another
+     thread, a live `Echo` keeps its allocation probe green. Every render records its
+     thread, and none is ever the thread calling `process()`. The plant
+     `irRenderInline` renders inside `request()`.
+  4. **It keeps up (gate 4).** Frame 1 is ready within 100 ms of `request()`. This is
+     measured in Release on the dev Mac at 48 and 192 kHz, on the slowest patch, as the
+     worst of 20 runs. The plant `irWholeTailFirst` withholds frame 1 until the whole
+     tail is rendered, and must fail the check. CI reports the timing but does not gate
+     on it, because shared runners make wall-clock gates flaky.
+  5. **Fed only while open.** With the editor closed (`pause()`), no renders run.
+- **Out of scope:** drawing; `engine.h`.
+
+### T-032 — M4: the display model (B4-2)
+- **Status:** open (approved 2026-10-21, D-030).
+- **Scope:** new `core/include/echo/ir_view.h`, `core/tests/ir_tests.cpp`, `plants.h`
+  (M4 section).
+- **Acceptance criteria:**
+  1. **Stems.** A pure function turns a render into what the screen draws: per channel,
+     every non-zero sample as a stem at its sample index, in dB relative to the
+     impulse, on a −120 dB floor. The model keeps the render's own values, so a drawn
+     stem and the render sample read back equal (gate 1). The plant
+     `viewDecimatesPeaks` thins the stems for the screen and must be caught.
+  2. **Tempo grid.** Beats and bars are placed from the tempo and `time.div`.
+  3. **Spectrum strip.** For each generation n, the magnitude spectrum is taken in a
+     window centred on that generation's arrival time. With the loop filter alone in
+     circuit and the other filters off, it matches |F|ⁿ·g within 0.1 dB to 0.45 fs,
+     where F is the loop filter's analytic response.
+  4. **Energy decay curve.** The EDC is the backward integral (Schroeder) of the render.
+  5. Each is proven on its plant first.
+- **Out of scope:** pixels, styling.
+
+### T-033 — M4: the snapshot label's engine hooks (B4-3)
+- **Status:** blocked (until M3's T-014 lands on main; approved 2026-10-21, D-030).
+- **Scope:** `core/include/echo/engine.h` (additive only): a ceiling-engagement count, and
+  a status word published once per block through T-014's mechanism (heads moving, time
+  modulated). Also `ir_render.h`, `ir_tests.cpp` and `plants.h`.
+- **Acceptance criteria:**
+  1. The label (`snapshot = modulated || ceiling || moving`) is true exactly when the
+     live engine's heads glide or crossfade, its modulation depth is non-zero or
+     ramping, or the render's ceiling engaged. It is false at every other block of a
+     scripted session that holds 20 moves, modulation on and off, and feedback from 50
+     to 120 % at the stated level.
+  2. Publishing allocates nothing and takes no lock. The `noAlloc` check stays green,
+     and the clean suite's 52 checks render bit-identically.
+  3. The plants are `statusLate` (published one block late), `ceilingUncounted` and
+     `modFlagFromParamOnly` (it misses the 250 ms ramp-down).
+- **Out of scope:** any other `engine.h` change.
+
+### T-034 — M4: Echo's screen (B4-4)
+- **Status:** open (approved 2026-10-21, D-030).
+- **Scope:** new `screen/`. It holds `echo-screen.html` (the 160 × 144 glass on horde's
+  chassis contract, plus an expanded view with the stem echogram on the tempo grid,
+  the spectrum strip and the EDC), the WebAssembly build of `ir_render.h` and `ir_view.h` (D-030), and
+  `tools/screen_smoke.mjs` in `./verify` (a human gate).
+- **Acceptance criteria:**
+  0. **Two glasses, one model (D-030):** Echo's stem-echogram glass and horde's SONAR SCOPE
+     glass, both drawn from `ir_view.h`'s model, for the human to pick in the workshop.
+  1. **The drawing is the engine's (gate 1).** The page's drawn stems equal, bit for bit,
+     the native renderer's output for the T-030 patches. The WebAssembly render's hash
+     equals the native one, or the difference is traced to libm and recorded in
+     DECISIONS before anything is pinned.
+  2. **The snapshot label** shows exactly as in T-033, driven from the status word.
+  3. **It keeps up.** A redraw follows a key change within 100 ms in Chrome and Safari on
+     the dev Mac. This is measured, and a planted whole-tail renderer must fail.
+  4. **The screen's own rows.**
+     - Keyboard: every control can be reached and changed by keyboard in horde's keyboard
+       mode.
+     - Names: every key shows its `params.json` display name.
+     - Contrast: text and stems meet WCAG AA in the light and dark themes.
+     - No feed while closed: nothing renders while the page is hidden.
+     - Each is checked headlessly with a planted control.
+  5. It follows horde's chassis rules: canvas and CSS only, no WebGL, no wheel
+     listeners, deterministic.
+- **Out of scope:** horde's tree; the house-style backup UI (M3's T-022).
+
+### T-035 — M4: the workshop and close (B4-5)
+- **Status:** open (approved 2026-10-21, D-030).
+- **Scope:** a filing in horde's `integrations/echo/`, made with the human's go-ahead
+  after T-002's spin-up notice, asking horde's lead to edit Echo's glass into the
+  workshop. Also ROADMAP, DECISIONS and a trace.
+- **Acceptance criteria:**
+  1. The human's sign-off on Echo's design in the workshop, recorded here.
+  2. An independent Opus critic review with no open HIGH findings.
+  3. M4's gate rows 1–6, each evidenced in the trace.
+- **Out of scope:** any edit inside horde's tree beyond that one path.
 
 ## Open questions (blocking — ask the human)
 
