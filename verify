@@ -166,7 +166,22 @@ core_gate() {
   local href hfpc hnop
   href="$("$b/echo_hash_ref")"; hfpc="$("$b/echo_hash")"; hnop="$("$b/echo_hash_nopragma")"
   if [ "$hfpc" != "$href" ]; then echo "verify: core — fp-contract: a contracting build renders differently ($hfpc vs $href): the header's pragma does not hold" >&2; ok=1
-  elif [ "$hnop" = "$href" ]; then echo "verify: core — fp-contract probe is vacuous: removing the pragma changed nothing" >&2; ok=1
+  elif [ "$hnop" = "$href" ]; then
+    # The control rendered identically. That is vacuity ONLY if this compiler,
+    # with the probe's flags, fuses at all: compile a bare a*b+c and look for a
+    # fused op. If it emits none, the planted fault cannot exist here, so the
+    # probe is not applicable (said loudly, never counted as proof). If it does
+    # fuse and the render is still unchanged, the probe is blind: red.
+    local fl cxxp asm; cxxp="$(command -v c++ || command -v g++)"
+    case "$("$cxxp" --version 2>&1)" in *clang*) fl="-ffp-contract=on" ;; *) fl="-ffp-contract=fast" ;; esac
+    case "$(uname -m)" in x86_64|amd64) fl="$fl -mfma" ;; esac
+    asm="$(printf 'double f(double a,double b,double c){return a*b+c;}\n' | "$cxxp" -O3 $fl -x c++ -S -o - - 2>&1)"
+    case "$asm" in
+      *fmadd*|*vfmadd*|*fmla*)
+        echo "verify: core — fp-contract probe is vacuous: this compiler fuses a*b+c with '$fl', yet removing the pragma changed nothing" >&2; ok=1 ;;
+      *)
+        echo "fp-contract: NOT APPLICABLE here — '$fl' emits no fused op for a bare a*b+c, so contraction cannot occur on this compiler; the pragma is proven on clang (dev Mac), not here" ;;
+    esac
   else echo "fp-contract: OK — pragma holds ($href); without it the render differs ($hnop)"; fi
   local cxx probe; cxx="$(command -v c++ || command -v g++ || command -v clang++)"
   "$cxx" -std=c++20 -fsyntax-only -I core/include core/tests/guard_probe.cpp >/dev/null 2>&1 \
