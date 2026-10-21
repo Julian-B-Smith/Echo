@@ -9,11 +9,15 @@ lives in `DECISIONS.md`; horde's shipping bar is `intake/module-1.0-bar.md`.
 - **Phase:** Phase 0 CLOSED 2026-10-20 (D-013). **Phase A CLOSED 2026-10-20**
   (PR #4 merged, 8187aef; T-003; D-015–D-017): `spec/` revision 2 ratified, the
   lab smoke in `./verify fast`, Q-A1, Q-A2, Q-A4, Q-A5 and S-1 closed.
-  **M1 (the C++ core) is next.**
+  **M1 (the C++ core) gate MET on its branch 2026-10-20** (T-006; D-018): closes
+  when its PR lands on main. **M2 is next.**
 - **Oracle:** `./verify fast` = kit integrity, leak gate, private-name gate,
   structure, manifest, intake pin, legal gate, **lab smoke** (`tools/lab_smoke.mjs`,
-  every detector with a planted must-fail control, ~7 s). The C++ invariant suite arrives at
-  M1. `full` = `fast` for now.
+  ~7 s), and the **core gate**: a warning-free Release build of `core/`, the M1
+  invariant suite on the clean build (`echo_tests`), the same suite under each of
+  its 32 planted faults (`echo_plants`, each must be caught), the C++ table
+  against `spec/params.json`, and the fast-math guard probe (~10 s warm, ~70 s
+  from a cold build). `full` = `fast` for now (goldens and sweeps arrive with M3).
 - **Hard date:** horde's module cutoff **2026-12-11**. Every MUST row of the 1.0
   bar met by then, or Echo ships after 1.0.
 - **Last human ratification:** 2026-10-20 — the spec, revision 2, with S-1 and
@@ -58,6 +62,14 @@ commercial delay or borrow its mode names, presets or UI text.
 - **Gate:** the suite runs in `./verify fast`, green; every planted control
   proven to fire (recorded in a trace); memory figure stated per instance at
   192 kHz worst case.
+- **Status: gate MET 2026-10-20 on branch `m1-core`** (T-006): 39 checks green,
+  52 of 52 planted faults caught (`traces/2026-10-20-m1-core.md`), after an
+  independent Opus critic review (FIX-THEN-SHIP: 4 HIGH, 8 MED, all fixed or
+  recorded; D-018–D-020). Memory measured at prepare: **17.61 MiB per instance at
+  192 kHz** (4.40 MiB at 48 kHz), all of it the two lines. M1 placeholders M2
+  replaces: repitch acts as a crossfade of `time.xfadeMs`; every tempo move is a
+  crossfade whatever `time.tempoMode`; `mod.*` keys are stored but inert. Meters,
+  the ABI swap and state-by-name are M3.
 
 ### M2 — Modulation modes and moving time
 - Repitch (per Q-A1), crossfade jump, and wobble/chorus on the line; what a
@@ -124,6 +136,32 @@ commercial delay or borrow its mode names, presets or UI text.
 - **Acceptance criteria:** filed by a PR in horde's tree touching only that path,
   with the human's go-ahead; the outbound table updated.
 - **Out of scope:** the spin-up notice (T-002).
+
+### T-006 — M1: the C++ core and its invariant suite
+- **Status:** gate met 2026-10-20 on branch `m1-core`, in review (PR); done when it
+  lands on main. Trace: `traces/2026-10-20-m1-core.md`.
+- **Scope:** `core/`, `tools/check_manifest.py`, `./verify`'s core gate, CI's C++
+  note; SPEC §10 amended by D-018.
+- **Acceptance criteria:** the M1 gate above.
+- **Out of scope:** M2's laws and modulation; M3's ABI swap, meters, presets, CPU.
+
+### T-005 — Lab: rest waits for the wet (D-018)
+- **Status:** open.
+- **Scope:** `lab/echo-lab.html`, `tools/lab_smoke.mjs`.
+- **Acceptance criteria:** the lab's tail gate counts the wet (after the loop and
+  output filters) as well as the line writes, as SPEC §10 now says; a lab smoke
+  check that the gate never cuts a sounding tail, proven on the literal-text plant.
+- **Out of scope:** any other lab change.
+
+### T-007 — M1 critic leftovers (recorded, not blocking)
+- **Status:** open.
+- **Scope:** `core/`, `tools/check_manifest.py`.
+- **Items:** a check that cutoff glides take 10 ms (an instant glide survives the
+  suite); `check_manifest.py` to compare `rate` and `smoothing` too (the C++ table
+  has neither yet); the ABI shim's 4-pointer `process` vs the shims' in-place L/R
+  (a call-site change, not a rename, at M3).
+- **Acceptance criteria:** each item lands with a planted control, or is ruled out
+  in DECISIONS.
 
 ### T-002 — Spin-up filings
 - **Status:** open (drafts in `docs/filings/`)

@@ -4,7 +4,9 @@
 gate, made by a new decision that cites this one. Written by the Phase A lead session from the ratified Phase 0 decisions
 (D-004–D-013), the Phase A rulings (D-015, D-016), the horde contract packet (`intake/`), an independent critic
 review of revision 1 (folded in here), and measurements on the lab (`lab/echo-lab.html`). S-1 (§5.3) and the
-defaults of the two keys added by the rulings were ratified with it (D-017).
+defaults of the two keys added by the rulings were ratified with it (D-017). **Amended 2026-10-20 by D-018, D-019 and D-020**
+(§10: rest waits for the wet to fall below −120 dBFS; the tail clock restarts at a hold or a tail change; a load fades
+the old repeats under their old settings).
 
 **What this is.** The behaviour Echo must have, stated so the C++ core (M1–M3) can be built and tested against it.
 The machine-readable half is [`params.json`](params.json): every key, unit, range, default, morph class, rate
@@ -352,7 +354,7 @@ rule as written) were ratified with the spec (D-017).
 | `latency()` | **0** samples. Nothing is buffered ahead. |
 | `min_block` | **1**. Any block size 1 … 4096; parameters ramp per sample (A3; tempo, §3.3). |
 | `channels()` | **2** in, 2 out (RS-2.8). |
-| `tail()` | feedback g < 1: **(n + 2)·T_max + 0.25 s**, with n = ⌈(−120 dB − 6 dB) / (20·log₁₀ g)⌉ and T_max the longer resolved time plus the modulation depth (g = 0: n = 0). **g ≥ 1: `kInfiniteTail`.** `may_change` = true. |
+| `tail()` | feedback g < 1: **(n + 2)·T_max + 0.25 s**, with n = ⌈(−120 dB − 6.03 dB) / (20·log₁₀ g)⌉ and T_max the longer resolved time plus the modulation depth plus the read kernel's 4 samples (g = 0: n = 0; D-019). **g ≥ 1: `kInfiniteTail`.** `may_change` = true. |
 | `changes_image`, `changes_level` | both **true** (ping-pong and mid/side move the image; the wet adds level) (RS-2.4). |
 | `LoadDecl` | **crossfade out, 20 ms** (below). |
 | `morphPosition` | not declared (RS-4.10 is optional; Echo has no costly per-corner design). |
@@ -363,7 +365,7 @@ passes bring every write below −120 dBFS; one more pass is the gate's window; 
 blocker settling.
 
 **The tail gate and rest (A5, RS-7.3–7.6, A16 as amended).** When the input has been silent for a whole read span
-and every line write in that span is below −120 dBFS — **or** when the declared tail has elapsed since the input
+and every line write **and every wet sample (after the loop and output filters; D-018)** in that span is below −120 dBFS — **or** when the declared tail has elapsed on the **tail clock** (D-019: it counts silent samples since the input stopped, the loop was last held at g ≥ 1, or the declared tail last changed, whichever is latest), since the input
 went silent, whichever comes first — Echo clears its lines, filter states and DC state and is **at rest**. So the
 output is exact zero at the end of the declared tail **by construction**, never as an estimate. At rest:
 - the output is exact zero (silence in, silence out);
@@ -377,8 +379,8 @@ otherwise drift, an instance that slept and its never-slept twin are bit-identic
 parameters changed during sleep at their targets (A16's judge; the lab gate tests it with a planted modulation
 that keeps running at rest). A held loop (g ≥ 1) never rests.
 
-**Load (RS-6.7, ruled D-016).** A preset or state load lands every patch value with no ramp-in. **Device keys are
-not part of a patch and are left alone** (RS-4.5; B435 test 4). The old audio **fades out over 20 ms and ends**:
+**Load (RS-6.7, ruled D-016, D-020).** A preset or state load lands every patch value with no ramp-in, at the load's block boundary (the dry path follows a new mix at once); **the old repeats fade out under their OLD routing, filters, feedback and wet level**, and a second load during the fade lands its values but never restarts the fade. **Device keys are
+not part of a patch and are left alone**, a gain ramp in flight included (RS-4.5; B435 test 4). The old audio **fades out over 20 ms and ends**:
 the lines and loop state are cleared and the heads land on the new times — never a glide (ADR-142). Whether the old
 tail keeps ringing is horde's spill-over setting (a second instance, RS-6.3/6.5/6.13), never Echo's. (Input that
 arrives during the 20 ms fade is lost from the line; the dry path is untouched.)

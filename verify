@@ -62,6 +62,7 @@ structure_gate() {
            SPINUP-BRIEF.md project.manifest.json integrations/README.md traces/README.md \
            intake/MANIFEST intake/rack-slot-contract.md intake/module-1.0-bar.md \
            spec/SPEC.md spec/params.json lab/echo-lab.html tools/lab_smoke.mjs \
+           core/CMakeLists.txt core/include/echo/engine.h core/tests/core_tests.cpp tools/check_manifest.py \
            .gitattributes .github/workflows/ci.yml; do
     [ -e "$f" ] || { echo "verify: structure — missing $f" >&2; ok=1; }
   done
@@ -139,6 +140,50 @@ need_node() {
 # Every detector is first proven against a planted fault. ~7 s.
 lab_smoke_gate() { need_node && node tools/lab_smoke.mjs; }
 
+# The C++ core (ROADMAP M1): Release build at an ABSOLUTE path (a relative one
+# silently builds nothing in this sandbox) with -Werror (a grep of the build log
+# went green on a warm rebuild that recompiled nothing; critic M5), then:
+#   echo_tests   the invariant suite on the clean build (exactly what horde links)
+#   echo_plants  each check re-run under each planted fault it guards; a fault
+#                a check does not catch makes that check vacuous, and red
+#   check_manifest.py  the C++ parameter table equals spec/params.json
+#   fp-contract  the header's pragma holds: a contracting build hashes equal to
+#                the reference, and the pragma-less control must DIFFER
+#   guard probe  -ffast-math / -ffinite-math-only must hit the engine's #error
+# A missing cmake or compiler is red, never a skip.
+core_gate() {
+  command -v cmake >/dev/null 2>&1 || { echo "verify: core — cmake not found" >&2; return 1; }
+  local b log ok=0 f
+  b="$(pwd)/build-core"; log="$HARNESS_DIR/core-build.log"
+  cmake -S "$(pwd)/core" -B "$b" -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release -DECHO_WERROR=ON -DECHO_SANITIZE=OFF >"$log" 2>&1 \
+    && cmake --build "$b" -j4 >>"$log" 2>&1 \
+    || { echo "verify: core — build failed (warnings are errors):" >&2; grep -E "error|warning" "$log" | head -20 >&2; return 1; }
+  "$b/echo_tests" | grep -v "^  PASS" || ok=1
+  [ "${PIPESTATUS[0]}" -eq 0 ] || ok=1
+  "$b/echo_plants" | grep -v "^  PASS" || ok=1
+  [ "${PIPESTATUS[0]}" -eq 0 ] || ok=1
+  python3 tools/check_manifest.py "$b/echo_manifest" || ok=1
+  local href hfpc hnop
+  href="$("$b/echo_hash_ref")"; hfpc="$("$b/echo_hash")"; hnop="$("$b/echo_hash_nopragma")"
+  if [ "$hfpc" != "$href" ]; then echo "verify: core — fp-contract: a contracting build renders differently ($hfpc vs $href): the header's pragma does not hold" >&2; ok=1
+  elif [ "$hnop" = "$href" ]; then echo "verify: core — fp-contract probe is vacuous: removing the pragma changed nothing" >&2; ok=1
+  else echo "fp-contract: OK — pragma holds ($href); without it the render differs ($hnop)"; fi
+  local cxx probe; cxx="$(command -v c++ || command -v g++ || command -v clang++)"
+  "$cxx" -std=c++20 -fsyntax-only -I core/include core/tests/guard_probe.cpp >/dev/null 2>&1 \
+    || { echo "verify: core — the guard probe does not compile clean" >&2; ok=1; }
+  # Capture, THEN match: under `set -o pipefail` a `c++ … | grep -q` pipeline
+  # takes the compiler's (expected) failure as its status, so the guard read
+  # as silent even when it fired.
+  for f in -ffast-math -ffinite-math-only; do
+    probe="$("$cxx" -std=c++20 -fsyntax-only "$f" -I core/include core/tests/guard_probe.cpp 2>&1)"
+    case "$probe" in
+      *forbidden*) ;;
+      *) echo "verify: core — the fast-math guard did NOT fire under $f" >&2; ok=1 ;;
+    esac
+  done
+  return $ok
+}
+
 fast() {
   # ---- Layer-0: seconds, not minutes. CI-blocking. -------------------------
   local ok=0
@@ -150,7 +195,7 @@ fast() {
   intake_gate       || ok=1  # intake/ is read-only: pinned bytes
   legal_gate        || ok=1  # D-014: legal/IP analysis stays in local/legal/
   lab_smoke_gate    || ok=1  # Phase A: the listening twin is fit to listen to
-  # Grows per ROADMAP: the C++ invariant tests (M1).
+  core_gate         || ok=1  # M1: the C++ core's invariant suite, each check proven on its plants
   return $ok
 }
 

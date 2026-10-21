@@ -384,3 +384,76 @@ the smoke.
   Q-A2, Q-A4, Q-A5 and S-1 closed.
 - Same poll: merge main into the Phase A branch (keeping main's `legal_gate` and D-014 beside this branch's
   `lab_smoke_gate`, D-015–D-017), push it and open a PR; the human merges.
+
+## D-018 — Rest waits for the filters: "quiet" includes the wet (RATIFIED by poll, 2026-10-20; amends SPEC §10)
+
+**Finding (M1).** SPEC §10's first rest condition read "the input silent for a whole read span and every line
+write in that span below −120 dBFS". Building it in C++ showed that the condition fires one read span after the last
+loud write, while the loop filter and the output filter are still ringing on what was just read: resting clears
+their state mid-ring. Measured on the core (48 kHz, 100 ms, fb 0, a 20 Hz loop low cut): the gate cut a tail at
+**0.0285**, an audible step. It also corrupted the M1 sample-rate check (a 100 Hz reading of −3.2 dB where the filter
+gives −0.2 dB), which is how it surfaced.
+
+**Ruled by poll:** "quiet" means the line writes **and** the wet — the read after the loop filter and the decoded
+wet after the output filter — below −120 dBFS for the span. The second condition (the declared tail elapsed) is
+unchanged and still bounds rest, so the declaration stays exact by construction: rest can only come later than
+under the literal text, never after the declared tail. SPEC §10 is amended to cite this decision (a protected-path
+edit, approved in the same poll).
+
+**Enforced.** `core/tests/core_tests.cpp` "rest never cuts a sound" requires the last sample before the final
+exact-zero run to be below −120 dBFS, at three loop low cuts; the planted fault `gateLineOnly` (the literal §10
+text) fails it (0.0285).
+
+**Follow-up.** The lab (`lab/echo-lab.html`) implements the literal text and has the same cut. It is a listening
+twin, not a reference, so M1 does not touch it; fixing it is ROADMAP T-005.
+
+Rejected: keeping the spec text and recording M1 as stricter (two texts for one behaviour drift; the spec would
+describe a click).
+
+## D-019 — The tail clock restarts at a hold or a tail change (RATIFIED by poll, 2026-10-20; amends SPEC §10)
+
+**Finding (the M1 critic, H2).** SPEC §10's second rest condition, "the declared tail has elapsed since the input
+went silent", measured silence from the input alone. The declared tail is recomputed whenever feedback, time or
+modulation depth changes, so lowering feedback mid-tail shrank the bound under repeats already ringing. Measured on
+the core: a loop held at 120 % for 10 s, then pulled to 35 %, rested 225 samples later and cut a wet of −0.70; 90 %
+→ 10 % after 10 s cleared the line holding repeats at about 0.17. That is the standard dub gesture.
+
+**Ruled by poll:** the condition runs on a **tail clock** that counts silent samples since the latest of: the input
+stopping, the loop last held (g ≥ 1, current or target), or the declared tail last changing. A full declared tail is
+always allowed after the last change, so rest can only come later than under the old text, and the declaration stays
+exact by construction. SPEC §10 is amended to cite this decision.
+
+**Also recorded (no behaviour change, spec text aligned):** the code's tail uses 6.03 dB for the returning term's
+headroom (20·log₁₀ 2 = 6.0206, rounded up) and adds the read kernel's 4 samples to T_max. Both make the tail longer,
+never shorter; §10 now states them. The tail is computed in double and saturates to `kInfiniteTail` past 4·10¹⁸
+samples, because a feedback of 99.99999999999999 % (a normalised host's round trip) overflowed int64 and declared a
+NEGATIVE tail on x86 (critic H3).
+
+**Enforced:** checks "tail clock" (held → released; 90 → 10 %), "tail formula" (50 / 90 / 99 %, filters on and off:
+the sample before rest is below −120 dBFS) and "tail near unity", with plants `tailClockFromSilence`,
+`tailFormulaShort` and `tailInt32`.
+
+Rejected: keeping §10 as written (lowering feedback could end a tail abruptly).
+
+## D-020 — A load fades the old repeats under their old settings (RATIFIED by poll, 2026-10-20; amends SPEC §10)
+
+**Finding (the M1 critic, H4).** At a load the core faded the old wet over 20 ms, but routing, filters and the wet
+level switched instantly underneath that fade (measured: 17.9 times the steady per-sample slope on a mid/side →
+stereo load with the output filter switched on); a second load mid-fade restarted the fade gain from about 0.5 back to
+1; and the load snapped a Device gain ramp in flight (+22.8 dB on the dry path).
+
+**Ruled by poll, read with the contract.** RS-6.7 says the new parameters land at the load's block boundary with no
+ramp-in and the old audio ends by a crossfade out. So: **every patch value lands at the boundary** (`getParam` reads
+the new values, and the dry path follows a new mix at once: a step, by RS-6.7's design, with spill-over horde's); **the
+old repeats fade out over 20 ms under their OLD routing, filters, feedback and wet level**; then the lines and loop
+state are cleared, the new settings take the wet, and the heads land. A second load during the fade lands its values
+but never restarts the fade. Device keys, ramps included, are never touched by a load. A resting instance has nothing
+sounding and adopts the patch at once. (The poll's wording was "old settings until the fade ends, then the new patch
+lands"; RS-6.7's "at that boundary" moves the landing for everything except the fading old audio to the boundary. The
+behaviour of the old audio is exactly what the poll chose.)
+
+**Enforced:** checks "load: old repeats fade and end", "load: click-free", "load: no restart", "load: Device ramps
+run on", with plants `loadClearsInstantly`, `loadNewSettingsOnOld`, `loadRestartsFade`, `loadSnapsDevice`.
+
+Rejected: new settings applied to the fading old audio (the click above).
+
