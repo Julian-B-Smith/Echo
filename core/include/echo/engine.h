@@ -1,4 +1,4 @@
-// echo/engine.h — Echo's stereo delay core (M1), behind a local stand-in for
+// echo/engine.h — Echo's stereo delay core (M1 + M2), behind a local stand-in for
 // FOUNDATIONS' FX-operator ABI.
 //
 // DEGRADED AND TEMPORARY SHIM. FOUNDATIONS has not frozen the ABI (OQ #32), so
@@ -18,16 +18,19 @@
 // rules (§10), FTZ (RS-7.8). Time moves: crossfade (time.xfadeMs) and jump
 // (3 ms) per §3.5, with the latest-target-wins queue and per-move latching.
 //
-// M1 PLACEHOLDERS (visibly degraded, replaced in M2; ROADMAP M2):
-//   - time.change = repitch moves the head by a crossfade of time.xfadeMs, not
-//     by the tape / exponential laws of §3.6; time.law and time.glide are stored
-//     and latched but have no audible effect yet.
-//   - every tempo move is handled like a control move (a crossfade), whatever
-//     time.tempoMode says: §3.8's (A) behaviour for all three modes.
-//   - mod.* keys are validated and stored, and mod.depthMs enters the declared
-//     tail, but the line modulation of §7 is not built: reads are unmodulated.
-//   - meters with clip latches (§8, B435) are M3; only the non-finite repair
-//     count and latch exist here.
+// M2 (ROADMAP M2): moving time per §3.5-3.8. A control move follows
+// time.change: repitch by time.law (tape: a varispeed tape model whose write
+// position is recorded at control rate; exponential: a one-pole on ln D), held
+// to the 12 st cap, the hard read-speed invariant s in [0.25, 4] (a counted
+// backstop) and the 3 s crossfade fallback; crossfade; jump (3 ms). A move the
+// host tempo alone causes follows time.tempoMode: crossfade, glide (the repitch
+// law), or follow (exact while the bend stays within 50 cents, a crossfade past
+// it). Line modulation per §7: sine or seeded drift (two mulberry32 streams from
+// mod.seed), depth limited by the curve's slope and the write head, the offset
+// slew-limited to 0.25 sample/sample, 250 ms ramps, seeded switches.
+//
+// STILL NOT HERE (M3): meters with clip latches (§8, B435), the FOUNDATIONS ABI
+// swap, state stored by name. Only the non-finite count and latch exist.
 //
 // THREADING. One writer: every method is called from one thread at a time
 // (horde's slot serialises them, RS-6.6). Only the non-finite counters are
@@ -98,6 +101,16 @@ inline constexpr double kReturnHeadroomDb = 6.03;  // the DC blocker's L1 gain <
 inline constexpr double kTailMarginS = 0.25;
 inline constexpr double kMinCutHz = 10.0, kMaxCutFrac = 0.45;
 inline constexpr double kPi = 3.14159265358979323846;
+// M2: moving time and modulation (SPEC §3.6-3.8, §7, §13)
+inline constexpr double kModRampS = 0.25;      // depth, spread and shape changes
+inline constexpr double kModRateGlideS = 0.1;  // the rate glides in log-frequency
+inline constexpr double kModSlopeMax = 0.25;   // |d offset / dt|, samples per sample
+inline constexpr double kSMin = 0.25, kSMax = 4.0;  // the HARD read-speed invariant (D-006)
+inline constexpr double kCapSt = 12.0;         // every repitch law's pitch cap, both ways
+inline constexpr double kFallbackS = 3.0;      // longer than this at the cap's rate: crossfade
+inline constexpr double kTempoCapCents = 50.0; // tempo "follow": exact within this bend
+inline constexpr double kMinRead = 3.0;        // the 4-point kernel's distance from the write
+inline constexpr int kTapeGrid = 32;           // the tape history's control rate (SPEC §11)
 }  // namespace k
 
 class Echo {
@@ -114,6 +127,16 @@ class Echo {
     maxBlock_ = maxBlock > 0 ? maxBlock : 1;
     lineLen_ = static_cast<int>(std::ceil((k::kMaxDelayS + k::kModMarginS) * sr_)) + k::kKernelMargin;
     for (auto& l : line_) l.assign(static_cast<std::size_t>(lineLen_), 0.0f);
+    // The tape law's write-position history, one point per 32 samples over the
+    // whole line (SPEC §11: ~1.1 MiB at 192 kHz for both lines).
+    tapeCap_ = lineLen_ / k::kTapeGrid + 8;
+    for (auto& r : tapeRing_) r.assign(static_cast<std::size_t>(tapeCap_), 0.0);
+    modRampN_ = std::max(1, static_cast<int>(std::lround(k::kModRampS * sr_)));
+    rateA_ = 1.0 - std::exp(-1.0 / (k::kModRateGlideS * sr_));
+    up_ = std::pow(2.0, k::kCapSt / 12.0) - 1.0;   // the fastest shortening (pitch up)
+    dn_ = 1.0 - std::pow(2.0, -k::kCapSt / 12.0);  // the fastest lengthening (pitch down)
+    capUp_ = std::pow(2.0, k::kTempoCapCents / 1200.0) - 1.0;
+    capDn_ = 1.0 - std::pow(2.0, -k::kTempoCapCents / 1200.0);
     rampN_ = plant::rampFixedSamples ? 960 : std::max(1, static_cast<int>(std::lround(k::kRampS * sr_)));
     dcR_ = std::exp(-2.0 * k::kPi * k::kDcHz / (plant::dcFixedRate ? 48000.0 : sr_));
     glideA_ = 1.0 - std::exp(-1.0 / (k::kCutoffTauS * sr_));
@@ -129,12 +152,19 @@ class Echo {
     if (!plant::resetKeepsLine) clearLoop();
     bpm_ = bpmPrev_ = 120.0;
     loadLeft_ = 0;
+    n_ = 0;
+    paramMoved_ = false;
     fadeCount_[0] = fadeCount_[1] = 0;
+    modPhase_ = 0.0;
+    mods_[0] = mods_[1] = 0.0;
+    reseed(false);
+    seedApplied_ = p_[kModSeed];
+    resetStats();
     snapAll(true);
     resolveBoth(bpm_);
-    for (int k = 0; k < 2; ++k) landHead(k);
+    for (int k = 0; k < 2; ++k) { landHead(k); head_[k].lastPos = head_[k].D; head_[k].statsLive = false; }
     idle_ = true;
-    restDirty_ = false;
+    restDirty_ = true;  // the first resting sample lands everything, the offsets included
     silentRun_ = quietRun_ = tailClock_ = 0;
     nonFinite_.store(0, std::memory_order_relaxed);
     nonFiniteLatch_.store(false, std::memory_order_relaxed);
@@ -257,8 +287,11 @@ class Echo {
       // The tail clock (D-019): counts silent samples since the input stopped,
       // the loop last held (g >= 1) or the declared tail last changed, so a
       // full declared tail is always allowed after the last change.
+      // It also restarts while any head moves (D-025, critic M2-H1): the
+      // declared tail is built from the TARGET times, and a shortening glide's
+      // head still sounds repeats from the old, longer time.
       if (plant::tailClockFromSilence) tailClock_ = silentRun_;
-      else tailClock_ = (silentIn && g < 1.0 && fbTarget() < 1.0) ? tailClock_ + 1 : 0;
+      else tailClock_ = (silentIn && g < 1.0 && fbTarget() < 1.0 && (plant::tailClockIgnoresMotion || !headsMoving())) ? tailClock_ + 1 : 0;
 
       // Encode into the lines (§4), then the input filter on what enters them.
       double u[2];
@@ -270,6 +303,9 @@ class Echo {
       const bool tempoMoved = sync && b != bpm_;
       bpm_ = b;
       if (tempoMoved) resolveBoth(b);
+      // A move's class (SPEC §3.5): a key moved it (1) or the tempo alone (2).
+      const int cls = paramMoved_ ? 1 : (tempoMoved ? 2 : 0);
+      paramMoved_ = false;
 
       // A load fades the old audio out over 20 ms, then ends it (§10, D-020).
       double lg = 1.0;
@@ -282,8 +318,13 @@ class Echo {
       // Read each line (a crossfade sounds both heads, equal-gain), then the
       // loop filter: the wet already carries it once (§2).
       double y[2];
+      if (!loading)
+        for (int k = 0; k < 2; ++k) stepHead(k, cls);
+      if (plant::blockSteppedD && i == 0)  // the plant: the read holds its position for the call, then steps
+        for (int k = 0; k < 2; ++k) heldD_[k] = head_[k].D;
+      modStep();  // the line modulation (§7), on every head of a line
       for (int k = 0; k < 2; ++k) {
-        if (!loading) stepHead(k);
+        backstop(k);
         y[k] = filterSample(fLoop_, k, readHead(k)) * lg;
       }
 
@@ -312,6 +353,7 @@ class Echo {
       }
       w_ = (w_ + 1 == lineLen_) ? 0 : w_ + 1;
       if (sinceClear_ < lineLen_) ++sinceClear_;
+      ++n_;
 
       // Decode, output filter, mix (equal-power, exact endpoints), output gain.
       double wo[2];
@@ -387,6 +429,20 @@ class Echo {
   std::uint64_t fadeCount(int k) const { return fadeCount_[k]; }
   // The sounding head's delay in samples when no fade runs (test read).
   double headDelay(int k) const { return head_[k].D; }
+  // The read position the line sounds now, delay + modulation (test read).
+  double readPosition(int k) const { return (head_[k].fade ? head_[k].dA : head_[k].D) + mods_[k]; }
+  double modOffset(int k) const { return mods_[k]; }
+  bool fading(int k) const { return head_[k].fade; }
+  // Read-speed statistics on the sounding position since reset / resetStats
+  // (SPEC §3.6's invariant: s = 1 - d(position)/dt in [0.25, 4], never <= 0).
+  struct SpeedStats {
+    double sMin = 1e300, sMax = -1e300;
+    std::uint64_t reverse = 0, clamps = 0, fallbacks = 0, overruns = 0, floors = 0;
+  };
+  SpeedStats speedStats(int k) const { return stats_[k]; }
+  void resetStats() {
+    for (auto& st : stats_) st = SpeedStats{};
+  }
   // The largest magnitude held in either line (test read, not real-time:
   // it scans 2 x 12 s). The ceiling's bound is stated on the line (§5.1).
   double linePeak() const {
@@ -653,50 +709,458 @@ class Echo {
     if (t != tailN_) { tailN_ = t; tailClock_ = 0; }
   }
 
-  // A head: the sounding delay D, or a crossfade from dA to dB. Each move is
-  // latched to the time.change in force when it starts (§3.5 deferral).
+  // A head: the sounding delay D (moving by V a sample under a repitch law),
+  // or a crossfade from dA to dB. Each move is latched to the time.change /
+  // time.law / time.tempoMode in force when it starts (§3.5 deferral).
+  enum Mode : int { kRepitch = 0, kCrossfade = 1, kJump = 2, kFollow = 4 };
   struct Head {
-    double D = 0;
+    double D = 0, V = 0, T = 0;  // delay, its per-sample velocity, the target
     bool fade = false;
     double dA = 0, dB = 0;
     int fi = 0, fn = 1;
-    int mode = 0;  // the latched time.change of the running fade
+    int mode = kRepitch;         // latched per move
+    int law = 0;                 // latched per move: 0 tape, 1 exponential
+    bool tempo = false;          // the move's cause: the tempo alone
+    double lastPos = 0;          // the sounding read position one sample ago
+    bool statsLive = false;      // false for one sample after a handover (no speed measured)
+    double lnT = 0;              // ln T, cached per target (the exponential law)
+  };
+
+  // The tape law's state (§3.6): a tape at speed v (tape units a sample), the
+  // write head at tape position p, the read head one tape unit behind it. The
+  // write position's history is a line through (baseN, baseP) with slope baseV
+  // (a steady tape) followed by the points recorded every 32 samples since; a
+  // repeat recorded at v(t') plays at v(t) because the read finds t' where the
+  // tape that is under it now was written. pNow and the history restart from 0
+  // whenever the tape law starts after D has been steady (exact, and it keeps
+  // the numbers small over hours).
+  struct Tape {
+    bool active = false;
+    double v = 0, p = 0;          // speed, write position at sample n_
+    std::int64_t baseN = 0;       // the steady segment's end (a sample index)
+    double baseP = 0, baseV = 0;
+    std::int64_t g0 = 0;          // the grid index of the oldest recorded point
+    int head = 0, count = 0;      // the ring of recorded points
+    double c = 0;                 // the read cursor, a sample time
   };
 
   void landHead(int k) {
     Head& h = head_[k];
-    h.D = h.dA = h.dB = tT_[k];
+    h.D = h.dA = h.dB = h.T = tT_[k];
+    h.V = 0;
     h.fade = false;
     h.fi = 0;
     h.fn = 1;
+    h.lnT = std::log(h.T);
+    h.statsLive = false;  // a landing is a handover: no speed is measured across it
+    tape_[k].active = false;
   }
 
   int fadeLength(int mode) const {
     const double xf = plant::xfadeIgnored ? 0.030 : p_[kXfadeMs] / 1000.0;
-    const double s = (mode == 2 && !plant::jumpUsesXfade) ? k::kJumpS : xf;  // repitch: crossfade (M1 placeholder)
+    const double s = (mode == kJump && !plant::jumpUsesXfade) ? k::kJumpS : xf;
     return std::max(1, static_cast<int>(std::lround(s * sr_)));
   }
 
-  // Advance one sample. A fade runs to its end; then, if the target moved by
-  // half a sample or more, the next fade starts toward the LATEST target
-  // (queue, latest wins: intermediate targets are dropped, §3.5).
-  void stepHead(int k) {
+  void startFade(int k, double to, int mode) {
     Head& h = head_[k];
-    if (h.fade && plant::retargetMidFade && std::fabs(tT_[k] - h.dB) >= 0.5) h.dB = tT_[k];
+    h.dA = h.D;
+    h.dB = to;
+    h.fi = 0;
+    h.fn = fadeLength(mode);
+    h.fade = true;
+    h.V = 0;
+    ++fadeCount_[k];
+  }
+
+  // The behaviour a NEW move gets (§3.5): time.change for a key move,
+  // time.tempoMode for a move the tempo alone caused; and the law.
+  void latch(Head& h) const {
+    h.law = static_cast<int>(p_[kLaw]);
+    if (h.tempo) {
+      const int tm = plant::tempoModeIgnored ? 0 : static_cast<int>(p_[kTempoMode]);  // 0 crossfade, 1 glide, 2 follow
+      h.mode = tm == 0 ? kCrossfade : tm == 2 ? kFollow : kRepitch;
+    } else {
+      const int ch = static_cast<int>(p_[kChange]);  // 0 repitch, 1 crossfade, 2 jump
+      h.mode = ch == 0 ? kRepitch : ch == 1 ? kCrossfade : kJump;
+    }
+  }
+
+  // Advance one head by one sample (§3.5-3.8).
+  void stepHead(int k, int cls) {
+    Head& h = head_[k];
+    const double T = tT_[k], Tprev = h.T;
+    const double D0 = h.D;
+    bool tapeRan = false;
+    if (T != Tprev) {  // a new move, or a retarget of the one in flight
+      h.T = T;
+      h.lnT = std::log(T);
+      // A move a KEY caused always follows time.change (§3.8), even when the
+      // tempo moves while it is still in flight: only a settled head hands the
+      // move to time.tempoMode (critic M2-H4).
+      const bool keyInFlight = !h.tempo && (h.fade || std::fabs(h.D - Tprev) >= 1.0);
+      if (cls == 1) h.tempo = false;
+      else if (cls == 2 && (plant::tempoStealsKeyMove || !keyInFlight)) h.tempo = true;
+      latch(h);
+    }
+    // Follow (§3.8): while a follow crossfade runs, its destination keeps
+    // tracking the grid within the 50-cent cap, so the head is on the grid
+    // when the fade ends and following resumes (critic M2-M1).
+    if (h.fade && h.mode == kFollow && cls == 2 && !plant::followNoTrackInFade) {
+      const double dT = T - Tprev;
+      if (dT >= -capUp_ && dT <= capDn_) h.dB += dT;
+    }
+    if (h.fade && plant::retargetMidFade && std::fabs(T - h.dB) >= 0.5) h.dB = T;
     if (h.fade) {
-      if (plant::deferralBroken) h.fn = std::min(h.fn, fadeLength(static_cast<int>(p_[kChange])));
-      if (++h.fi >= h.fn) { h.D = h.dB; h.fade = false; }
+      if (plant::deferralBroken) h.fn = std::min(h.fn, fadeLength(static_cast<int>(p_[kChange]) == 2 ? kJump : kCrossfade));
+      if (++h.fi < h.fn) { finishStep(k, D0, false); return; }
+      h.fade = false;  // the fade has sounded its last (weight-1) sample
+      h.D = h.dB;
+      h.V = 0;
+      h.statsLive = false;  // a handover: dA's position gives way to dB's
+      tape_[k].active = false;
+      // The queue (§3.5): a target that moved during the fade is faded to
+      // next; the latest one wins, the ones between are dropped.
+      if (h.mode != kRepitch && std::fabs(T - h.D) >= 0.5) {
+        startFade(k, T, h.mode == kJump ? kJump : kCrossfade);
+        finishStep(k, D0, false);
+        return;
+      }
     }
-    if (!h.fade && std::fabs(tT_[k] - h.D) >= 0.5) {
-      h.mode = static_cast<int>(p_[kChange]);
-      if (h.mode == 2 && plant::bareJump) { h.D = tT_[k]; return; }
-      h.dA = h.D;
-      h.dB = tT_[k];
-      h.fi = 0;
-      h.fn = fadeLength(h.mode);
-      h.fade = true;
-      ++fadeCount_[k];
+    if (h.mode == kJump && plant::bareJump) {  // the click metric's planted control
+      h.D = T;
+      finishStep(k, D0, false);
+      return;
     }
+    if (h.mode == kCrossfade || h.mode == kJump) {
+      if (std::fabs(T - h.D) >= 0.5) startFade(k, T, h.mode);
+      finishStep(k, D0, false);
+      return;
+    }
+    if (h.mode == kFollow) {  // tempo "follow" (§3.8): exact within 50 cents, a crossfade past it
+      const double dT = T - Tprev;
+      const bool settled = std::fabs(h.D - Tprev) < 1.0;
+      if (settled && (plant::followNoCap || (dT >= -capUp_ && dT <= capDn_))) {
+        // Move toward T by at most the cap: follows the grid exactly and
+        // absorbs any residual a previous move left (critic M2-M2).
+        h.D += plant::followNoCap ? dT : (plant::followKeepsResidual ? dT : std::clamp(T - h.D, -capUp_, capDn_));
+        finishStep(k, D0, false);
+        return;
+      }
+      if (settled) {
+        if (std::fabs(T - h.D) >= 0.5) startFade(k, T, kCrossfade);
+        finishStep(k, D0, false);
+        return;
+      }
+      // else a glide from a key move is still in flight: the law finishes it
+    }
+    // ---- repitch: the law moves D toward T ------------------------------------
+    const double gap = T - h.D;
+    if (gap == 0.0 && h.V == 0.0) { finishStep(k, D0, false); return; }
+    if (!plant::noFallback && std::fabs(gap) / (gap < 0 ? up_ : dn_) > k::kFallbackS * sr_) {
+      ++stats_[k].fallbacks;  // D-006's hybrid: a 12 s -> 10 ms move crossfades, never dives for 12 s
+      startFade(k, T, kCrossfade);
+      finishStep(k, D0, false);
+      return;
+    }
+    const double tau = std::max(1.0, p_[kGlide] * (plant::glideFixedRate ? 48000.0 : sr_));
+    if (h.law == 1 || plant::expLawLinear) {
+      // "exponential" (§3.6): a one-pole on ln D, time constant time.glide.
+      h.V = plant::expLawLinear ? gap / tau : h.D * (h.lnT - std::log(h.D)) / tau;
+    } else {
+      h.V = tapeStep(k, T, tau) - h.D;  // "tape": the varispeed model's read delay
+      tapeRan = true;
+    }
+    // The law's pitch cap (|pitch| <= 12 st, so dD/dt in [-1, +0.5]).
+    if (!plant::noLawCap && !plant::expLawLinear) h.V = std::clamp(h.V, -up_, dn_);
+    if (std::fabs(T - (h.D + h.V)) < 1e-9 && std::fabs(h.V) <= std::fabs(gap)) { h.D = T; h.V = 0; }
+    else h.D += h.V;
+    if (tapeRan) tape_[k].c = static_cast<double>(n_) - h.D;  // the cursor follows a capped head
+    finishStep(k, D0, tapeRan);
+  }
+
+  // After a head step: the tape model lives only while the tape law moves the
+  // head. Once a tape glide has snapped to its target, its history over the
+  // line is steady to ~1e-9 (D only converges once the speeds under the read
+  // are steady), so the next tape move rebuilds an exact steady tape. (A
+  // keep-alive that ran the tape on after a glide changed no result: critic L2.)
+  void finishStep(int k, double /*D0*/, bool tapeRan) {
+    if (!tapeRan) tape_[k].active = false;
+  }
+
+  // The tape law (§3.6): the tape speed lags its target 1/T with time constant
+  // tau; the read sits where the tape now under it was written. Returns the
+  // read delay the model implies (the caller caps it).
+  double tapeStep(int k, double T, double tau) {
+    Tape& tp = tape_[k];
+    const Head& h = head_[k];
+    if (!tp.active) tapeRebuild(k, h.D);
+    if (tau != tapeTau_) { tapeTau_ = tau; tapeA_ = 1.0 - std::exp(-1.0 / tau); }
+    tp.v += (1.0 / T - tp.v) * tapeA_;
+    if (plant::tapeNoHistory) {
+      tapeAdvance(k);
+      return 1.0 / tp.v;  // a speed with no memory: the planted fault
+    }
+    tapeAdvance(k);
+    const double target = tp.p - 1.0;  // one tape unit behind the write head
+    const double c = tapeSolve(k, target, tp.c);
+    return static_cast<double>(n_) - c;
+  }
+
+  // The steady tape that matches the current delay: v = 1/D, history a line.
+  void tapeRebuild(int k, double D) {
+    Tape& tp = tape_[k];
+    tp.active = true;
+    tp.v = 1.0 / D;
+    tp.p = 0.0;
+    tp.baseN = n_ - 1;  // the write position one sample ago; this sample's advance follows
+    tp.baseP = 0.0;
+    tp.baseV = tp.v;
+    tp.g0 = n_ / k::kTapeGrid + 1;
+    tp.head = tp.count = 0;
+    tp.c = static_cast<double>(n_) - D;
+  }
+
+  // One sample of tape travel: p moves by v; every 32 samples the write
+  // position is recorded (the history the read searches).
+  void tapeAdvance(int k) {
+    Tape& tp = tape_[k];
+    tp.p += tp.v;
+    if (n_ % k::kTapeGrid == 0 && n_ > tp.baseN) {
+      const std::int64_t g = n_ / k::kTapeGrid;
+      if (tp.count == tapeCap_) { tp.head = (tp.head + 1) % tapeCap_; --tp.count; ++tp.g0; }
+      if (tp.count == 0) tp.g0 = g;
+      tapeRing_[k][static_cast<std::size_t>((tp.head + tp.count) % tapeCap_)] = tp.p;
+      ++tp.count;
+    }
+  }
+
+  // The history's breakpoints, in time order: j = -2 a synthetic point one
+  // grid step before the base (the steady line), -1 the base, 0..count-1 the
+  // recorded points (every 32 samples), then the present.
+  std::pair<double, double> tapeBp(int k, std::int64_t j) const {
+    const Tape& tp = tape_[k];
+    if (j <= -2) return {static_cast<double>(tp.baseN - k::kTapeGrid), tp.baseP - k::kTapeGrid * tp.baseV};
+    if (j == -1) return {static_cast<double>(tp.baseN), tp.baseP};
+    if (j < tp.count) return {static_cast<double>((tp.g0 + j) * k::kTapeGrid), ringAt(k, tp.g0 + j)};
+    return {static_cast<double>(n_), tp.p};
+  }
+  // The segment [bp(j), bp(j+1)) that holds time t (t in (baseN, now)).
+  std::int64_t tapeSeg(int k, double t) const {
+    const Tape& tp = tape_[k];
+    if (tp.count == 0 || t < static_cast<double>(tp.g0 * k::kTapeGrid)) return -1;
+    return std::min<std::int64_t>(static_cast<std::int64_t>(std::floor(t / k::kTapeGrid)) - tp.g0, tp.count - 1);
+  }
+  // The write position at sample time t: QUADRATIC through three breakpoints
+  // (critic M2-M5: linear interpolation over 32 samples erred by up to 50 cents
+  // in the read's speed at a 10 ms glide; quadratic cuts the error by ~h/tau).
+  // Continuous: every stencil passes through both ends of its segment.
+  double tapeP(int k, double t) const {
+    const Tape& tp = tape_[k];
+    const double now = static_cast<double>(n_);
+    if (t >= now) return tp.p;
+    if (t <= static_cast<double>(tp.baseN)) return tp.baseP - (static_cast<double>(tp.baseN) - t) * tp.baseV;
+    const std::int64_t j = tapeSeg(k, t);
+    const auto [t0, p0] = tapeBp(k, j - 1);
+    const auto [t1, p1] = tapeBp(k, j);
+    const auto [t2, p2] = tapeBp(k, j + 1);
+    if (plant::tapeLinearHistory || !(t1 > t0 && t2 > t1)) return t2 > t1 ? p1 + (p2 - p1) * (t - t1) / (t2 - t1) : p1;
+    const double l0 = (t - t1) * (t - t2) / ((t0 - t1) * (t0 - t2));
+    const double l1 = (t - t0) * (t - t2) / ((t1 - t0) * (t1 - t2));
+    const double l2 = (t - t0) * (t - t1) / ((t2 - t0) * (t2 - t1));
+    return p0 * l0 + p1 * l1 + p2 * l2;
+  }
+  double ringAt(int k, std::int64_t g) const {
+    const Tape& tp = tape_[k];
+    if (tp.count == 0) return tp.baseP;
+    const std::int64_t i = std::clamp<std::int64_t>(g - tp.g0, 0, tp.count - 1);
+    return tapeRing_[k][static_cast<std::size_t>((tp.head + i) % tapeCap_)];
+  }
+  // The time t >= from where the write position equalled `target`: a forward
+  // walk over breakpoints (the cursor never runs backward and cannot pass the
+  // present), a linear estimate inside the segment, then two secant
+  // refinements on the quadratic history. Bounded: a legitimate answer lies
+  // within ~2 samples of the cursor (the read moves at most 4 samples a
+  // sample), so 16 segments are never needed (critic: the cap only binds where
+  // the backstop overrides the answer anyway).
+  double tapeSolve(int k, double target, double from) const {
+    const Tape& tp = tape_[k];
+    const double now = static_cast<double>(n_);
+    if (tapeP(k, from) >= target) return from;
+    if (from < static_cast<double>(tp.baseN)) {
+      if (tp.baseP >= target) return std::max(from, static_cast<double>(tp.baseN) - (tp.baseP - target) / tp.baseV);
+      from = static_cast<double>(tp.baseN);
+    }
+    std::int64_t j = tapeSeg(k, from);
+    for (int it = 0; it < 16; ++it) {
+      const auto [t0, p0] = tapeBp(k, j);
+      const auto [t1, p1] = tapeBp(k, j + 1);
+      if (p1 >= target) {
+        if (!(p1 > p0)) return std::max(from, t1);
+        const double slope = (p1 - p0) / (t1 - t0);
+        double c = t0 + (target - p0) / slope;
+        for (int r = 0; r < 2; ++r) c = std::clamp(c - (tapeP(k, c) - target) / slope, t0, t1);
+        return std::max(from, c);
+      }
+      if (t1 >= now) return now;
+      ++j;
+    }
+    return std::max(from, tapeBp(k, j).first);
+  }
+
+  // ---- line modulation (§7) ----------------------------------------------------
+  // mulberry32, bit for bit the lab's: the only randomness in Echo.
+  struct Stream {
+    std::uint32_t a = 0;
+    double next() {
+      a += 0x6D2B79F5u;
+      std::uint32_t t = (a ^ (a >> 15)) * (1u | a);
+      t = (t + ((t ^ (t >> 7)) * (61u | t))) ^ t;
+      return static_cast<double>(t ^ (t >> 14)) / 4294967296.0;
+    }
+  };
+  struct Drift {
+    Stream r;
+    double pts[4] = {0, 0, 0, 0};
+    double u = 0;
+  };
+
+  // Catmull-Rom through the stream's points, clamped to [-1, 1]: unclamped it
+  // overshoots to 1.25 and would read past the line's 20 ms margin.
+  double driftVal(const Drift& d) const {
+    const double p0 = d.pts[0], p1 = d.pts[1], p2 = d.pts[2], p3 = d.pts[3], u = d.u;
+    const double m1 = 0.5 * (p2 - p0), m2 = 0.5 * (p3 - p1), u2 = u * u, u3 = u2 * u;
+    const double v = (2 * u3 - 3 * u2 + 1) * p1 + (u3 - 2 * u2 + u) * m1 + (-2 * u3 + 3 * u2) * p2 + (u3 - u2) * m2;
+    return plant::driftOvershoot ? v : std::clamp(v, -1.0, 1.0);
+  }
+
+  // Two streams derived from mod.seed alone. A SEEDED reseed (a mod.seed
+  // change, contract §12.2) starts the new streams from the value being
+  // output, so the modulation does not step; only its slope changes.
+  void reseed(bool seeded) {
+    const auto seed = static_cast<std::uint32_t>(p_[kModSeed]);
+    for (int k = 0; k < 2; ++k) {
+      Drift& d = drift_[k];
+      const double cur = seeded ? driftVal(d) : 0.0;
+      d.r.a = seed * 2u + 1u + static_cast<std::uint32_t>(k);
+      if (seeded && !plant::unseededSeed) {
+        d.pts[0] = cur; d.pts[1] = cur;
+        d.pts[2] = d.r.next() * 2 - 1; d.pts[3] = d.r.next() * 2 - 1;
+      } else {
+        for (double& q : d.pts) q = d.r.next() * 2 - 1;
+      }
+      d.u = 0;
+    }
+  }
+
+  // The shape mix in force (0 sine, 1 drift), blending from shapeFrom_ toward
+  // shapeTarget_ over 250 ms after a switch.
+  double shapeNow() const {
+    return shapeW_ >= 1.0 ? shapeTarget_ : shapeFrom_ + (shapeTarget_ - shapeFrom_) * shapeW_;
+  }
+
+  // The offsets (samples) for both lines at this sample. The depth is limited
+  // so the curve's own slope moves the read speed by at most 25 % and the read
+  // stays 3 samples clear of the write head; and the OFFSET itself is
+  // slew-limited to 0.25 sample a sample, so no rate glide, ramp, shape blend,
+  // seed change or lifted depth limit can move the read faster (§7).
+  void modStep() {
+    if (rateL2_ != rateTargetL2_) {  // the rate glides in log-frequency (cached once settled)
+      rateL2_ += (rateTargetL2_ - rateL2_) * rateA_;
+      if (std::fabs(rateTargetL2_ - rateL2_) < 1e-12) rateL2_ = rateTargetL2_;
+      rateF_ = std::exp2(rateL2_);
+    }
+    const double f = rateF_;
+    rDepth_.tick();
+    rSpread_.tick();
+    modPhase_ += 2 * k::kPi * f / sr_;
+    if (modPhase_ >= 2 * k::kPi) modPhase_ -= 2 * k::kPi;
+    for (auto& d : drift_) {
+      d.u += f / sr_;
+      if (d.u >= 1.0) {
+        d.u -= 1.0;
+        d.pts[0] = d.pts[1]; d.pts[1] = d.pts[2]; d.pts[2] = d.pts[3];
+        d.pts[3] = d.r.next() * 2 - 1;
+      }
+    }
+    const double w = shapeNow();
+    if (shapeW_ < 1.0) shapeW_ = std::min(1.0, shapeW_ + 1.0 / modRampN_);
+    double t[2];
+    modTargets(w, t);
+    for (int k = 0; k < 2; ++k) {
+      if (plant::modSlewOff) mods_[k] = t[k];
+      else mods_[k] += std::clamp(t[k] - mods_[k], -k::kModSlopeMax, k::kModSlopeMax);
+      // The read floor wins over the slew (critic M2-M3): a move to a short
+      // time can leave a slewing offset that would read under 3 samples from
+      // the write head, which the kernel cannot. Bounded here, per line.
+      if (!plant::modNoFloorBound) {
+        const auto [lo, hi] = headSpan(k);
+        mods_[k] = std::clamp(mods_[k], k::kMinRead - lo, static_cast<double>(lineLen_ - k::kKernelMargin) - hi);
+      }
+    }
+  }
+
+  // The offsets the curve asks for now (no slew), each line limited by its OWN
+  // heads (§7: A <= D - 3 samples) and by the curve's slope.
+  void modTargets(double w, double* t) const {
+    t[0] = t[1] = 0.0;
+    const double depth = rDepth_.cur;
+    if (depth <= 0.0) return;
+    const double f = rateF_, sp = rSpread_.cur;
+    const double s[2] = {std::sin(modPhase_), std::sin(modPhase_ + sp * k::kPi / 2)};
+    const double a = driftVal(drift_[0]);
+    const double dr[2] = {a, (1 - sp) * a + sp * driftVal(drift_[1])};
+    // max |dm/dt|: 2 pi f for the sine; 3.5 f for Catmull-Rom through [-1, 1]
+    const double slope = std::max(w < 1.0 ? 2 * k::kPi * f / sr_ : 0.0, w > 0.0 ? 3.5 * f / sr_ : 0.0);
+    const double lim = plant::modDepthUnlimited ? depth : k::kModSlopeMax / slope;
+    for (int k = 0; k < 2; ++k) {
+      const double A = std::max(0.0, std::min({depth, lim, headSpan(k).first - k::kMinRead}));
+      t[k] = A * ((1 - w) * s[k] + w * dr[k]);
+    }
+  }
+
+  // The shortest and longest delay any head of line k reads at.
+  std::pair<double, double> headSpan(int k) const {
+    const Head& h = head_[k];
+    if (!h.fade) return {h.D, h.D};
+    return {std::min(h.dA, h.dB), std::max(h.dA, h.dB)};
+  }
+
+  bool headsMoving() const {
+    for (const auto& h : head_)
+      if (h.fade || h.D != h.T) return true;
+    return false;
+  }
+
+
+  // The hard invariant (D-006): the sounding read speed s = 1 - d(pos)/dt
+  // stays in [0.25, 4] at every sample. The law's cap and the modulation's
+  // slew limit keep it inside [0.25, 2.25] by construction; this clamp is the
+  // backstop, and every hit is counted (the suite requires zero). Also keeps
+  // the speed statistics.
+  void backstop(int k) {
+    Head& h = head_[k];
+    SpeedStats& st = stats_[k];
+    double pos = (h.fade ? h.dA : h.D) + mods_[k];
+    if (h.statsLive) {
+      double dp = pos - h.lastPos;
+      const double lo = 1.0 - k::kSMax, hi = 1.0 - k::kSMin;
+      if (!h.fade && (dp > hi || dp < lo)) {
+        const double D = h.lastPos + (dp > hi ? hi : lo) - mods_[k];
+        h.V += D - h.D;
+        h.D = D;
+        tape_[k].c = static_cast<double>(n_) - D;
+        ++st.clamps;
+        pos = h.D + mods_[k];
+        dp = pos - h.lastPos;
+      }
+      const double s = 1.0 - dp;
+      st.sMin = std::min(st.sMin, s);
+      st.sMax = std::max(st.sMax, s);
+      if (s <= 0.0) ++st.reverse;
+    }
+    h.lastPos = pos;
+    h.statsLive = true;
   }
 
   // The read (D-004): 4-point Catmull-Rom (cubic Hermite) at a fractional
@@ -754,18 +1218,30 @@ class Echo {
 
   // Mid-fade both heads sound, equal-gain (D-007, RS-3.6): correlated copies
   // then never sum above the signal, so the loop bound holds through a fade.
-  double readHead(int k) const {
+  // The modulation rides on every head of a line, both mid-fade (§7).
+  double readHead(int k) {
     const Head& h = head_[k];
-    if (!h.fade) return readAt(k, h.D);
+    const double m = mods_[k];
+    if (!h.fade) return readAt(k, pos(k, (plant::blockSteppedD ? heldD_[k] : h.D) + m));
     const double wF = static_cast<double>(h.fi + 1) / h.fn;
-    if (plant::equalPower)
-      return std::cos(wF * k::kPi / 2) * readAt(k, h.dA) + std::sin(wF * k::kPi / 2) * readAt(k, h.dB);
-    return (1.0 - wF) * readAt(k, h.dA) + wF * readAt(k, h.dB);
+    const double a = readAt(k, pos(k, h.dA + m)), b = readAt(k, pos(k, h.dB + m));
+    if (plant::equalPower) return std::cos(wF * k::kPi / 2) * a + std::sin(wF * k::kPi / 2) * b;
+    return (1.0 - wF) * a + wF * b;
+  }
+  // Every read position is held inside the line; an attempt past it is
+  // counted (the suite requires zero: the depth limit and the clamp keep it in).
+  double pos(int k, double p) {
+    if (plant::integerRead) p = std::round(p);
+    const double hi = static_cast<double>(lineLen_ - k::kKernelMargin);
+    if (p > hi) { ++stats_[k].overruns; return hi; }
+    if (p < k::kMinRead) { ++stats_[k].floors; return k::kMinRead; }  // counted: the suite requires zero
+    return p;
   }
 
   std::int64_t readSpan() const {
     double m = 0;
     for (const auto& h : head_) m = std::max({m, h.D, h.fade ? std::max(h.dA, h.dB) : 0.0});
+    m += std::max(std::fabs(mods_[0]), std::fabs(mods_[1]));
     if (m >= lineLen_) m = lineLen_;
     return static_cast<std::int64_t>(std::ceil(m)) + 4;
   }
@@ -791,8 +1267,24 @@ class Echo {
       case kOutGain: rOut_.to(gainTarget(kOutGain), rampN_); break;
       case kMix: rMix_.to(p_[kMix] / 100.0, rampN_); break;
       case kFb: rFb_.to(fbTarget(), rampN_); setTail(computeTail()); break;
-      case kSync: case kTimeMs: case kDiv: case kOffL: case kOffR: resolveBoth(bpm_); break;
-      case kModDepth: setTail(computeTail()); break;
+      case kSync: case kTimeMs: case kDiv: case kOffL: case kOffR:
+        resolveBoth(bpm_);
+        paramMoved_ = true;  // a key move: the next head step latches time.change (§3.5)
+        break;
+      case kModDepth: rDepth_.to(p_[kModDepth] / 1000.0 * sr_, modRampN_); setTail(computeTail()); break;
+      case kModSpread: rSpread_.to(p_[kModSpread] / 100.0, modRampN_); break;
+      case kModRate: rateTargetL2_ = std::log2(p_[kModRate]); break;
+      case kModShape:
+        // Blend from wherever the shape stands now (a seeded switch, §9).
+        if (p_[kModShape] != shapeTarget_) {
+          shapeFrom_ = shapeNow();
+          shapeTarget_ = p_[kModShape];
+          shapeW_ = plant::shapeInstant ? 1.0 : 0.0;
+        }
+        break;
+      case kModSeed:  // only a CHANGE reseeds: a host re-sending the value must not freeze the drift (critic M2-H2)
+        if (plant::seedResendRestarts || p_[kModSeed] != seedApplied_) { reseed(true); seedApplied_ = p_[kModSeed]; }
+        break;
       case kRoute: switchRouting(static_cast<int>(p_[kRoute])); break;
       case kInOn: switchFilter(fIn_, p_[kInOn]); break;
       case kLoopOn: switchFilter(fLoop_, p_[kLoopOn]); break;
@@ -800,7 +1292,7 @@ class Echo {
       case kInHp: case kInLp: fIn_.settled = false; break;
       case kLoopHp: case kLoopLp: fLoop_.settled = false; break;
       case kOutHp: case kOutLp: fOut_.settled = false; break;
-      default: break;  // time.change / law / tempoMode: deferred (§3.5); mod.*: M2
+      default: break;  // time.change / law / tempoMode: deferred (§3.5); mod.rateHz glides in modStep
     }
   }
 
@@ -818,6 +1310,12 @@ class Echo {
     }
     rMix_.target = p_[kMix] / 100.0; rMix_.snap();
     rFb_.target = fbTarget(); rFb_.snap();
+    rDepth_.target = p_[kModDepth] / 1000.0 * sr_; rDepth_.snap();
+    rSpread_.target = p_[kModSpread] / 100.0; rSpread_.snap();
+    rateL2_ = rateTargetL2_ = std::log2(p_[kModRate]);
+    rateF_ = p_[kModRate];
+    shapeW_ = 1.0;
+    shapeFrom_ = shapeTarget_ = p_[kModShape];
     for (FilterPos* f : {&fIn_, &fLoop_, &fOut_}) {
       f->w = f->wT = p_[f->onKey];
       f->wStep = 0;
@@ -832,24 +1330,41 @@ class Echo {
   }
 
   // The new patch takes everything: at a load's end, or at once when resting.
+  // The modulation restarts from the patch's seed and phase 0, so a loaded
+  // preset's drift is derived from mod.seed alone whatever played before
+  // (D-026; the old audio has faded, so nothing audible steps).
   void adoptPatch() {
     snapAll(false);
     resolveBoth(bpm_);
+    if (!plant::loadKeepsModState) {
+      modPhase_ = 0.0;
+      reseed(false);
+      seedApplied_ = p_[kModSeed];
+    }
   }
 
   // One resting sample. Everything lands ONCE per change (critic M4: snapping
   // every sample made resting cost more CPU than running): on entering rest and
   // after any setParam / load while resting. The tempo and heads land too.
   void atRest(double bpmEnd) {
+    bool land = false;
     if (plant::restRamps) { tickRamps(); tickFilters(); tickRoute(); }
-    else if (restDirty_) { snapAll(true); restDirty_ = false; }
+    else if (restDirty_) { snapAll(true); restDirty_ = false; land = true; }
     if (!plant::tempoGlidesAtRest) {
       const bool moved = bpm_ != bpmEnd;
       bpm_ = bpmPrev_ = bpmEnd;
       if (moved) resolveBoth(bpmEnd);
     }
-    for (int k = 0; k < 2; ++k)
-      if (head_[k].D != tT_[k] || head_[k].fade) landHead(k);
+    for (int k = 0; k < 2; ++k) {
+      if (head_[k].D != tT_[k] || head_[k].fade) { landHead(k); land = true; }
+      head_[k].statsLive = false;  // nothing sounds at rest: no speed across a wake
+    }
+    // The phase and the drift HOLD (§10), and the offset LANDS on the curve
+    // they define, so the first repeat after a wake plays at speed 1, not
+    // slewing in from 0 (critic M2-M4: it played 39 ms at 0.75).
+    if (land && !plant::wakeOffsetFromZero) modTargets(shapeNow(), mods_);
+    else if (plant::wakeOffsetFromZero) mods_[0] = mods_[1] = 0.0;
+    paramMoved_ = false;
     loadLeft_ = 0;
   }
 
@@ -908,6 +1423,24 @@ class Echo {
   int clearW_ = 0;               // the write index at the last logical clear
   int sinceClear_ = 0;           // samples written since it, saturating at lineLen_
   std::uint64_t fadeCount_[2] = {0, 0};
+  // M2
+  std::int64_t n_ = 0;            // samples processed since reset (the tape's clock)
+  bool paramMoved_ = false;
+  double up_ = 1.0, dn_ = 0.5, capUp_ = 0.0, capDn_ = 0.0;
+  Tape tape_[2];
+  std::array<std::vector<double>, 2> tapeRing_;
+  int tapeCap_ = 0;
+  SpeedStats stats_[2];
+  Ramp rDepth_, rSpread_;
+  int modRampN_ = 12000;
+  double rateA_ = 0.0, rateL2_ = 0.0, rateTargetL2_ = 0.0, rateF_ = 1.0;
+  double tapeTau_ = -1.0, tapeA_ = 0.0;
+  double seedApplied_ = -1.0;
+  double heldD_[2] = {0.0, 0.0};  // BLOCK_STEPPED_D plant only
+  double modPhase_ = 0.0;
+  double shapeW_ = 1.0, shapeFrom_ = 0.0, shapeTarget_ = 0.0;
+  Drift drift_[2];
+  double mods_[2] = {0.0, 0.0};
   std::atomic<std::uint64_t> nonFinite_{0};
   std::atomic<bool> nonFiniteLatch_{false};
 };

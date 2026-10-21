@@ -6,7 +6,8 @@ gate, made by a new decision that cites this one. Written by the Phase A lead se
 review of revision 1 (folded in here), and measurements on the lab (`lab/echo-lab.html`). S-1 (§5.3) and the
 defaults of the two keys added by the rulings were ratified with it (D-017). **Amended 2026-10-20 by D-018, D-019 and D-020**
 (§10: rest waits for the wet to fall below −120 dBFS; the tail clock restarts at a hold or a tail change; a load fades
-the old repeats under their old settings).
+the old repeats under their old settings), and **2026-10-21 by D-025 and D-026** (§10: the tail clock also restarts
+while a head moves; §7, §10: a seed reseeds only when it changes, and a load restarts the modulation from its seed).
 
 **What this is.** The behaviour Echo must have, stated so the C++ core (M1–M3) can be built and tested against it.
 The machine-readable half is [`params.json`](params.json): every key, unit, range, default, morph class, rate
@@ -282,7 +283,12 @@ A modulation offset is added to every read head of a line (both heads mid-crossf
 - **Smoothing**: depth and spread ramp over 250 ms; a shape switch blends the two shapes' values over 250 ms; the
   rate glides in log-frequency (100 ms).
 - **Seed change** is a declared **seeded jump** (contract §12.2): the new streams start from the value being
-  output, so the modulation does not step; only its slope changes.
+  output, so the modulation does not step; only its slope changes. Only a **changed** value reseeds: a host or morph
+  re-sending the same seed changes nothing (D-026).
+- **A load** restarts the modulation from the patch's `mod.seed` at phase 0, so a loaded preset's drift is derived from
+  its seed alone whatever played before; the old repeats have faded by then, so nothing audible steps (D-026).
+- **At rest** the phase and the drift hold, and the offset rests ON the curve they define, so a wake plays at the
+  modulation's own speed rather than slewing in from 0.
 - The modulated read is a snapshot for the visualiser (D-011).
 
 ## 8. Mix and I/O gain
@@ -365,7 +371,8 @@ passes bring every write below −120 dBFS; one more pass is the gate's window; 
 blocker settling.
 
 **The tail gate and rest (A5, RS-7.3–7.6, A16 as amended).** When the input has been silent for a whole read span
-and every line write **and every wet sample (after the loop and output filters; D-018)** in that span is below −120 dBFS — **or** when the declared tail has elapsed on the **tail clock** (D-019: it counts silent samples since the input stopped, the loop was last held at g ≥ 1, or the declared tail last changed, whichever is latest), since the input
+and every line write **and every wet sample (after the loop and output filters; D-018)** in that span is below −120 dBFS — **or** when the declared tail has elapsed on the **tail clock** (D-019: it counts silent samples since the input stopped, the loop was last held at g ≥ 1, or the declared tail last changed, whichever is latest, and it restarts while any head still glides or crossfades,
+D-025, because the tail is built from the target times and a shortening glide still sounds the old, longer time), since the input
 went silent, whichever comes first — Echo clears its lines, filter states and DC state and is **at rest**. So the
 output is exact zero at the end of the declared tail **by construction**, never as an estimate. At rest:
 - the output is exact zero (silence in, silence out);

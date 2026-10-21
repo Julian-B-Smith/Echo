@@ -9,7 +9,8 @@ lives in `DECISIONS.md`; horde's shipping bar is `intake/module-1.0-bar.md`.
 - **Phase:** Phase 0 CLOSED 2026-10-20 (D-013). Phase A CLOSED 2026-10-20 (PR #4;
   D-015–D-017). **M1 CLOSED 2026-10-21** (PR #7 merged, 5c3e822; T-006;
   D-018–D-022): the C++ core and its 39-check suite, 52 planted faults caught,
-  green on Mac/clang and Linux/GCC, ASan + UBSan clean in CI. **M2 is next.**
+  green on Mac/clang and Linux/GCC, ASan + UBSan clean in CI. **M2 gate MET on its
+  branch 2026-10-21** (T-009; D-023–D-026): closes when its PR lands on main. **M3 is next.**
 - **Oracle:** `./verify fast` = kit integrity, leak gate, private-name gate,
   structure, manifest, intake pin, legal gate, **lab smoke** (`tools/lab_smoke.mjs`,
   ~7 s), and the **core gate**: a warning-free Release build of `core/`, the M1
@@ -77,6 +78,15 @@ commercial delay or borrow its mode names, presets or UI text.
 - **Gate:** repitch accuracy in cents and modulation depth tested; the click
   metric (with a planted-click control) passes under a 1 Hz full-range time
   sweep in every mode.
+- **Status: gate MET 2026-10-21 on branch `m2`** (T-009): both repitch laws
+  (tape: a varispeed model with a quadratic 32-sample history; exponential),
+  the 12 st cap, the 3 s fallback, the speed backstop (zero hits required),
+  the three tempo modes, sine and seeded-drift modulation. The suite is 52
+  checks with 75 planted faults caught (`traces/2026-10-21-m2.md`), after an
+  independent Opus critic review (FIX-THEN-SHIP: 4 HIGH, 6 MED, all fixed or
+  recorded). Click gate (D-023): s fixed at 2.25, one threshold 2.5, clean ≤ 1.91,
+  faults ≥ 3.5. Memory: 18.71 MiB per instance at 192 kHz (lines 17.61, tape
+  history 1.10).
 
 ### M3 — Rack admission (the 1.0 bar)
 - FOUNDATIONS FX-operator ABI (vendored, sha256-pinned; brief filed first);
@@ -163,6 +173,22 @@ commercial delay or borrow its mode names, presets or UI text.
   stays bit-identical despite 153 fused ops in `process` (D-022).
 - **Acceptance criteria:** each item lands with a planted control, or is ruled out
   in DECISIONS.
+
+### T-009 — M2: moving time and modulation
+- **Status:** in progress 2026-10-21: the M2 gate is met on branch `m2`, in review
+  (PR); done when it lands on main. Trace: `traces/2026-10-21-m2.md`.
+- **Scope:** `core/include/echo/{engine,plants}.h`, `core/tests/core_tests.cpp`;
+  SPEC §7 and §10 amended by D-025 and D-026.
+- **Acceptance criteria:** the M2 gate above.
+- **Out of scope:** M3's ABI swap, meters, presets, CPU bench; T-008.
+
+### T-008 — D-009's other two click readings (M1 residual, M3 AR-whitened)
+- **Status:** open.
+- **Scope:** `core/tests/core_tests.cpp`.
+- **Acceptance criteria:** both readings implemented as reports with planted
+  controls; whether either gates is a human ruling (D-023 gates on M2 only). Also
+  report horde's B265 reading beside them (contract §12 A11; critic M2-L5).
+- **Out of scope:** engine changes.
 
 ### T-002 — Spin-up filings
 - **Status:** open (drafts in `docs/filings/`)
