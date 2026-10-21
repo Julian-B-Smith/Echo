@@ -555,3 +555,35 @@ Set at M2 close, as D-021 scheduled. By poll:
   collide with M3's, so the M3 session is told, and M4's core work lands in its own files or after M3's batch that
   touches the same ones.
 
+
+## D-028 — The M3 plan approved; the bank's size, the face and the CPU budget (RATIFIED by poll, 2026-10-21)
+
+The M3 planning session wrote the plan into ROADMAP (M3's evidence map for the 21 MUST rows; queue T-010 – T-027;
+batches B1–B5, closing by 2026-12-04) and polled the human. Each answer took the lead's recommendation; the
+session said beforehand that it hoped for exactly that, so these rulings deserve a second look at each item's gate.
+- **Q-M3P: the plan, approved as written.** Each item still asks its own human gates as it reaches them (the
+  intake re-pin, spec revision 3, `./verify` edits, outward filings, goldens). Rejected: re-ordering first;
+  rework.
+- **Q-M3B: the factory bank is an init plus 7** (T-021): a slap, a synced dotted ping-pong, a dark dub loop near
+  unity, a modulated chorus-like line, a mid/side wide, a tape-repitch throw, a past-unity edge patch. The final
+  seven are picked by listening (T-023). Rejected: init + 5 (thin coverage of the range); init + 11 (more
+  listening and goldens than the slack allows).
+- **Q-M3F: Echo specifies the face; horde's workshop draws it** (T-022). Echo writes `docs/face.md` (face and
+  expanded keys, groups, keyboard order) and an ADR-203 law check; horde's FX screens workshop renders the
+  house-style UI and owns the GUI review. Rejected: Echo building a house-style face itself (more M3 work that
+  would compete with M4's own screen, D-027).
+- **Q-A3: closed on the bar's approved budget** (`intake/module-1.0-bar.md` appendix, "Budget approved",
+  2026-10-04): ≤ 2 % of a min-spec core at defaults and ≤ 4 % at worst per FX module, with ADR-236's 4 % ceiling
+  for the automated and morphing rows. Echo is reported against it and never gated (RS-8.3). Rejected: an
+  Echo-specific figure.
+
+## D-029 — T-019 builds the one offline IR renderer; M4 adopts it (RATIFIED by the human, 2026-10-21)
+
+M4's gate 1 (D-027) says ONE renderer feeds the display, the tail oracle and D-010's mono-fold metric. M3's B408
+report (T-019) needs that metric in B3, before M4 would exist. The M3 plan flagged the overlap rather than adjusting
+either gate. The human ruled: **T-019 builds the offline impulse-response renderer in its own file,
+`core/include/echo/ir_render.h`**, a non-real-time clone of the engine on the public API (D-011: deterministic,
+never probed from a live line), and the stereo report measures through it. M4 adopts that file for the display,
+so one renderer holds from M3 on. M4 keeps its own gate rows 2–4 (the snapshot label, off the audio thread, the
+100 ms redraw) and whatever caching or worker thread they need. Rejected: T-019 measuring on a plain offline
+instance and M4 re-pointing the metric later (two renderers until M4 closes).
