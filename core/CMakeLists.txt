@@ -84,14 +84,17 @@ target_compile_options(echo_hash_nopragma PRIVATE ${ECHO_WARN} ${ECHO_FPC_ISA} $
 # M4 (ROADMAP T-030, D-030): the one offline IR renderer's suite, in its own
 # source so M4 never edits M3's core_tests.cpp. Same two-binary shape:
 # echo_ir_tests clean, echo_ir_plants with every M4 plant switchable.
+# The render service (ir_service.h) runs a worker thread: link the platform's
+# thread library (a no-op on macOS, -pthread on Linux/GCC).
+find_package(Threads REQUIRED)
 add_executable(echo_ir_tests tests/ir_tests.cpp)
-target_link_libraries(echo_ir_tests PRIVATE echocore)
+target_link_libraries(echo_ir_tests PRIVATE echocore Threads::Threads)
 target_compile_options(echo_ir_tests PRIVATE ${ECHO_WARN})
 if(ECHO_SANITIZE)
   target_compile_options(echo_ir_tests PRIVATE -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer)
   target_link_options(echo_ir_tests PRIVATE -fsanitize=address,undefined)
 endif()
 add_executable(echo_ir_plants tests/ir_tests.cpp)
-target_link_libraries(echo_ir_plants PRIVATE echocore)
+target_link_libraries(echo_ir_plants PRIVATE echocore Threads::Threads)
 target_compile_definitions(echo_ir_plants PRIVATE ECHO_PLANTS=1)
 target_compile_options(echo_ir_plants PRIVATE ${ECHO_WARN})

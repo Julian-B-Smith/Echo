@@ -631,3 +631,30 @@ should be drawn: the one heard right after loading the patch, or the one reached
   modulated, so the drawing never claims to be the live curve then.
 - **Guarded by:** `irSeedAfterReset` (the old order), caught by the load-path reference and by the reuse check.
 - **Rejected:** drawing the knob-path curve (not a function of the patch, so it cannot be cached or reproduced).
+
+## D-032 — B4-2's measured amendments: a head fixed in samples; columns; the spectrum strip's oracle (lead's record, 2026-10-21; for the human's review on B4-2's PR)
+
+Building T-031 and T-032 turned up three choices that the plan's wording got wrong. Each is a narrowing of the plan's
+wording, never of the gate (gate 4 stays 100 ms; gate 1 stays bit for bit), and is recorded here for review:
+- **Frame 1 is the first 96 000 samples, not the first 2 s.** The renderer costs per sample. In the service, the
+  worst of 20 requests on a slow patch (drift, mid/side, feedback 99 %, all filters) took **228 ms** for a 2 s head at
+  192 kHz; the renderer alone takes 85 ms at best. A fixed sample budget costs the same at every rate: it measured a
+  worst of 16–29 ms at 48 and 192 kHz on the dev Mac. That is 2 s at 48 kHz and 0.5 s at 192 kHz, and the service
+  extends the same render by 0.5 s chunks after it. Rejected: a 2 s head (fails gate 4 at 192 kHz); a time-budgeted
+  head (deterministic content, but how much frame 1 shows would then depend on the machine).
+- **The echogram is drawn as columns, each the render's own peak sample.** A screen has hundreds of columns and a
+  render millions of samples. A column carries one sample, the one of greatest magnitude in its range, by index and
+  value, so every drawn stem is a render sample bit for bit and no peak is thinned (plant `viewDecimatesPeaks`).
+  Rejected: means or resampling (they draw values the engine never produced).
+- **The spectrum strip's oracle is the geometric step, not an analytic |F|.** The loop filter's response is private
+  to `engine.h`; a test that re-derived it would be a second model of the engine, the thing D-011 rules out. With
+  every filter off, each generation is flat and the next is exactly 20 log₁₀ g lower; with the loop filter on, the
+  step from one generation to the next is the same at every n (|F|·g per pass, so the strip shows Fⁿ up to a
+  constant). Both are checked within 0.1 dB from 100 Hz to 0.45 fs.
+- **Open: the service's memory.** The cache holds 2 × slots × window doubles. With 8 slots and an 8 s window that is
+  49 MiB at 48 kHz and 197 MiB at 192 kHz, plus the clone's 18.7 MiB. T-034 picks the window and the slot count.
+  The lead's proposal: size the slots from a fixed budget (for example 64 MiB) rather than a fixed count. To be ruled
+  with the screen.
+- **Observed, not acted on:** the worker's renders ran about 2.7× slower than the same render alone. The likely cause
+  is macOS scheduling the worker on an efficiency core. horde's host sets its own thread priorities, so the core
+  requests none.
