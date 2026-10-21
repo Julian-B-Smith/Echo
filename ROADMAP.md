@@ -6,10 +6,10 @@ lives in `DECISIONS.md`; horde's shipping bar is `intake/module-1.0-bar.md`.
 
 ## Status
 
-- **Phase:** Phase 0 CLOSED 2026-10-20 (D-013). **Phase A gate MET** 2026-10-20
-  on its branch (T-003; D-015–D-017): `spec/` revision 2 ratified, the lab smoke
-  in `./verify fast`, Q-A1, Q-A2, Q-A4, Q-A5 and S-1 closed. Phase A closes when
-  its PR lands on main; **M1 (the C++ core) is next.**
+- **Phase:** Phase 0 CLOSED 2026-10-20 (D-013). **Phase A CLOSED 2026-10-20**
+  (PR #4 merged, 8187aef; T-003; D-015–D-017): `spec/` revision 2 ratified, the
+  lab smoke in `./verify fast`, Q-A1, Q-A2, Q-A4, Q-A5 and S-1 closed.
+  **M1 (the C++ core) is next.**
 - **Oracle:** `./verify fast` = kit integrity, leak gate, private-name gate,
   structure, manifest, intake pin, legal gate, **lab smoke** (`tools/lab_smoke.mjs`,
   every detector with a planted must-fail control, ~7 s). The C++ invariant suite arrives at
@@ -105,11 +105,11 @@ commercial delay or borrow its mode names, presets or UI text.
 - **Out of scope:** any spec or code.
 
 ### T-003 — Phase A: spec + lab twin
-- **Status:** in progress 2026-10-20 (D-015, D-016). `spec/SPEC.md` revision 2,
+- **Status:** done 2026-10-20 (PR #4, 8187aef; trace: `traces/2026-10-20-phase-a.md`; D-015–D-017). `spec/SPEC.md` revision 2,
   `spec/params.json` (29 keys), `lab/echo-lab.html` (A/B panels, a blind bench,
   free play with every key, an IR echogram), `tools/lab_smoke.mjs` in `./verify
   fast`. An Opus critic reviewed revision 1 (REWORK, 7 HIGH; all fixed, D-016).
-  Spec ratified 2026-10-20 (D-017): done when the PR lands on main.
+  Spec ratified 2026-10-20 (D-017).
 - **Scope:** `spec/`, `lab/`, `tools/`, the `./verify` lab gate, CI's node step.
 - **Acceptance criteria:** the Phase A gate above.
 - **Out of scope:** any C++; `intake/`; the manifest.
