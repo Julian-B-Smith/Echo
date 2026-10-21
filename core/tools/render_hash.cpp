@@ -17,8 +17,11 @@
 int main() {
   echo::Echo e;
   e.prepare(48000, 512);
-  for (auto [k, v] : {std::pair<const char*, double>{"time.sync", 0}, {"time.ms", 90}, {"fb.amount", 70}, {"mix", 60},
-                      {"filt.in.on", 1}, {"filt.in.hpHz", 120}, {"filt.out.on", 1}, {"filt.out.lpHz", 7000}})
+  // A FRACTIONAL delay (90.37 ms is 4337.76 samples): at a whole-sample delay
+  // every interpolation product is exact, so a fused op changes no bit and the
+  // probe cannot see contraction (GCC's first CI runs: 167 fused ops, same hash).
+  for (auto [k, v] : {std::pair<const char*, double>{"time.sync", 0}, {"time.ms", 90.37}, {"time.offR", 7.3}, {"fb.amount", 70},
+                      {"mix", 60}, {"filt.in.on", 1}, {"filt.in.hpHz", 120}, {"filt.out.on", 1}, {"filt.out.lpHz", 7000}})
     e.setParam(k, v);
   const int n = 96000;
   std::vector<double> L(n), R(n), oL(n), oR(n);
@@ -29,8 +32,10 @@ int main() {
     R[i] = L[i] * 0.7;
   }
   for (int p = 0; p < n; p += 512) {
+    if (p == 10240) { e.setParam("filt.out.lpHz", 2300); e.setParam("filt.in.hpHz", 410); }  // cutoff glides
+    if (p == 20480) { e.setParam("mix", 35); e.setParam("fb.amount", 85); e.setParam("io.outGain", -3.7); }  // ramps
     if (p == 30720) e.setParam("route.mode", 2);
-    if (p == 40960) e.setParam("time.ms", 140);
+    if (p == 40960) e.setParam("time.ms", 140.61);
     e.process(L.data() + p, R.data() + p, oL.data() + p, oR.data() + p, 512, 120);
   }
   std::uint64_t h = 1469598103934665603ull;

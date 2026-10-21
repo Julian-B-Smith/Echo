@@ -184,6 +184,12 @@ core_gate() {
         for t in echo_hash_ref echo_hash echo_hash_nopragma; do
           if command -v objdump >/dev/null 2>&1; then dis="$(objdump -d "$b/$t" 2>/dev/null)"; else dis="$(otool -tv "$b/$t" 2>/dev/null)"; fi
           echo "    $t: $(printf '%s\n' "$dis" | grep -ciE 'vfmadd|vfmsub|vfnmadd|fmadd|fmsub|fmla') fused-op instructions" >&2
+          # ...and the functions they sit in (objdump only), so a fused op left
+          # in a pragma build can be traced to engine code or to the caller.
+          if command -v objdump >/dev/null 2>&1; then
+            printf '%s\n' "$dis" | awk '/^[0-9a-f]+ <.*>:$/ {fn=$2} tolower($0) ~ /vfmadd|vfmsub|vfnmadd/ {print fn}' \
+              | sort | uniq -c | sort -rn | head -6 | sed 's/^/      /' >&2
+          fi
         done
         ok=1 ;;
       *)
