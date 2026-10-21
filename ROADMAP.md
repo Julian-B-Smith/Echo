@@ -6,11 +6,10 @@ lives in `DECISIONS.md`; horde's shipping bar is `intake/module-1.0-bar.md`.
 
 ## Status
 
-- **Phase:** Phase 0 CLOSED 2026-10-20 (D-013). **Phase A CLOSED 2026-10-20**
-  (PR #4 merged, 8187aef; T-003; D-015–D-017): `spec/` revision 2 ratified, the
-  lab smoke in `./verify fast`, Q-A1, Q-A2, Q-A4, Q-A5 and S-1 closed.
-  **M1 (the C++ core) gate MET on its branch 2026-10-20** (T-006; D-018): closes
-  when its PR lands on main. **M2 is next.**
+- **Phase:** Phase 0 CLOSED 2026-10-20 (D-013). Phase A CLOSED 2026-10-20 (PR #4;
+  D-015–D-017). **M1 CLOSED 2026-10-21** (PR #7 merged, 5c3e822; T-006;
+  D-018–D-022): the C++ core and its 39-check suite, 52 planted faults caught,
+  green on Mac/clang and Linux/GCC, ASan + UBSan clean in CI. **M2 is next.**
 - **Oracle:** `./verify fast` = kit integrity, leak gate, private-name gate,
   structure, manifest, intake pin, legal gate, **lab smoke** (`tools/lab_smoke.mjs`,
   ~7 s), and the **core gate**: a warning-free Release build of `core/`, the M1
@@ -63,7 +62,7 @@ commercial delay or borrow its mode names, presets or UI text.
 - **Gate:** the suite runs in `./verify fast`, green; every planted control
   proven to fire (recorded in a trace); memory figure stated per instance at
   192 kHz worst case.
-- **Status: gate MET 2026-10-20 on branch `m1-core`** (T-006): 39 checks green,
+- **Status: CLOSED 2026-10-21** (PR #7, 5c3e822; T-006): 39 checks green,
   52 of 52 planted faults caught (`traces/2026-10-20-m1-core.md`), after an
   independent Opus critic review (FIX-THEN-SHIP: 4 HIGH, 8 MED, all fixed or
   recorded; D-018–D-020). Memory measured at prepare: **17.61 MiB per instance at
@@ -140,8 +139,7 @@ commercial delay or borrow its mode names, presets or UI text.
 - **Out of scope:** the spin-up notice (T-002).
 
 ### T-006 — M1: the C++ core and its invariant suite
-- **Status:** in progress 2026-10-20: the M1 gate is met on branch `m1-core`, in review
-  (PR #7); done when it lands on main. Trace: `traces/2026-10-20-m1-core.md`.
+- **Status:** done 2026-10-21 (PR #7, 5c3e822; trace: `traces/2026-10-20-m1-core.md`).
 - **Scope:** `core/`, `tools/check_manifest.py`, `./verify`'s core gate, CI's C++
   note; SPEC §10 amended by D-018.
 - **Acceptance criteria:** the M1 gate above.
