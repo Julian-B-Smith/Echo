@@ -31,8 +31,11 @@
 
 // No fused multiply-add here either (CLAUDE.md §Domain): scoped exactly as
 // engine.h scopes it, and restored at the end of the file, so the spectra,
-// the EDC and the renderer's own arithmetic round the same in every build
-// (native and wasm alike, T-034) without touching the includer's numerics.
+// the EDC and the renderer's own arithmetic contract no a*b+c into one
+// rounding in any build. (libm's pow, log10, sin and cos may still differ
+// between platforms: T-034 compares the wasm build's output with the native
+// one rather than assuming it.) Clang's closing DEFAULT also resets an
+// includer's own OFF: engine.h does the same.
 #if !defined(ECHO_FP_PRAGMA_OFF)
 #if defined(__clang__)
 #pragma STDC FP_CONTRACT OFF
@@ -49,21 +52,31 @@ inline constexpr double kIrFloorDb = -120.0;  // the echogram's floor (SPEC §10
 // ---- the stem echogram ---------------------------------------------------------
 
 // One display column: the render sample of greatest magnitude in its range.
+inline constexpr std::int64_t kIrColumnZero = -1;         // every sample in the range is exact zero
+inline constexpr std::int64_t kIrColumnNotRendered = -2;  // part of the range is not rendered yet (critic B4-2 M4)
 struct IrColumn {
-  std::int64_t index = -1;  // -1: every sample in the range is exact zero
-  double value = 0.0;       // the render's own sample at `index`
+  std::int64_t index = kIrColumnZero;  // a sample index, or one of the two sentinels above
+  double value = 0.0;                  // the render's own sample at `index`
 };
 
 // Columns of x over the sample range [x0, x1): column c covers
 // [x0 + c*(x1-x0)/n, x0 + (c+1)*(x1-x0)/n), integer-divided, so the columns
 // tile the range exactly with no gap and no overlap. Ties keep the earliest.
+// x is what is rendered so far (a frame's [0, ready)): a column reaching past
+// it is kIrColumnNotRendered, never "exact zero", so a partial frame never
+// draws a tail that has ended when it has only not been rendered yet.
 inline void irColumns(std::span<const double> x, std::int64_t x0, std::int64_t x1, std::span<IrColumn> cols) {
   const auto n = static_cast<std::int64_t>(cols.size());
   const auto len = static_cast<std::int64_t>(x.size());
   for (std::int64_t c = 0; c < n; ++c) {
-    const std::int64_t a = std::clamp<std::int64_t>(x0 + c * (x1 - x0) / n, 0, len);
-    const std::int64_t b = std::clamp<std::int64_t>(x0 + (c + 1) * (x1 - x0) / n, 0, len);
+    const std::int64_t a = std::max<std::int64_t>(x0 + c * (x1 - x0) / n, 0);
+    const std::int64_t b = x0 + (c + 1) * (x1 - x0) / n;
     IrColumn col;
+    if (b > len && !plant::viewUnrenderedIsZero) {
+      col.index = kIrColumnNotRendered;
+      cols[static_cast<std::size_t>(c)] = col;
+      continue;
+    }
     for (std::int64_t i = a; i < b; ++i) {
       const double v = x[static_cast<std::size_t>(i)];
       if (plant::viewDecimatesPeaks) {  // the plant: the column's first sample, peak or not
@@ -137,27 +150,61 @@ inline void fft(std::vector<std::complex<double>>& a) {  // iterative radix-2, s
 }
 }  // namespace detail
 
-// The spacing of one channel's generations, in seconds: the clone's resolved
-// time for that line (after offsets, the §3.4 clamp and synced folding).
-// Ping-pong crosses the lines, so its generations alternate channels; the
-// strip is defined for stereo and mid/side, where line k feeds channel k.
-inline double irGenerationSpacing(const IrInfo& info, const IrPatch& patch, int channel) {
-  if (plant::viewGenWindowFromBase && patch[kSync] < 0.5) return patch[kTimeMs] / 1000.0;  // the plant: the base time
-  return info.times[static_cast<std::size_t>(channel & 1)];
+// Where one channel's generations arrive, in seconds: generation n (1-based)
+// at first + (n - 1) * spacing. From SPEC §4's routing table and the clone's
+// resolved line times T0, T1 (after offsets, the §3.4 clamp, synced folding):
+//   stereo:    channel k is line k alone: first = spacing = Tk.
+//   ping-pong: every input enters line 0 and the feedback crosses, so the
+//              repeats alternate L (T0), R (T0+T1), L (2T0+T1), ...: per
+//              channel first = T0 (L) or T0+T1 (R), spacing = T0+T1, and
+//              each channel generation is TWO passes of the loop.
+//   mid/side:  both channels are M + S and M - S. With a mono input (the
+//              display's, IrInput::Mono) only M sounds: first = spacing = T0.
+//              With side content and T0 != T1 the two lines interleave and a
+//              channel has no single spacing: ok = false (critic B4-2 H1).
+struct IrGenWindows {
+  double first = 0.0, spacing = 0.0;
+  int passes = 1;   // loop passes from one channel generation to the next
+  bool ok = false;
+};
+inline IrGenWindows irGenerationWindows(const IrInfo& info, const IrRequest& r, int channel) {
+  const double t0 = info.times[0], t1 = info.times[1];
+  IrGenWindows w;
+  w.ok = true;
+  switch (static_cast<int>(r.patch[kRoute])) {
+    case 1:
+      w.first = (channel & 1) ? t0 + t1 : t0;
+      w.spacing = t0 + t1;
+      w.passes = 2;
+      break;
+    case 2:
+      if (r.input != IrInput::Mono && t0 != t1) return IrGenWindows{};
+      w.first = w.spacing = t0;
+      break;
+    default:
+      w.first = w.spacing = info.times[static_cast<std::size_t>(channel & 1)];
+      if (plant::viewGenWindowFromBase && r.patch[kSync] < 0.5) w.first = w.spacing = r.patch[kTimeMs] / 1000.0;  // the plant: the base time
+      break;
+  }
+  if (plant::viewGenIndexOffByOne) w.first += w.spacing;  // the plant: generation n drawn at n + 1
+  return w;
 }
 
 // Magnitude spectra, in dB re the stated level, of generations 1..gens of one
-// channel. Generation n is the rectangular window of one spacing T centred on
-// its arrival n*T (so neighbours never share a sample), zero-padded to nfft (a
-// power of two >= T*sr). out is gens x (nfft/2 + 1), row-major. Returns false
-// if a window runs past the render or nfft is too small.
-inline bool irGenerationSpectra(std::span<const double> x, double sr, double T, double levelDb, int gens, std::size_t nfft, std::span<double> out) {
-  const auto w = static_cast<std::int64_t>(std::floor(T * sr));
+// channel. Generation n is the rectangular window one spacing wide centred on
+// its arrival (so neighbours never share a sample), zero-padded to nfft (a
+// power of two >= spacing*sr). out is gens x (nfft/2 + 1), row-major. Returns
+// false if the windows are undefined (w.ok false), a window runs past the
+// render, or nfft is too small.
+inline bool irGenerationSpectra(std::span<const double> x, double sr, const IrGenWindows& gw, double levelDb, int gens, std::size_t nfft,
+                                std::span<double> out) {
+  const auto w = static_cast<std::int64_t>(std::floor(gw.spacing * sr));
   const std::size_t bins = nfft / 2 + 1;
-  if (w < 2 || nfft < static_cast<std::size_t>(w) || !std::has_single_bit(nfft) || out.size() < bins * static_cast<std::size_t>(gens)) return false;
+  if (!gw.ok || w < 2 || nfft < static_cast<std::size_t>(w) || !std::has_single_bit(nfft) || out.size() < bins * static_cast<std::size_t>(gens))
+    return false;
   std::vector<std::complex<double>> a(nfft);
   for (int g = 1; g <= gens; ++g) {
-    const std::int64_t c = std::llround(static_cast<double>(g) * T * sr), from = c - w / 2;
+    const std::int64_t c = std::llround((gw.first + static_cast<double>(g - 1) * gw.spacing) * sr), from = c - w / 2;
     if (from < 0 || from + w > static_cast<std::int64_t>(x.size())) return false;
     std::fill(a.begin(), a.end(), std::complex<double>(0.0, 0.0));
     for (std::int64_t i = 0; i < w; ++i) a[static_cast<std::size_t>(i)] = x[static_cast<std::size_t>(from + i)];

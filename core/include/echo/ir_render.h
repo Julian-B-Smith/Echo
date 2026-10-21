@@ -58,8 +58,11 @@
 
 // No fused multiply-add here either (CLAUDE.md §Domain): scoped exactly as
 // engine.h scopes it, and restored at the end of the file, so the spectra,
-// the EDC and the renderer's own arithmetic round the same in every build
-// (native and wasm alike, T-034) without touching the includer's numerics.
+// the EDC and the renderer's own arithmetic contract no a*b+c into one
+// rounding in any build. (libm's pow, log10, sin and cos may still differ
+// between platforms: T-034 compares the wasm build's output with the native
+// one rather than assuming it.) Clang's closing DEFAULT also resets an
+// includer's own OFF: engine.h does the same.
 #if !defined(ECHO_FP_PRAGMA_OFF)
 #if defined(__clang__)
 #pragma STDC FP_CONTRACT OFF

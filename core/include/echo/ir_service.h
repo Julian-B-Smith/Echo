@@ -11,9 +11,10 @@
 //
 // HEAD FIRST (gate 4: a redraw within 100 ms of a change). A whole window can
 // take 200-300 ms at 192 kHz (ROADMAP M4, found 5), so a render publishes its
-// first headLength samples as frame 1, then extends the SAME render by chunk
-// samples per frame (IrRenderer's resumable form: no re-rendering of the
-// head). A newer request cancels the render in flight at its next chunk.
+// first headLength samples (96 000, D-033) as frame 1, then extends the SAME
+// render by chunk samples per frame (IrRenderer's resumable form: no
+// re-rendering of the head). A newer request cancels the render in flight at
+// its next chunk, the head's chunks included.
 //
 // THE CACHE. `slots` complete renders, keyed by irHash (every input the render
 // reads), least recently used out. A hit is published at once with no render.
@@ -29,6 +30,7 @@
 #include <array>
 #include <condition_variable>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <span>
 #include <thread>
@@ -42,8 +44,8 @@ namespace echo {
 struct IrServiceConfig {
   double sampleRate = 48000.0;
   std::int64_t maxLength = 0;   // the longest window a request may ask for, in samples (slots are sized to it)
-  std::int64_t headLength = 0;  // frame 1 covers this many samples (T-031: 2 s)
-  std::int64_t chunk = 0;       // each later frame extends the render by this many
+  std::int64_t headLength = 0;  // frame 1 covers this many samples (D-033: 96 000 at every rate)
+  std::int64_t chunk = 0;       // the render's step: a newer request waits at most this many samples; frames extend by it
   int slots = 8;                // complete renders kept
 };
 
@@ -71,9 +73,13 @@ class IrService {
     stop();
     if (c.maxLength <= 0 || c.headLength <= 0 || c.chunk <= 0 || c.slots < 1) return false;
     cfg_ = c;
-    ren_.prepare(c.sampleRate);
-    if (!ren_.preparedFor(c.sampleRate)) return false;
-    if (plant::irRenderInline) inline_.prepare(c.sampleRate);
+    ren_ = std::make_unique<IrRenderer>();  // ~18 MiB of clone at 192 kHz: on the heap, freed by stop()
+    ren_->prepare(c.sampleRate);
+    if (!ren_->preparedFor(c.sampleRate)) return false;
+    if (plant::irRenderInline) {
+      inline_ = std::make_unique<IrRenderer>();
+      inline_->prepare(c.sampleRate);
+    }
     slots_.assign(static_cast<std::size_t>(c.slots), Slot{});
     for (auto& s : slots_) {
       s.L.assign(static_cast<std::size_t>(c.maxLength), 0.0);
@@ -95,6 +101,12 @@ class IrService {
     }
     cv_.notify_all();
     worker_.join();
+    // Release the cache and the clone: a stopped service holds no memory
+    // (critic B4-2 L1). pause() keeps them, so a reopened editor hits the cache.
+    std::vector<Slot>().swap(slots_);
+    ren_.reset();
+    inline_.reset();
+    current_ = -1;
   }
 
   // UI thread. Queues the request (the newest wins) and returns its serial at
@@ -102,16 +114,18 @@ class IrService {
   std::uint64_t request(const IrRequest& r) {
     if (r.sampleRate != cfg_.sampleRate || r.length <= 0 || r.length > cfg_.maxLength) return 0;
     std::unique_lock<std::mutex> lk(m_);
+    if (!worker_.joinable() || quit_) return 0;  // stopped: nothing would ever serve it (critic B4-2 L5)
     const std::uint64_t serial = ++serial_;
     if (plant::irRenderInline) {  // the plant: the caller's thread renders the whole window, here
       Slot& s = slots_[static_cast<std::size_t>(pickSlot())];
       claim(s, r, serial);
-      if (inline_.start(r)) inline_.renderNext(s.L, s.R, r.length);
+      if (inline_->start(r)) inline_->renderNext(s.L, s.R, r.length);
       noteThread();
-      stats_.firstReady = inline_.position();
-      s.ready = inline_.position();
-      s.info = inline_.info();
+      stats_.firstReady = inline_->position();
+      s.ready = inline_->position();
+      s.info = inline_->info();
       s.complete = true;
+      current_ = static_cast<int>(&s - slots_.data());
       ++version_;
       return serial;
     }
@@ -132,7 +146,9 @@ class IrService {
     {
       std::lock_guard<std::mutex> lk(m_);
       paused_ = false;
-      // A render the pause cut short is not drawable to its end: render it again.
+      // A render the pause cut short is not drawable to its end: render it again
+      // from the start (critic B4-2 L4: continuing it would need the renderer
+      // to outlive the cut, and an editor reopening is not a hot path).
       if (!pending_ && current_ >= 0 && !slots_[static_cast<std::size_t>(current_)].complete && haveLast_) {
         pendingReq_ = lastReq_;
         pendingSerial_ = slots_[static_cast<std::size_t>(current_)].serial;
@@ -203,7 +219,9 @@ class IrService {
     }
     return best;
   }
-  // Under m_. Makes s the frame on screen for request r.
+  // Under m_. Reserves s for request r. It goes ON SCREEN only at its first
+  // publication (critic B4-2 M3: showing an empty frame at every request
+  // blanked the screen through a drag); until then the old frame stays.
   void claim(Slot& s, const IrRequest& r, std::uint64_t serial) {
     s.hash = irHash(r);
     s.serial = serial;
@@ -213,11 +231,13 @@ class IrService {
     s.complete = false;
     s.valid = true;
     s.info = IrInfo{};
-    current_ = static_cast<int>(&s - slots_.data());
+    if (plant::irPublishesEmpty) {
+      current_ = static_cast<int>(&s - slots_.data());
+      ++version_;
+    }
     lastReq_ = r;
     haveLast_ = true;
     ++stats_.renders;
-    ++version_;
   }
   // Under m_. Records the thread doing the rendering (gate 3's evidence).
   void noteThread() {
@@ -257,41 +277,51 @@ class IrService {
       Slot& s = slots_[static_cast<std::size_t>(pickSlot())];
       claim(s, r, serial);
       lk.unlock();
-      const bool ok = ren_.start(r);
+      const bool ok = ren_->start(r);
       lk.lock();
-      if (!ok) {  // refused by the engine (a value out of range): nothing to draw
+      if (!ok) {  // refused by the engine (a value out of range): nothing new to draw; the old frame stays
         s.valid = false;
-        current_ = -1;
-        ++version_;
         continue;
       }
-      std::int64_t target = plant::irWholeTailFirst ? r.length : std::min(cfg_.headLength, r.length);
+      // Rendered in chunks of cfg_.chunk throughout, the head included, so a
+      // newer request waits at most one chunk, never a whole head (critic
+      // B4-2 M5). Published first when the head is complete (frame 1, exactly
+      // headLength samples: the chunk targets land on it), then every chunk.
+      const std::int64_t head = plant::irWholeTailFirst ? r.length : std::min(cfg_.headLength, r.length);
+      std::int64_t pos = 0;
       for (;;) {
+        const std::int64_t target = pos < head ? std::min(pos + cfg_.chunk, head) : std::min(pos + cfg_.chunk, r.length);
         lk.unlock();
         // The slot's samples past `ready` belong to the worker alone: read()
         // shows only [0, ready), and `ready` moves under the lock.
-        ren_.renderNext(s.L, s.R, target);
+        pos = ren_->renderNext(s.L, s.R, target);
         lk.lock();
         noteThread();
-        if (s.ready == 0) stats_.firstReady = ren_.position();
         ++stats_.chunks;
-        s.ready = ren_.position();
-        s.info = ren_.info();
-        s.complete = ren_.done();
-        ++version_;
+        if (pos >= head) {
+          if (s.ready == 0) stats_.firstReady = pos;
+          s.ready = pos;
+          s.info = ren_->info();
+          s.complete = ren_->done();
+          current_ = static_cast<int>(&s - slots_.data());  // on screen from its first publication
+          ++version_;
+        }
         if (s.complete || quit_) break;
         if ((pending_ && !plant::irNoCancel) || (paused_ && !plant::irRendersWhilePaused)) {
-          ++stats_.cancelled;  // cut short: never a cache hit (complete stays false)
+          // Cut short: never a hit (complete stays false), and the first slot
+          // the next render reuses, so a drag of cut renders never pushes the
+          // complete ones out of the cache (critic B4-2 M2).
+          ++stats_.cancelled;
+          if (!plant::irCancelKeepsSlot) s.used = 0;
           break;
         }
-        target = std::min(target + cfg_.chunk, r.length);
       }
       if (quit_) return;
     }
   }
 
   IrServiceConfig cfg_;
-  IrRenderer ren_, inline_;
+  std::unique_ptr<IrRenderer> ren_, inline_;
   std::vector<Slot> slots_;
   int current_ = -1;
   mutable std::mutex m_;

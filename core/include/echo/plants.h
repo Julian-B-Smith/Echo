@@ -119,6 +119,10 @@ ECHO_PLANT(viewDecimatesPeaks)   // a display column shows its first sample, not
 ECHO_PLANT(gridFixedTempo)       // the tempo grid is drawn at 120 bpm whatever the tempo
 ECHO_PLANT(viewGenWindowFromBase) // the spectrum strip's windows ignore the L/R offsets (the base time)
 ECHO_PLANT(edcForward)           // the energy decay curve integrates forward, not backward (Schroeder)
+ECHO_PLANT(viewGenIndexOffByOne) // the spectrum strip draws generation n+1 as generation n (critic B4-2 H2)
+ECHO_PLANT(irCancelKeepsSlot)    // a cancelled render stays a valid, freshest slot and pushes complete renders out (critic B4-2 M2)
+ECHO_PLANT(irPublishesEmpty)     // a request is shown before anything is rendered: the screen blanks on every change (critic B4-2 M3)
+ECHO_PLANT(viewUnrenderedIsZero) // a column past what is rendered reads as exact zero: a partial frame draws an ended tail (critic B4-2 M4)
 }  // namespace echo::plant
 
 #undef ECHO_PLANT
