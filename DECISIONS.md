@@ -535,3 +535,23 @@ patch's seed at phase 0, so a preset's drift is derived from its seed alone. Not
 repeats have faded by then. Guarded by "mod.seed" with the plants `seedResendRestarts` and `loadKeepsModState`.
 Rejected: keeping the modulation running through loads.
 
+## D-027 — M4's scope, gate and timing (RATIFIED by poll, 2026-10-21; closes Q-M4)
+
+Set at M2 close, as D-021 scheduled. By poll:
+- **Scope:** D-011's impulse-response display (the stem echogram on a tempo grid and the per-generation spectrum
+  strip) and Echo's own screen style. Rejected: the display only, with the screen past 1.0; adding live meters and a
+  read-head scope.
+- **Visualiser gate:** the drawn IR equals the engine's own offline render bit for bit (one renderer, D-011); the
+  "snapshot" label shows exactly when the time is modulated, the ceiling engages or a move is in flight; rendering never
+  touches the audio thread; the display redraws within 100 ms of a parameter change. Each is proven on a planted fault
+  first. Rejected: the human's visual sign-off alone.
+- **Screen gate:** the human's sign-off on Echo's design in horde's FX screens workshop, plus checkable rows:
+  keyboard-reachable, every key display-named (ADR-203), legible in light and dark, no audio-thread work. Rejected:
+  sign-off alone.
+- **Timing: aim for 1.0**, built in parallel with M3 (the lead recommended after the cutoff; the human chose 1.0). M3
+  keeps priority: nothing in M4 may put a 1.0-bar MUST row at risk before 2026-12-11. If M4 is not ready, Echo ships with
+  the house-style UI (which meets the bar's screen row on its own) and M4 follows.
+- **Coordination:** the offline renderer is a non-real-time clone of the engine (D-011). Its `core/` changes must not
+  collide with M3's, so the M3 session is told, and M4's core work lands in its own files or after M3's batch that
+  touches the same ones.
+

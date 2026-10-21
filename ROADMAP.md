@@ -106,12 +106,27 @@ commercial delay or borrow its mode names, presets or UI text.
   **Due 2026-12-11.**
 
 ### M4 — Visualizers and screens
-- The impulse response drawn as the repeats will sound; Echo's own screen style
-  plus the backup UI in horde's house style (horde's FX screens workshop). The
-  1.0 bar's "face and expanded view" MUST row (B432/ADR-203) is met in M3 with
-  the house-style UI if Echo's own screen is not ready.
-- **Gate:** defined at M2 close, with the human (Q-M4; moved from Phase A close by
-  the human, 2026-10-20, D-021).
+- **Scope (D-027):** D-011's impulse-response display (a stem echogram in dB on a
+  tempo grid, plus the per-generation spectrum strip) and Echo's own screen
+  style. The house-style backup UI is M3's, and meets the 1.0 bar's
+  face-and-expanded-view MUST row on its own if Echo's screen is not ready.
+- **Timing (D-027):** aimed at 1.0, built in parallel with M3. M3 keeps priority:
+  nothing in M4 may put a 1.0-bar MUST row at risk before 2026-12-11. If M4 is not
+  ready, Echo ships in 1.0 with the house-style UI and M4 follows.
+- **Gate (D-027):**
+  1. **The drawing is the engine's.** The drawn impulse response equals the
+     engine's own offline render bit for bit: one renderer feeds the display,
+     the tail oracle and the D-010 mono-fold metric (D-011).
+  2. **It says when it is a snapshot.** The label shows exactly when the time
+     is modulated, the ceiling engages, or a move is in flight, and at no
+     other time.
+  3. **It stays off the audio thread.** Rendering never allocates, locks or
+     runs there (the no-allocation probe on `process` stays green).
+  4. **It keeps up.** The display redraws within 100 ms of a parameter change.
+  5. Each of 1–4 is proven on a planted fault first.
+  6. **The screen** gets the human's sign-off on Echo's own design in horde's FX
+     screens workshop, plus checkable rows: keyboard-reachable, every key
+     display-named (ADR-203), legible in light and dark, no audio-thread work.
 
 ### Phase N (pre-ship) — Prior-art re-scan + name clearance
 - Re-run the prior-art swarm; the legal and IP checks and horde's B433 screen
@@ -204,10 +219,10 @@ commercial delay or borrow its mode names, presets or UI text.
 
 - **Q-A3 — Per-module CPU budget** for 1.0 is the human's to set (1.0 bar row 51);
   the appendix's ~2 % default / 4 % worst of a min-spec core is the working target.
-- **Q-M4 — M4's gate** (the visualizers and Echo's own screens): defined with the
-  human at **M2 close**. It was due at Phase A close and was not set; the human
-  moved it on 2026-10-20 (D-021). The 1.0 bar's face-and-expanded-view MUST row
-  is met in M3 by the house-style UI either way.
+
+## Closed since
+
+- **Q-M4 — M4's gate:** set at M2 close, 2026-10-21, by poll (D-027; ROADMAP M4).
 
 ## Closed in Phase A
 
