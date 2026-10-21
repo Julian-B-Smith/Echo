@@ -299,7 +299,7 @@ catch (charter §Domain); `./verify fast` green; a trace in `traces/`. An edit t
 `spec/`, `intake/` or the manifest is a human gate, asked in the batch's own poll. Outward
 filings need the human's go-ahead each time.
 
-### T-010 — Re-pin intake to horde's current contract (ADR-257, §12.5)
+### T-010 — M3: Re-pin intake to horde's current contract (ADR-257, §12.5)
 - **Status:** open (human gate: a re-pin).
 - **Scope:** `intake/rack-slot-contract.md`, `intake/MANIFEST`; DECISIONS.
 - **Acceptance criteria:** the copy is byte-identical to horde's `docs/proposals/rack-slot-contract.md`
@@ -308,7 +308,7 @@ filings need the human's go-ahead each time.
   notes), A22 not applicable, and RS-5.8 (fixed controls) decided in T-011.
 - **Out of scope:** any other intake file (the bar and the I/O gain standard are unchanged).
 
-### T-011 — Spec revision 3: what M3 adds to the spec
+### T-011 — M3: Spec revision 3: what M3 adds to the spec
 - **Status:** open (human gate: `spec/` is protected; ratified by poll).
 - **Scope:** `spec/SPEC.md`, `spec/params.json` if fixed controls are declared; DECISIONS.
 - **Acceptance criteria:** the spec states, each as a ruled line: (1) the meter taps (where they
@@ -325,7 +325,7 @@ filings need the human's go-ahead each time.
   cited by a decision.
 - **Out of scope:** any change to the 29 keys' ranges, defaults or classes.
 
-### T-012 — FOUNDATIONS brief, then the vendored, pinned header
+### T-012 — M3: FOUNDATIONS brief, then the vendored, pinned header
 - **Status:** open (outward-facing: the human's go-ahead to file).
 - **Scope:** FOUNDATIONS' `integrations/echo/brief.md` (a PR touching only that path);
   `core/third_party/foundations/` (Scape's shape: `fx_operator.h` verbatim from a reviewed
@@ -341,7 +341,7 @@ filings need the human's go-ahead each time.
   on a planted one-byte edit of the vendored file and passes clean.
 - **Out of scope:** waiting for the answer: B2 proceeds on the draft (rule 2).
 
-### T-013 — ABI conformance and the declarations (row A1)
+### T-013 — M3: ABI conformance and the declarations (row A1)
 - **Status:** open (needs T-012's header and T-011's ruling on the tail mapping).
 - **Scope:** `core/include/echo/engine.h`, `plants.h`, `core/tests/core_tests.cpp`.
 - **Acceptance criteria:** `static_assert` that `echo::Echo` models FOUNDATIONS'
@@ -356,7 +356,7 @@ filings need the human's go-ahead each time.
   with no class; a process that reads its input after writing its output.
 - **Out of scope:** the state format (T-015); meters (T-014).
 
-### T-014 — Meter taps, clip latches and the I/O gain tests 1–7 (row A6)
+### T-014 — M3: Meter taps, clip latches and the I/O gain tests 1–7 (row A6)
 - **Status:** open (needs T-011's meter ruling).
 - **Scope:** `engine.h`, `plants.h`, `core_tests.cpp`.
 - **Acceptance criteria:** two taps, directly after Input Gain and directly after Output
@@ -373,7 +373,7 @@ filings need the human's go-ahead each time.
   double gain.
 - **Out of scope:** horde's mixer page and its feed gating.
 
-### T-015 — State by name, exact restore, and undo (rows A17–A20; bar row 17)
+### T-015 — M3: State by name, exact restore, and undo (rows A17–A20; bar row 17)
 - **Status:** open (needs T-011's format ruling).
 - **Scope:** `engine.h` (or a new `core/include/echo/state.h`), `plants.h`, `core_tests.cpp`.
 - **Acceptance criteria:** `saveState` writes the T-011 format; `stageState` parses and
@@ -391,7 +391,7 @@ filings need the human's go-ahead each time.
   accepted; a division stored by index.
 - **Out of scope:** horde's history tree and gesture brackets (RS-6.14 is the face's).
 
-### T-016 — Manifest lock and scope freeze (bar rows 1–2)
+### T-016 — M3: Manifest lock and scope freeze (bar rows 1–2)
 - **Status:** open (human gate: a `./verify` edit).
 - **Scope:** a lock file beside the manifest (or under `core/`, as the human prefers, since
   `spec/` is protected), `./verify`, `tools/check_manifest.py`.
@@ -403,7 +403,7 @@ filings need the human's go-ahead each time.
 - **Out of scope:** the date of horde's feature freeze (horde's; the scope list in SPEC §1 is
   frozen on it).
 
-### T-017 — Module presets and macros (rows A12, A13; bar rows 5–6)
+### T-017 — M3: Module presets and macros (rows A12, A13; bar rows 5–6)
 - **Status:** open (needs T-011 and T-015).
 - **Scope:** `presets/` (the bank file), a validator and reference resolver in `tools/` or
   `core/tools/`, `core_tests.cpp`.
@@ -419,7 +419,7 @@ filings need the human's go-ahead each time.
   that is not exact.
 - **Out of scope:** horde's resolution at run time (RS-5.5: horde resolves Echo's macros).
 
-### T-018 — Admission self-test: rows A1–A22 mapped and the gaps filled
+### T-018 — M3: Admission self-test: rows A1–A22 mapped and the gaps filled
 - **Status:** open (after T-013 – T-015).
 - **Scope:** `core_tests.cpp`, `plants.h`; a generated `docs/admission.md`.
 - **Acceptance criteria:** `docs/admission.md` lists each row A1–A22 with its check, its plant
@@ -440,7 +440,7 @@ filings need the human's go-ahead each time.
   stated in one table.
 - **Out of scope:** horde's own admission harness (unbuilt; horde judges its rows at hosting).
 
-### T-019 — The B408 stereo report (D-010; bar row 12)
+### T-019 — M3: The B408 stereo report (D-010; bar row 12)
 - **Status:** open.
 - **Scope:** a report tool in `core/tools/`, `docs/stereo-report.md` (generated), checks in
   `core_tests.cpp`.
@@ -452,7 +452,7 @@ filings need the human's go-ahead each time.
   ~40 ms and are not equal. Plants: D-010's P1–P5 (prior-art §5.3).
 - **Out of scope:** a stereo width control (post-1.0).
 
-### T-020 — Cost bench and memory figure (bar rows 13–15)
+### T-020 — M3: Cost bench and memory figure (bar rows 13–15)
 - **Status:** open.
 - **Scope:** `core/tools/bench.cpp`, `docs/cost.md`. Reported, **never** a verify gate
   (RS-8.3).
@@ -468,7 +468,7 @@ filings need the human's go-ahead each time.
 - **Out of scope:** optimisation, unless a row is over budget (then a new item; ADR-236:
   over budget does not cut a module).
 
-### T-021 — The factory bank: an init plus a small set
+### T-021 — M3: The factory bank: an init plus a small set
 - **Status:** open (the bank's size is a poll; needs T-017).
 - **Scope:** `presets/echo-factory.json`.
 - **Acceptance criteria:** an init (the manifest defaults, no macros) and the size the human
@@ -478,7 +478,7 @@ filings need the human's go-ahead each time.
   labelled macros. The human picks the final set by listening (T-023).
 - **Out of scope:** horde's presets lab and its library size (B395/B409).
 
-### T-022 — The face and expanded view (bar row 16)
+### T-022 — M3: The face and expanded view (bar row 16)
 - **Status:** open (who builds it is a poll).
 - **Scope (proposed):** `docs/face.md`: which keys sit on the face and which in the
   expanded view, their grouping and order, a keyboard order; the ADR-203 check that every
@@ -489,7 +489,7 @@ filings need the human's go-ahead each time.
   check is in `./verify`; the human or horde's workshop accepts the face.
 - **Out of scope:** Echo's own screen (M4, D-027).
 
-### T-023 — Listening renders and the human's sign-off (bar row 20)
+### T-023 — M3: Listening renders and the human's sign-off (bar row 20)
 - **Status:** open (after T-021).
 - **Scope:** `core/tools/render_presets.cpp` (WAVs from the C++ engine, never the lab), a
   small listening page in `lab/` or `docs/`, ROADMAP.
@@ -499,7 +499,7 @@ filings need the human's go-ahead each time.
   replaced or dropped.
 - **Out of scope:** the lab's own sound (the lab is not the module).
 
-### T-024 — Goldens per factory preset (human gate)
+### T-024 — M3: Goldens per factory preset (human gate)
 - **Status:** blocked (on T-021 and T-023).
 - **Scope:** `core/goldens/` (render hashes), `./verify full`.
 - **Acceptance criteria:** one golden per factory preset plus the init and the stress cases,
@@ -509,7 +509,7 @@ filings need the human's go-ahead each time.
   red.
 - **Out of scope:** goldens before the sign-off (ADR-142: parity never enshrines a defect).
 
-### T-025 — The name: B433's knockout screen (bar row 21)
+### T-025 — M3: The name: B433's knockout screen (bar row 21)
 - **Status:** open (private).
 - **Scope:** `local/legal/` only (D-014); a neutral pointer in tracked files.
 - **Acceptance criteria:** the self-run knockout screen of B433 run for the user-visible
@@ -517,7 +517,7 @@ filings need the human's go-ahead each time.
   a neutral line. Phase N's broader clearance stays pre-commercial.
 - **Out of scope:** counsel (ADR-236 item 5).
 
-### T-026 — Independent critic review of M3 (bar row 19)
+### T-026 — M3: Independent critic review of M3 (bar row 19)
 - **Status:** blocked (on T-013 – T-020).
 - **Scope:** read-only.
 - **Acceptance criteria:** a fresh-context Opus critic with no shared conversation, an
@@ -526,7 +526,7 @@ filings need the human's go-ahead each time.
   the project, a second review from another model family or a human is still owed.)
 - **Out of scope:** fixing in the review itself.
 
-### T-027 — Readiness notice to horde
+### T-027 — M3: Readiness notice to horde
 - **Status:** blocked (on T-002's spin-up notice and every MUST row above).
 - **Scope:** horde's `integrations/echo/` (a PR touching only that path; the human's
   go-ahead), `integrations/README.md`.
