@@ -186,7 +186,7 @@ commercial delay or borrow its mode names, presets or UI text.
   |---|---|---|
   | B1 | none | `core/third_party/foundations/` (T-012: the vendored header and its `MANIFEST`) |
   | B2 | `core/include/echo/engine.h`, `plants.h`, `params.h` (class mapping, T-013), `core/tests/core_tests.cpp`, `core/tests/alloc_probe.h`, `core/CMakeLists.txt` (the vendored include path) | `core/include/echo/state.h` (T-015) |
-  | B3 | `core/tests/core_tests.cpp`, `plants.h`, `core/CMakeLists.txt` (new tool targets); `engine.h` **only** for a fault a check finds | `core/tools/bench.cpp` (T-020), `core/include/echo/ir_render.h` and `core/tools/stereo_report.cpp` (T-019, D-029), a preset validator and resolver (T-017) |
+  | B3 | `core/tests/core_tests.cpp`, `plants.h`, `core/CMakeLists.txt` (new tool targets); `engine.h` **only** for a fault a check finds | `core/tools/bench.cpp` (T-020), `core/tools/stereo_report.cpp` (T-019; `ir_render.h` only under D-030's fallback), a preset validator and resolver (T-017) |
   | B4 | `core/CMakeLists.txt` | `core/tools/render_presets.cpp` (T-023) |
   | B5 | `core/CMakeLists.txt`, `./verify full` | `core/goldens/` (T-024) |
 
@@ -194,9 +194,12 @@ commercial delay or borrow its mode names, presets or UI text.
   `saveState` / `stageState` / `adoptStaged`). After that, M4 can build on the public API in a
   file of its own (for example `core/include/echo/ir_render.h`) with no collision, except
   `core/CMakeLists.txt` and `core_tests.cpp`, which every batch appends to.
-- **M3 vs M4's one-renderer gate: RULED (D-029).** T-019 builds the offline IR renderer in
-  `core/include/echo/ir_render.h`, and the B408 report measures through it; M4 adopts that
-  file for the display, so one renderer holds from M3 on (M4's gate 1, D-027).
+- **M3 vs M4's one-renderer gate: RULED (D-029, amended by D-030).** M4 builds the one
+  offline IR renderer, `core/include/echo/ir_render.h`, in its batch B4-1. It must be on main
+  by 2026-11-06 and meet T-019's renderer criteria. T-019 then measures through it. **M3
+  never waits:** if the file is not on main by 2026-11-09, T-019 builds it itself, as D-029
+  said. Either way there is one file and one renderer from M3 on (M4's gate 1, D-027).
+  (D-030 is on M4's branch and lands with M4's plan PR.)
 - **Never blocked on a provider:** if FOUNDATIONS or horde has not answered, Echo proceeds on
   the shim and the contract as pinned, and says so in the readiness notice (INTEGRATIONS
   rule 2).
@@ -381,7 +384,9 @@ filings need the human's go-ahead each time.
 - **Acceptance criteria:** two taps, directly after Input Gain and directly after Output
   Gain, each a peak and a clip latch, published as atomics readable from another thread,
   computed without allocation; a latch holds until `clearMeters()`, and a load or a reset
-  never clears it (RS-6.13's table). Tests 1–7 of `intake/module-io-gain.md` as checks:
+  never clears it (RS-6.13's table). The published-atomics mechanism leaves room for a
+  status word (heads moving, modulated) and a ceiling count, which M4's T-033 adds after this
+  item lands (D-030); this is not required here. Tests 1–7 of `intake/module-io-gain.md` as checks:
   1 bit-identical at 0 dB; 2 the 20 ms linear ramp at 44.1, 48 **and** 96 kHz; 3 the first
   sample after `prepare` at a saved +6 dB is already +6 dB; 4 a patch load and a corner flip
   (a load at another corner's patch) leave both gains and their ramps alone; 5 +12 dB of
@@ -461,16 +466,18 @@ filings need the human's go-ahead each time.
 
 ### T-019 — M3: The B408 stereo report (D-010; bar row 12)
 - **Status:** open.
-- **Scope:** the offline IR renderer `core/include/echo/ir_render.h` (D-029: the one renderer
-  M4 adopts), a report tool in `core/tools/`, `docs/stereo-report.md` (generated), checks in
-  `core_tests.cpp`.
+- **Scope:** a report tool in `core/tools/`, `docs/stereo-report.md` (generated), checks in
+  `core_tests.cpp`. The report measures through the one offline IR renderer,
+  `core/include/echo/ir_render.h`. M4 builds it by 2026-11-06 (D-030, amending D-029); if it
+  is not on main by 2026-11-09, T-019 builds it here, to the criteria below.
 - **Acceptance criteria:** per routing mode, D-010's readings: ρ broadband, per repeat
   generation and per octave band; the ⅓-octave-smoothed worst notch and its frequency; on a
   mono impulse, seeded decorrelated noise, and the S-only impulse (labelled *by
   construction*, Q-A4). Layer-0: ρ_out ≥ ρ_in per generation on the mono and noise inputs in
   every mode; the colouring-zone flag raised exactly when the two times differ by less than
-  ~40 ms and are not equal. The renderer's output equals a plain offline `Echo` render of the same impulse bit for bit
-  (plant: a renderer that skips the output filter). Plants: D-010's P1–P5 (prior-art §5.3).
+  ~40 ms and are not equal. The renderer's output equals a plain offline `Echo` render of the same impulse, bit for
+  bit, on the mono, S-only and seeded-noise inputs too (M4's plant `irSkipsOutputFilter`, or
+  this item's own if it builds the file). Plants: D-010's P1–P5 (prior-art §5.3).
 - **Out of scope:** a stereo width control (post-1.0).
 
 ### T-020 — M3: Cost bench and memory figure (bar rows 13–15)
