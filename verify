@@ -147,6 +147,7 @@ lab_smoke_gate() { need_node && node tools/lab_smoke.mjs; }
 #   echo_tests   the invariant suite on the clean build (exactly what horde links)
 #   echo_plants  each check re-run under each planted fault it guards; a fault
 #                a check does not catch makes that check vacuous, and red
+#   echo_ir_tests / echo_ir_plants  the same, for M4's offline IR renderer
 #   check_manifest.py  the C++ parameter table equals spec/params.json
 #   fp-contract  the header's pragma holds: a contracting build hashes equal to
 #                the reference and the pragma-less control DIFFERS; where the
@@ -163,6 +164,12 @@ core_gate() {
   "$b/echo_tests" | grep -v "^  PASS" || ok=1
   [ "${PIPESTATUS[0]}" -eq 0 ] || ok=1
   "$b/echo_plants" | grep -v "^  PASS" || ok=1
+  [ "${PIPESTATUS[0]}" -eq 0 ] || ok=1
+  # M4 (T-030, D-030): the one offline IR renderer's suite, clean and under
+  # each of its plants, in its own binaries so M4 never edits core_tests.cpp.
+  "$b/echo_ir_tests" | grep -v "^  PASS" || ok=1
+  [ "${PIPESTATUS[0]}" -eq 0 ] || ok=1
+  "$b/echo_ir_plants" | grep -v "^  PASS" || ok=1
   [ "${PIPESTATUS[0]}" -eq 0 ] || ok=1
   python3 tools/check_manifest.py "$b/echo_manifest" || ok=1
   local href hfpc hnop

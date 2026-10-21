@@ -624,10 +624,19 @@ filings need the human's go-ahead each time.
 - **Out of scope:** hosting Echo in horde (horde's work).
 
 ### T-030 — M4: the offline IR renderer (B4-1)
-- **Status:** open (approved 2026-10-21, D-030; in progress on its own branch).
-- **Scope:** new `core/include/echo/ir_render.h` (the one renderer, D-029 as amended by D-030), new `core/tests/ir_tests.cpp` (built as
-  `echo_ir_tests` and `echo_ir_plants`), `core/CMakeLists.txt`, an M4 section appended to
-  `plants.h`, and the `./verify` core gate running both new binaries (a human gate).
+- **Status:** in progress (built on branch `m4-renderer`, B4-1's PR; trace
+  `traces/2026-10-21-t030-ir-renderer.md`; critic FIX-THEN-SHIP, all fixed).
+- **Scope:** new `core/include/echo/ir_render.h` (the one renderer, D-029 as amended by
+  D-030), new `core/tests/ir_tests.cpp` (built as `echo_ir_tests` and `echo_ir_plants`),
+  `core/CMakeLists.txt`, an M4 section appended to `plants.h`, the `./verify` core gate
+  running both new binaries (approved by D-030), and CI's sanitizer step.
+- **Amended 2026-10-21 by the lead, after the critic (D-031):** the API is
+  `echo::renderIr(IrRequest)` and `IrRenderer::render`, not a five-argument call. The
+  response drawn is the one heard right after loading the patch (D-026's restart from the
+  seed), the only response that is a function of the patch. The reference is an `Echo`
+  that loaded the patch. The plant `irRendersFromLive` cannot be planted (the API takes no
+  live instance); `irReusesState` and `irSeedAfterReset` stand for it. The criteria below
+  are read with those amendments.
 - **Acceptance criteria:**
   1. `echo::renderIr(patch, sr, bpm, level, n)` renders through a private `echo::Echo`
      instance: prepared at the host rate, every patch and Device value landed at rest,
@@ -670,6 +679,9 @@ filings need the human's go-ahead each time.
      tail is rendered, and must fail the check. CI reports the timing but does not gate
      on it, because shared runners make wall-clock gates flaky.
   5. **Fed only while open.** With the editor closed (`pause()`), no renders run.
+  6. **No re-rendering of the head (critic T-030 M2).** Head-first frames extend one
+     render. `IrRenderer` gains a resumable form (start, then render the next n
+     samples) in `ir_render.h`, proven bit-equal to the one-shot render at every split.
 - **Out of scope:** drawing; `engine.h`.
 
 ### T-032 — M4: the display model (B4-2)

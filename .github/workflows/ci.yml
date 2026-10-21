@@ -75,5 +75,6 @@ jobs:
       - name: core under sanitizers
         run: |
           cmake -S core -B "$PWD/build-asan" -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=RelWithDebInfo -DECHO_SANITIZE=ON
-          cmake --build "$PWD/build-asan" --target echo_tests -j4
+          cmake --build "$PWD/build-asan" --target echo_tests echo_ir_tests -j4
           "$PWD/build-asan/echo_tests"
+          "$PWD/build-asan/echo_ir_tests"
