@@ -20,8 +20,9 @@ lives in `DECISIONS.md`; horde's shipping bar is `intake/module-1.0-bar.md`.
   from a cold build). `full` = `fast` for now (goldens and sweeps arrive with M3).
 - **Hard date:** horde's module cutoff **2026-12-11**. Every MUST row of the 1.0
   bar met by then, or Echo ships after 1.0.
-- **Last human ratification:** 2026-10-20 — the spec, revision 2, with S-1 and
-  the new keys' defaults (D-017); before it, the listening polls (D-016).
+- **Last human ratification:** 2026-10-20 — the M1 rulings by poll: rest waits for
+  the wet (D-018), the tail clock (D-019), a load fades the old repeats under their
+  old settings (D-020); before them, the spec, revision 2 (D-017).
 
 ## Phases (each gate is a checkable condition)
 
@@ -138,8 +139,8 @@ commercial delay or borrow its mode names, presets or UI text.
 - **Out of scope:** the spin-up notice (T-002).
 
 ### T-006 — M1: the C++ core and its invariant suite
-- **Status:** gate met 2026-10-20 on branch `m1-core`, in review (PR); done when it
-  lands on main. Trace: `traces/2026-10-20-m1-core.md`.
+- **Status:** in progress 2026-10-20: the M1 gate is met on branch `m1-core`, in review
+  (PR #7); done when it lands on main. Trace: `traces/2026-10-20-m1-core.md`.
 - **Scope:** `core/`, `tools/check_manifest.py`, `./verify`'s core gate, CI's C++
   note; SPEC §10 amended by D-018.
 - **Acceptance criteria:** the M1 gate above.
