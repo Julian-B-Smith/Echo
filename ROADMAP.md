@@ -178,6 +178,28 @@ commercial delay or borrow its mode names, presets or UI text.
   - **B4, listening (11-23 → 11-27):** T-021 finished, T-022, T-023.
   - **B5, close (11-30 → 12-04):** T-024, T-025, T-026, T-027. A week of slack before the
     2026-12-11 cutoff.
+- **The `core/` files each batch touches** (so M4's offline renderer, D-011/D-027, lands in
+  its own files or after the batch that changes the same ones; asked by the lead,
+  2026-10-21):
+
+  | batch | changes | adds |
+  |---|---|---|
+  | B1 | none | `core/third_party/foundations/` (T-012: the vendored header and its `MANIFEST`) |
+  | B2 | `core/include/echo/engine.h`, `plants.h`, `params.h` (class mapping, T-013), `core/tests/core_tests.cpp`, `core/tests/alloc_probe.h`, `core/CMakeLists.txt` (the vendored include path) | `core/include/echo/state.h` (T-015) |
+  | B3 | `core/tests/core_tests.cpp`, `plants.h`, `core/CMakeLists.txt` (new tool targets); `engine.h` **only** for a fault a check finds | `core/tools/bench.cpp` (T-020), `core/tools/stereo_report.cpp` (T-019), a preset validator and resolver (T-017) |
+  | B4 | `core/CMakeLists.txt` | `core/tools/render_presets.cpp` (T-023) |
+  | B5 | `core/CMakeLists.txt`, `./verify full` | `core/goldens/` (T-024) |
+
+  `engine.h`'s public surface settles at the end of B2 (`properties()`, the meters,
+  `saveState` / `stageState` / `adoptStaged`). After that, M4 can build on the public API in a
+  file of its own (for example `core/include/echo/ir_render.h`) with no collision, except
+  `core/CMakeLists.txt` and `core_tests.cpp`, which every batch appends to.
+- **Flagged for the human, not adjusted (M3 vs M4's gate, D-027):** M4's gate 1 says **one**
+  renderer feeds the display, the tail oracle and D-010's mono-fold metric. T-019's B408 report
+  needs that metric before M4's renderer exists. Either T-019 builds the offline IR renderer
+  in its own file and M4 adopts it, or T-019 measures on a plain offline engine instance and M4
+  re-points the metric to its renderer later (so the gate's "one renderer" holds at M4 close,
+  not at M3's). The human chooses before B3 starts.
 - **Never blocked on a provider:** if FOUNDATIONS or horde has not answered, Echo proceeds on
   the shim and the contract as pinned, and says so in the readiness notice (INTEGRATIONS
   rule 2).
