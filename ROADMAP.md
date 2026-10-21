@@ -9,8 +9,10 @@ lives in `DECISIONS.md`; horde's shipping bar is `intake/module-1.0-bar.md`.
 - **Phase:** Phase 0 CLOSED 2026-10-20 (D-013). Phase A CLOSED 2026-10-20 (PR #4;
   D-015–D-017). **M1 CLOSED 2026-10-21** (PR #7 merged, 5c3e822; T-006;
   D-018–D-022): the C++ core and its 39-check suite, 52 planted faults caught,
-  green on Mac/clang and Linux/GCC, ASan + UBSan clean in CI. **M2 gate MET on its
-  branch 2026-10-21** (T-009; D-023–D-026): closes when its PR lands on main. **M3 is next.**
+  green on Mac/clang and Linux/GCC, ASan + UBSan clean in CI. **M2 CLOSED 2026-10-21**
+  (PR #10 merged, 4c68da4; T-009; D-023–D-026): both repitch laws, the tempo modes and
+  modulation; 52 checks, 75 planted faults caught. **M3 (rack admission, the 1.0 bar,
+  due 2026-12-11) is next.**
 - **Oracle:** `./verify fast` = kit integrity, leak gate, private-name gate,
   structure, manifest, intake pin, legal gate, **lab smoke** (`tools/lab_smoke.mjs`,
   ~7 s), and the **core gate**: a warning-free Release build of `core/`, the M1
@@ -78,7 +80,7 @@ commercial delay or borrow its mode names, presets or UI text.
 - **Gate:** repitch accuracy in cents and modulation depth tested; the click
   metric (with a planted-click control) passes under a 1 Hz full-range time
   sweep in every mode.
-- **Status: gate MET 2026-10-21 on branch `m2`** (T-009): both repitch laws
+- **Status: CLOSED 2026-10-21** (PR #10, 4c68da4; T-009): both repitch laws
   (tape: a varispeed model with a quadratic 32-sample history; exponential),
   the 12 st cap, the 3 s fallback, the speed backstop (zero hits required),
   the three tempo modes, sine and seeded-drift modulation. The suite is 52
@@ -104,12 +106,27 @@ commercial delay or borrow its mode names, presets or UI text.
   **Due 2026-12-11.**
 
 ### M4 — Visualizers and screens
-- The impulse response drawn as the repeats will sound; Echo's own screen style
-  plus the backup UI in horde's house style (horde's FX screens workshop). The
-  1.0 bar's "face and expanded view" MUST row (B432/ADR-203) is met in M3 with
-  the house-style UI if Echo's own screen is not ready.
-- **Gate:** defined at M2 close, with the human (Q-M4; moved from Phase A close by
-  the human, 2026-10-20, D-021).
+- **Scope (D-027):** D-011's impulse-response display (a stem echogram in dB on a
+  tempo grid, plus the per-generation spectrum strip) and Echo's own screen
+  style. The house-style backup UI is M3's, and meets the 1.0 bar's
+  face-and-expanded-view MUST row on its own if Echo's screen is not ready.
+- **Timing (D-027):** aimed at 1.0, built in parallel with M3. M3 keeps priority:
+  nothing in M4 may put a 1.0-bar MUST row at risk before 2026-12-11. If M4 is not
+  ready, Echo ships in 1.0 with the house-style UI and M4 follows.
+- **Gate:** (D-027)
+  1. **The drawing is the engine's.** The drawn impulse response equals the
+     engine's own offline render bit for bit: one renderer feeds the display,
+     the tail oracle and the D-010 mono-fold metric (D-011).
+  2. **It says when it is a snapshot.** The label shows exactly when the time
+     is modulated, the ceiling engages, or a move is in flight, and at no
+     other time.
+  3. **It stays off the audio thread.** Rendering never allocates, locks or
+     runs there (the no-allocation probe on `process` stays green).
+  4. **It keeps up.** The display redraws within 100 ms of a parameter change.
+  5. Each of 1–4 is proven on a planted fault first.
+  6. **The screen** gets the human's sign-off on Echo's own design in horde's FX
+     screens workshop, plus checkable rows: keyboard-reachable, every key
+     display-named (ADR-203), legible in light and dark, no audio-thread work.
 
 ### Phase N (pre-ship) — Prior-art re-scan + name clearance
 - Re-run the prior-art swarm; the legal and IP checks and horde's B433 screen
@@ -175,8 +192,7 @@ commercial delay or borrow its mode names, presets or UI text.
   in DECISIONS.
 
 ### T-009 — M2: moving time and modulation
-- **Status:** in progress 2026-10-21: the M2 gate is met on branch `m2`, in review
-  (PR); done when it lands on main. Trace: `traces/2026-10-21-m2.md`.
+- **Status:** done 2026-10-21 (PR #10, 4c68da4; trace: `traces/2026-10-21-m2.md`).
 - **Scope:** `core/include/echo/{engine,plants}.h`, `core/tests/core_tests.cpp`;
   SPEC §7 and §10 amended by D-025 and D-026.
 - **Acceptance criteria:** the M2 gate above.
@@ -203,10 +219,10 @@ commercial delay or borrow its mode names, presets or UI text.
 
 - **Q-A3 — Per-module CPU budget** for 1.0 is the human's to set (1.0 bar row 51);
   the appendix's ~2 % default / 4 % worst of a min-spec core is the working target.
-- **Q-M4 — M4's gate** (the visualizers and Echo's own screens): defined with the
-  human at **M2 close**. It was due at Phase A close and was not set; the human
-  moved it on 2026-10-20 (D-021). The 1.0 bar's face-and-expanded-view MUST row
-  is met in M3 by the house-style UI either way.
+
+## Closed since
+
+- **Q-M4 — M4's gate:** set at M2 close, 2026-10-21, by poll (D-027; ROADMAP M4).
 
 ## Closed in Phase A
 

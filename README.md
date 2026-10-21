@@ -3,7 +3,7 @@
 horde's standard delay module: a stereo delay library hosted in horde's FX rack, with a lab twin for listening.
 "Echo" is a working name; the module's name will be cleared before release.
 
-**Status: M2 (repitch laws, tempo following, line modulation) built 2026-10-21 on its branch; it closes when its PR lands, and M3 (rack admission, the 1.0 bar) is next.** Phase 0 closed 2026-10-20 (D-013). The spec is ratified at revision 2 ([`spec/SPEC.md`](spec/SPEC.md),
+**Status: M2 (repitch laws, tempo following, line modulation) closed 2026-10-21 (PR #10); M3 (rack admission, the 1.0 bar, due 2026-12-11) is next.** Phase 0 closed 2026-10-20 (D-013). The spec is ratified at revision 2 ([`spec/SPEC.md`](spec/SPEC.md),
 [`spec/params.json`](spec/params.json), 29 keys) and the listening lab is built ([`lab/echo-lab.html`](lab/echo-lab.html)).
 The listening choices are ruled: two repitch laws (tape, exponential), a per-patch tempo policy, jump as a 3 ms
 crossfade, and a load that ends the old repeats. S-1 and the defaults were ruled
@@ -38,7 +38,7 @@ modulation, now built in M2; horde's ABI, meters and presets are M3.**
 | `spec/` | The module spec and its parameter manifest (29 keys) | ratified 2026-10-20 (D-017), protected |
 | `lab/echo-lab.html` | The listening twin: A/B panels and a blind bench for the Phase A choices; free play with every key; an IR echogram. Open it in Chrome or Safari, or serve it: `python3 -m http.server -d lab` | built |
 | `tools/lab_smoke.mjs` | The lab smoke in `./verify fast`, every detector with a planted control | green |
-| `core/` | The C++ core: `include/echo/engine.h` (header-only, C++20; M1 + M2), its invariant suite `tests/core_tests.cpp` (52 checks), run twice by `./verify` (clean, and under each of 75 planted faults); CI adds ASan + UBSan | M2 built; M3 next |
+| `core/` | The C++ core: `include/echo/engine.h` (header-only, C++20; M1 + M2), its invariant suite `tests/core_tests.cpp` (52 checks), run twice by `./verify` (clean, and under each of 75 planted faults); CI adds ASan + UBSan | M2 closed 2026-10-21; M3 next |
 | `tools/check_manifest.py` | The C++ parameter table checked against `spec/params.json` | green |
 | `tools/plan_map_smoke.mjs` | The plan map's parser run headless against `ROADMAP.md`: its self-checks, all seven phases found, a pure model; each with a planted control. In `./verify fast` | green |
 | `verify` | The oracle: `./verify fast` / `full` / `report` | live |
@@ -56,4 +56,4 @@ modulation, now built in M2; horde's ABI, meters and presets are M3.**
 ./verify fast
 ```
 
-_Last verified: 2026-10-21 (M2 on branch m2; `./verify fast` green, core gate included)._
+_Last verified: 2026-10-21 (M2 closed on main at ef6fa8c; `./verify fast` green)._
