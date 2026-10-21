@@ -36,7 +36,7 @@ first. **Status: specified in the Phase A spec (revision 2) and playable in the 
 | `spec/` | The module spec and its parameter manifest (29 keys) | ratified 2026-10-20 (D-017), protected |
 | `lab/echo-lab.html` | The listening twin: A/B panels and a blind bench for the Phase A choices; free play with every key; an IR echogram. Open it in Chrome or Safari, or serve it: `python3 -m http.server -d lab` | built |
 | `tools/lab_smoke.mjs` | The lab smoke in `./verify fast`, every detector with a planted control | green |
-| `tools/plan_map_smoke.mjs` | The plan map's parser run headless against `ROADMAP.md`: its self-checks, all seven phases found, a pure model; each with a planted control. `node tools/plan_map_smoke.mjs` | green, not yet in `./verify` |
+| `tools/plan_map_smoke.mjs` | The plan map's parser run headless against `ROADMAP.md`: its self-checks, all seven phases found, a pure model; each with a planted control. In `./verify fast` | green |
 | `core/` | The C++ core | M1, not started |
 | `verify` | The oracle: `./verify fast` / `full` / `report` | live |
 
