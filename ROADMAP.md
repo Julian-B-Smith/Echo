@@ -104,6 +104,83 @@ commercial delay or borrow its mode names, presets or UI text.
   HIGH findings; the human's listening sign-off (presets + max-feedback stress
   case) recorded here; readiness notice filed in horde's `integrations/echo/`.
   **Due 2026-12-11.**
+- **Plan: PROPOSED 2026-10-21, awaiting the human's poll** (T-010 – T-027 below; nothing is
+  built before the poll). Written by an M3 planning session from the 1.0 bar, the
+  rack-slot contract (§1, §2.2, §4–§8, §11–§12), the I/O gain standard, SPEC-MODULE-MACROS,
+  this repo's spec, decisions, traces and `core/`, and a read of FOUNDATIONS, Scape and horde
+  as they stand on 2026-10-21.
+- **Found while planning (each changes the plan):**
+  1. **The intake pin is stale.** horde amended the rack-slot contract twice on 2026-10-20
+     (ADR-257 and its A1; horde's copy now hashes `09f41cc2…`, ours `945108a7…`). The new
+     §12.5 adds RS-5.8 (up to four optional *fixed controls*, which A12's round trip then
+     covers), RS-4.11 (an optional per-block note context) and admission row A22. The 1.0
+     bar and the I/O gain standard are unchanged. A re-pin is a human gate (T-010).
+  2. **FOUNDATIONS' `fx_operator.h` is still an unfrozen draft** (slices 1–3, DECISIONS
+     #127/#129/#131; nothing after #136). It declares `LatencyDecl`, `TailDecl`, `LoadDecl`,
+     `OperatorProperties`, `validate()` and the lifecycle and parameter concepts. It has **no**
+     `process()`, no `loadState()` arguments, no channels and no meters. So the "swap" is
+     partial: Echo conforms to what exists, and the local shim stays, visibly degraded, for
+     `process()` and the state entry (T-013). `TailDecl::samples` is `uint32_t`
+     (`kInfiniteTail` = 2³² − 1), but Echo's tail is int64 and can pass 2³² samples near unity
+     at 192 kHz, so the mapping must saturate (T-013, and a question in the brief, T-012).
+     FOUNDATIONS has no `integrations/echo/`, and Echo is not in its `correspondents.json`.
+  3. **horde has no hosted-module admission test.** It is still "a specification, not code"
+     (horde's module-cutoff audit, 2026-10-17). Modules self-admit row by row (Bulwark, Scape),
+     and horde judges its own rows at hosting. Echo does the same (T-018).
+  4. **horde's `integrations/echo/` does not exist yet.** horde's B526 waits for Echo's
+     spin-up notice (T-002), so that notice goes first and the readiness notice (T-027) last.
+  5. **The CPU budget is already approved.** The bar's appendix says "Budget approved"
+     (2026-10-04): ≤ 2 % of a min-spec core at defaults and ≤ 4 % at worst per FX module, and a 4 % ceiling for
+     the automated and morphing rows. Q-A3 can close on that reading (poll). horde's frozen
+     protocol is `docs/port/cpu-ledger.md` §1 (a 1e8 multiply-add calibration, best of 5
+     interleaved, 44.1 kHz at 128 samples, × 1.5 to min-spec, labelled an assumption). The
+     "Echo" row in horde's B262 bench (0.337 / 0.405 %) is the legacy rack's built-in echo,
+     not this module.
+  6. **Eight of the 21 MUST rows already have most of their evidence** (rows 1, 2, 7–11, 15 below). The
+     work is in plugging in (the ABI, meters, state, presets, macros), the reports (stereo,
+     cost) and the sign-offs.
+- **Evidence map: the 21 MUST rows** (bar line → what exists today → what closes it):
+
+  | bar row | today | closes it |
+  |---|---|---|
+  | 1 scope list, frozen | SPEC §1 | T-016 (freeze, at horde's feature freeze) |
+  | 2 manifest + lockfile diff gate | `spec/params.json`, `check_manifest.py` | T-016 (key lock gate) |
+  | 3 rack-slot contract (admission) | about half of A1–A20 in the suite | T-013, T-015, T-017, T-018 |
+  | 4 I/O gain standard, tests 1–7 | law, ramp at 48/96, Device on load, before the loop | T-014 (meters, latches, tests 1–7) |
+  | 5 macros, round trip | SPEC §12 only | T-017 |
+  | 6 morph + presets (corner flip, save/load) | Device keys skipped by `loadState` | T-015, T-017 |
+  | 7 deterministic | interleaved = solo; reset = fresh | T-018 (A2 at a stress preset) |
+  | 8 SR + block independent | 4 rates; blocks 1, 7, 64, 333, 4096, random | T-018 (add n = 256; state the tolerances) |
+  | 9 real-time safe | allocation probe; FTZ; NaN/Inf | T-018 (A10 scripted session; locks and syscalls stated) |
+  | 10 fidelity suite | 52 checks, 75 plants | T-018 (the thresholds, stated in one table) |
+  | 11 silence, exact-zero tails | silence and tail checks | — (met; cited in T-018) |
+  | 12 mono-safe (B408 report) | M/S folds to M; Q-A4 | T-019 |
+  | 13 CPU cost, default / worst | informal ns figures (M1) | T-020 |
+  | 14 automated + morphing cost | none | T-020 |
+  | 15 memory figure | 18.71 MiB at 192 kHz (M2) | T-020 (restated after M3's additions) |
+  | 16 face + expanded view | display names and laws in `params.json` | T-022 (who builds it is a poll) |
+  | 17 undo of every control | none | T-015 |
+  | 18 factory presets | none | T-021 |
+  | 19 critic review, no open HIGH | M1, M2 critics | T-026 |
+  | 20 listening sign-off | Phase A lab listening only | T-023 |
+  | 21 name cleared (B433 knockout) | D-012 placeholder | T-025 (private, `local/legal/`) |
+
+  SHOULD rows: lab parity is met by the ruling that demoted the lab (survey Q5) once goldens
+  are frozen (T-024). A manual page is not planned for 1.0 unless the human asks.
+- **Batches** (one branch and PR each, the human merges; one implementer at a time on
+  `engine.h`; M4's core work lands in its own files or after B2, D-027):
+  - **B1, the gates (by 2026-10-24):** T-010, T-011, T-012, with T-002's filings under the
+    same go-ahead.
+  - **B2, plugging in (2026-10-26 → 11-06):** T-013 → T-014 → T-015 in sequence (all
+    `engine.h`); T-016 beside them (`./verify`, tools).
+  - **B3, presets and reports (11-09 → 11-20):** T-017, T-018, T-019, T-020 (tools and tests,
+    disjoint files); the T-021 bank drafted.
+  - **B4, listening (11-23 → 11-27):** T-021 finished, T-022, T-023.
+  - **B5, close (11-30 → 12-04):** T-024, T-025, T-026, T-027. A week of slack before the
+    2026-12-11 cutoff.
+- **Never blocked on a provider:** if FOUNDATIONS or horde has not answered, Echo proceeds on
+  the shim and the contract as pinned, and says so in the readiness notice (INTEGRATIONS
+  rule 2).
 
 ### M4 — Visualizers and screens
 - **Scope (D-027):** D-011's impulse-response display (a stem echogram in dB on a
@@ -215,10 +292,263 @@ commercial delay or borrow its mode names, presets or UI text.
   `integrations/README.md` updated.
 - **Out of scope:** the FOUNDATIONS brief (M3, when the ABI is first touched).
 
+**The M3 queue, T-010 – T-027 (PROPOSED 2026-10-21; the human approves it by poll before any item is built).**
+
+Every item: its new checks each get a planted fault in `plants.h` that `echo_plants` must
+catch (charter §Domain); `./verify fast` green; a trace in `traces/`. An edit to `./verify`,
+`spec/`, `intake/` or the manifest is a human gate, asked in the batch's own poll. Outward
+filings need the human's go-ahead each time.
+
+### T-010 — Re-pin intake to horde's current contract (ADR-257, §12.5)
+- **Status:** open (human gate: a re-pin).
+- **Scope:** `intake/rack-slot-contract.md`, `intake/MANIFEST`; DECISIONS.
+- **Acceptance criteria:** the copy is byte-identical to horde's `docs/proposals/rack-slot-contract.md`
+  at a named horde commit; `intake_gate` green on the new hash; a decision records what
+  §12.5 means for Echo: RS-4.11 (the note context) **not declared** (Echo has no use for
+  notes), A22 not applicable, and RS-5.8 (fixed controls) decided in T-011.
+- **Out of scope:** any other intake file (the bar and the I/O gain standard are unchanged).
+
+### T-011 — Spec revision 3: what M3 adds to the spec
+- **Status:** open (human gate: `spec/` is protected; ratified by poll).
+- **Scope:** `spec/SPEC.md`, `spec/params.json` if fixed controls are declared; DECISIONS.
+- **Acceptance criteria:** the spec states, each as a ruled line: (1) the meter taps (where they
+  sit; peak per block; the clip latch sets on a sample with |x| > 1.0, i.e. over 0 dBFS, and
+  holds until cleared); (2) the state format: text, a version line, then one `key value`
+  per line in manifest order, stepped keys and divisions **by name** (SPEC §3.1), floats
+  written so they read back exactly, Device keys in a separate instance block, ≤ 2 KiB,
+  refused before allocation when larger; (3) the module preset format (SPEC-MODULE-MACROS
+  §4's `ModulePreset`: values by name, slots 1–8 with label, bindings `[lo, hi, curve]` and
+  `home`), and which keys a macro may bind (proposed: continuous keys only; a stepped key
+  through a macro would flip at an arbitrary threshold); (4) fixed controls (RS-5.8): which,
+  if any; (5) the `TailDecl` mapping: tails at or past 2³² − 1 samples saturate to
+  `kInfiniteTail`; (6) `noteContext` and `morphPosition` not declared. Ratified by poll and
+  cited by a decision.
+- **Out of scope:** any change to the 29 keys' ranges, defaults or classes.
+
+### T-012 — FOUNDATIONS brief, then the vendored, pinned header
+- **Status:** open (outward-facing: the human's go-ahead to file).
+- **Scope:** FOUNDATIONS' `integrations/echo/brief.md` (a PR touching only that path);
+  `core/third_party/foundations/` (Scape's shape: `fx_operator.h` verbatim from a reviewed
+  commit, a `MANIFEST` with `commit:` and sha256); `./verify`'s `vendor_gate` (human gate);
+  `integrations/README.md`'s outbound table.
+- **Acceptance criteria:** the brief is filed with the protocol's frontmatter (`id`, `status`,
+  `ball: FOUNDATIONS`, `seq: 1`, `filed`, `respond-by`), asks to register Echo as a
+  correspondent, and asks: (1) the `process()` shape for a stereo module that takes the host
+  tempo as data; (2) `loadState`'s arguments, offering Echo's staged by-name text; (3) the
+  `uint32_t` tail for lines whose tail passes 2³² samples; (4) whether `engine_manifest.h`
+  should be vendored so row A1 can validate the manifest in Echo's own tree. It offers
+  Echo's contract tests. The header is vendored with its sha256 pinned; `vendor_gate` fails
+  on a planted one-byte edit of the vendored file and passes clean.
+- **Out of scope:** waiting for the answer: B2 proceeds on the draft (rule 2).
+
+### T-013 — ABI conformance and the declarations (row A1)
+- **Status:** open (needs T-012's header and T-011's ruling on the tail mapping).
+- **Scope:** `core/include/echo/engine.h`, `plants.h`, `core/tests/core_tests.cpp`.
+- **Acceptance criteria:** `static_assert` that `echo::Echo` models FOUNDATIONS'
+  `FxOperatorLifecycle` and `FxOperatorParams`; `properties()` returns an `OperatorProperties`
+  (latency 0 with no residual, tail with `may_change`, `min_block` 1, `load` = 20 ms at
+  the rate) that passes `validate()` after `prepare` at 44.1, 48, 96 and 192 kHz; the tail
+  saturates to `kInfiniteTail` (checked at 99.99 % feedback, 12 s, 192 kHz); every parameter
+  maps one to one onto `MorphKind` + `MorphParticipation` (RS-2.2); `process()` is proven safe
+  in place (`inL == outL`, `inR == outR`), which settles T-007's signature item; the header's
+  comment names what is still the local shim (`process`, the state entry) as DEGRADED, per
+  INTEGRATIONS rule 2. Plants: a tail left undeclared; a tail that wraps at 2³²; a parameter
+  with no class; a process that reads its input after writing its output.
+- **Out of scope:** the state format (T-015); meters (T-014).
+
+### T-014 — Meter taps, clip latches and the I/O gain tests 1–7 (row A6)
+- **Status:** open (needs T-011's meter ruling).
+- **Scope:** `engine.h`, `plants.h`, `core_tests.cpp`.
+- **Acceptance criteria:** two taps, directly after Input Gain and directly after Output
+  Gain, each a peak and a clip latch, published as atomics readable from another thread,
+  computed without allocation; a latch holds until `clearMeters()`, and a load or a reset
+  never clears it (RS-6.13's table). Tests 1–7 of `intake/module-io-gain.md` as checks:
+  1 bit-identical at 0 dB; 2 the 20 ms linear ramp at 44.1, 48 **and** 96 kHz; 3 the first
+  sample after `prepare` at a saved +6 dB is already +6 dB; 4 a patch load and a corner flip
+  (a load at another corner's patch) leave both gains and their ramps alone; 5 +12 dB of
+  Input raises the loop into the ceiling (the returning term changes shape) while +12 dB of
+  Output scales level only; 6 Echo declares both keys, and a test-side slot that adds a
+  second pair reads red (the planted double gain); 7 both latches set on an over and hold.
+  Plants: a latch that clears itself; a tap before its gain; a prepare that ramps in; a
+  double gain.
+- **Out of scope:** horde's mixer page and its feed gating.
+
+### T-015 — State by name, exact restore, and undo (rows A17–A20; bar row 17)
+- **Status:** open (needs T-011's format ruling).
+- **Scope:** `engine.h` (or a new `core/include/echo/state.h`), `plants.h`, `core_tests.cpp`.
+- **Acceptance criteria:** `saveState` writes the T-011 format; `stageState` parses and
+  validates it off the audio thread; `adoptStaged` adopts it at a block boundary without
+  allocating (RS-6.6), with the D-020 load behaviour. A17: a state saved mid-session and loaded
+  into a fresh instance renders bit-identically to the original after its `reset()`. A18:
+  save → load → save is byte-identical and the renders after each load are bit-identical.
+  A19: every factory preset's state and a worst-case state fit 2 KiB; a 2 KiB + 1 state is
+  refused before anything allocates. A20: a state saved during a ringing tail, a ramp in
+  flight and a set latch equals one saved at rest. **Undo:** for every one of the 29 keys,
+  restoring a snapshot taken before the key moved gives a byte-identical state and a
+  bit-identical render (Device keys through their instance block). Aliases are accepted
+  on load and written back canonical (SPEC §3.1). Plants: a float written as `%.6g`
+  (L0008); one key missing from the state; the meter latch serialised; an oversized state
+  accepted; a division stored by index.
+- **Out of scope:** horde's history tree and gesture brackets (RS-6.14 is the face's).
+
+### T-016 — Manifest lock and scope freeze (bar rows 1–2)
+- **Status:** open (human gate: a `./verify` edit).
+- **Scope:** a lock file beside the manifest (or under `core/`, as the human prefers, since
+  `spec/` is protected), `./verify`, `tools/check_manifest.py`.
+- **Acceptance criteria:** a lock lists every key with its unit, class and stepped labels; a
+  gate fails on a renamed, removed or re-classed key and on a new key added without updating the lock, and
+  passes clean; the lock's hash is the `module_version` written in every preset (contract
+  §6.2). Also closes T-007's item to compare `rate` and `smoothing`. Plants: a renamed key; a
+  dropped label.
+- **Out of scope:** the date of horde's feature freeze (horde's; the scope list in SPEC §1 is
+  frozen on it).
+
+### T-017 — Module presets and macros (rows A12, A13; bar rows 5–6)
+- **Status:** open (needs T-011 and T-015).
+- **Scope:** `presets/` (the bank file), a validator and reference resolver in `tools/` or
+  `core/tools/`, `core_tests.cpp`.
+- **Acceptance criteria:** the validator refuses: more than 8 slots, slots out of order, an
+  unknown key, **a Device key in a preset**, a binding on a key T-011 rules out, a `log`
+  curve with a zero or mixed-sign endpoint, a `home` outside [0, 1]. The reference
+  resolver (SPEC-MODULE-MACROS §4–§5) hits `lo` and `hi` exactly at v = 0 and 1 for `lin`,
+  `exp` and `log`, and matches the closed form to 1e-12 at v ∈ {0, ¼, ½, ¾, 1} with a
+  decreasing range. A12: every factory preset saves and loads with slot order, labels,
+  bindings, curves, `home` (and fixed controls, if declared) exact. A13: a preset loaded at each of four corners,
+  flipped and round-tripped renders identically before and after. Plants: a load that
+  reorders slots; a Device key accepted in a preset; an invalid `log` accepted; an endpoint
+  that is not exact.
+- **Out of scope:** horde's resolution at run time (RS-5.5: horde resolves Echo's macros).
+
+### T-018 — Admission self-test: rows A1–A22 mapped and the gaps filled
+- **Status:** open (after T-013 – T-015).
+- **Scope:** `core_tests.cpp`, `plants.h`; a generated `docs/admission.md`.
+- **Acceptance criteria:** `docs/admission.md` lists each row A1–A22 with its check, its plant
+  and the result, or "horde's" (A7 "off" is the router's: Echo has no bypass key) or "not
+  declared" (A21, A22), and `./verify` fails if it is stale. New checks: A2 at a stress
+  preset; A3 with n = 256 added; A4 latency truth (on an impulse and a swept sine, the
+  measured delay of the dry path equals the declared 0 samples; plant: a dry path one
+  sample late); A8 `|L − R|` kept in stereo routing (plant: a mono sum); A10 a
+  scripted session (sweeps, macro-style moves, corner loads, staged state adoption, sleep and
+  wake) with zero allocations, and a stated note that locks and syscalls are checked by
+  review only (no RealtimeSanitizer on this toolchain); A11 a structural check that every flip
+  key in `params.json` declares a crossfade with a length, `gate`, a seeded jump or
+  deferral (plant: a switch with its crossfade removed), plus the **reported, never
+  judged** B265 click reading on horde's two probes at 48 kHz, at the defaults and each
+  factory preset, both directions, beside an ideal offline equal-gain crossfade (absorbs
+  T-008's B265 item); A14 Echo inside an external one-sample cycle at loop gain 1.2: silence
+  in gives silence out (plant: a loop that starts itself). The fidelity thresholds (row 10)
+  stated in one table.
+- **Out of scope:** horde's own admission harness (unbuilt; horde judges its rows at hosting).
+
+### T-019 — The B408 stereo report (D-010; bar row 12)
+- **Status:** open.
+- **Scope:** a report tool in `core/tools/`, `docs/stereo-report.md` (generated), checks in
+  `core_tests.cpp`.
+- **Acceptance criteria:** per routing mode, D-010's readings: ρ broadband, per repeat
+  generation and per octave band; the ⅓-octave-smoothed worst notch and its frequency; on a
+  mono impulse, seeded decorrelated noise, and the S-only impulse (labelled *by
+  construction*, Q-A4). Layer-0: ρ_out ≥ ρ_in per generation on the mono and noise inputs in
+  every mode; the colouring-zone flag raised exactly when the two times differ by less than
+  ~40 ms and are not equal. Plants: D-010's P1–P5 (prior-art §5.3).
+- **Out of scope:** a stereo width control (post-1.0).
+
+### T-020 — Cost bench and memory figure (bar rows 13–15)
+- **Status:** open.
+- **Scope:** `core/tools/bench.cpp`, `docs/cost.md`. Reported, **never** a verify gate
+  (RS-8.3).
+- **Acceptance criteria:** Release; horde's frozen protocol (`docs/port/cpu-ledger.md` §1 at a
+  cited horde commit); rows at 44.1 kHz / 128 (judged) and 48 kHz (reported): default;
+  worst (proposed: mid/side, all three filters on, drift modulation at full depth, tape
+  repitch moving, 120 % feedback); automated (one continuous key under a 1 Hz full-range
+  sine: `time.ms` in repitch, and `fb.amount`); morph-swept (the slot's blended `setParam`
+  targets at control rate between two corner patches). Each row as a ratio to the
+  calibration loop and as % of an M3 core and of min-spec (× 1.5, labelled an assumption),
+  against the approved 2 % / 4 % (Q-A3). Memory per instance at 44.1–192 kHz, worst case,
+  all allocated at prepare, restated after M3's additions.
+- **Out of scope:** optimisation, unless a row is over budget (then a new item; ADR-236:
+  over budget does not cut a module).
+
+### T-021 — The factory bank: an init plus a small set
+- **Status:** open (the bank's size is a poll; needs T-017).
+- **Scope:** `presets/echo-factory.json`.
+- **Acceptance criteria:** an init (the manifest defaults, no macros) and the size the human
+  rules, chosen to show the range: a slap, a synced dotted ping-pong, a dark dub loop near
+  unity, a modulated chorus-like line, a mid/side wide, a tape-repitch throw, a past-unity
+  edge patch. Each passes T-017's validator and T-015's size check and carries up to 8
+  labelled macros. The human picks the final set by listening (T-023).
+- **Out of scope:** horde's presets lab and its library size (B395/B409).
+
+### T-022 — The face and expanded view (bar row 16)
+- **Status:** open (who builds it is a poll).
+- **Scope (proposed):** `docs/face.md`: which keys sit on the face and which in the
+  expanded view, their grouping and order, a keyboard order; the ADR-203 check that every
+  key has a display name and a normalised law that maps [0, 1] onto its range and back
+  (plant: a key with no law). horde's FX screens workshop draws the house-style UI from it
+  (B336/B531), and the GUI review is horde's.
+- **Acceptance criteria:** the face spec exists and is complete for all 29 keys; the law
+  check is in `./verify`; the human or horde's workshop accepts the face.
+- **Out of scope:** Echo's own screen (M4, D-027).
+
+### T-023 — Listening renders and the human's sign-off (bar row 20)
+- **Status:** open (after T-021).
+- **Scope:** `core/tools/render_presets.cpp` (WAVs from the C++ engine, never the lab), a
+  small listening page in `lab/` or `docs/`, ROADMAP.
+- **Acceptance criteria:** renders of every factory preset and of the stress cases (120 %
+  feedback; 12 s at 1 ms flips; full-depth drift; a tape throw across the cap) on a fixed
+  seeded source set; the human's sign-off recorded here, with any preset they reject
+  replaced or dropped.
+- **Out of scope:** the lab's own sound (the lab is not the module).
+
+### T-024 — Goldens per factory preset (human gate)
+- **Status:** blocked (on T-021 and T-023).
+- **Scope:** `core/goldens/` (render hashes), `./verify full`.
+- **Acceptance criteria:** one golden per factory preset plus the init and the stress cases,
+  cut only after the sign-off, at 48 kHz on the fixed source set; `./verify full` runs
+  them on Mac/clang and Linux/GCC (or states why one platform's hashes differ); the
+  goldens become a protected path; a planted one-ulp change in the engine turns `full`
+  red.
+- **Out of scope:** goldens before the sign-off (ADR-142: parity never enshrines a defect).
+
+### T-025 — The name: B433's knockout screen (bar row 21)
+- **Status:** open (private).
+- **Scope:** `local/legal/` only (D-014); a neutral pointer in tracked files.
+- **Acceptance criteria:** the self-run knockout screen of B433 run for the user-visible
+  name the human picks (D-012), recorded privately; the human's go/no-go recorded here as
+  a neutral line. Phase N's broader clearance stays pre-commercial.
+- **Out of scope:** counsel (ADR-236 item 5).
+
+### T-026 — Independent critic review of M3 (bar row 19)
+- **Status:** blocked (on T-013 – T-020).
+- **Scope:** read-only.
+- **Acceptance criteria:** a fresh-context Opus critic with no shared conversation, an
+  adversarial brief and planted faults it must catch (ADR-203's reading for 1.0) reviews
+  the port and its oracles; no HIGH finding left open. (Before any binary ships outside
+  the project, a second review from another model family or a human is still owed.)
+- **Out of scope:** fixing in the review itself.
+
+### T-027 — Readiness notice to horde
+- **Status:** blocked (on T-002's spin-up notice and every MUST row above).
+- **Scope:** horde's `integrations/echo/` (a PR touching only that path; the human's
+  go-ahead), `integrations/README.md`.
+- **Acceptance criteria:** the notice lists each MUST row with its evidence (the admission
+  report, the stereo report, the cost rows, the sign-offs), Echo's known differences (the
+  shim's `process()` and state entry; anything FOUNDATIONS has not answered), and T-004's
+  three notices folded in; filed by 2026-12-04.
+- **Out of scope:** hosting Echo in horde (horde's work).
+
 ## Open questions (blocking — ask the human)
 
 - **Q-A3 — Per-module CPU budget** for 1.0 is the human's to set (1.0 bar row 51);
   the appendix's ~2 % default / 4 % worst of a min-spec core is the working target.
+  **Proposed reading (M3 plan, 2026-10-21):** the bar's appendix records it as approved
+  by the human on 2026-10-04 ("Budget approved"), with ADR-236's 4 % ceiling for the
+  automated and morphing rows, so it closes on that reading unless the human sets an
+  Echo-specific figure.
+- **Q-M3P — Approve the M3 plan** (T-010 – T-027 and the batches).
+- **Q-M3B — The factory bank's size** (T-021): the bar asks for an init plus "a small set";
+  horde's presets lab has not set a size.
+- **Q-M3F — Who builds the face and expanded view** (T-022): Echo supplies a face spec and
+  horde's workshop draws it (proposed), or Echo builds a house-style face itself.
 
 ## Closed since
 
