@@ -457,3 +457,10 @@ run on", with plants `loadClearsInstantly`, `loadNewSettingsOnOld`, `loadRestart
 
 Rejected: new settings applied to the fading old audio (the click above).
 
+## D-021 — M4's gate is set at M2 close (RATIFIED by the human, 2026-10-20)
+
+ROADMAP said M4's gate (the visualizers and Echo's own screens) would be "defined at Phase A close, with the human";
+Phase A closed without it, which the plan map (PR #6) flagged. The human ruled: leave it until **M2 close** and carry
+it as an open question (ROADMAP Q-M4). Nothing in 1.0 waits on it: the 1.0 bar's face-and-expanded-view MUST row is
+met in M3 with horde's house-style UI if Echo's own screen is not ready (ROADMAP M4).
+
