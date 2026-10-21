@@ -199,7 +199,13 @@ commercial delay or borrow its mode names, presets or UI text.
   by 2026-11-06 and meet T-019's renderer criteria. T-019 then measures through it. **M3
   never waits:** if the file is not on main by 2026-11-09, T-019 builds it itself, as D-029
   said. Either way there is one file and one renderer from M3 on (M4's gate 1, D-027).
-  (D-030 is on M4's branch and lands with M4's plan PR.)
+  **The file landed on main on 2026-10-21 (PR #15, T-030),** so the fallback is not needed.
+- **`core/tests/alloc_probe.h` (asked by M4, critic B4-2 L3, 2026-10-21):** M4's
+  `ir_service.h` runs a worker thread and holds a mutex. That makes two of the probe's
+  comments false: "the suite is single-threaded" (`t_inNew` is a shared, non-atomic global;
+  the zero/non-zero verdict still stands, because a concurrent `new` is counted too), and
+  "grep … `core/include/echo/` finds none" (narrow it to `engine.h`). The first M3 batch that
+  edits the probe (B2, or T-018's A10 session) corrects both.
 - **Never blocked on a provider:** if FOUNDATIONS or horde has not answered, Echo proceeds on
   the shim and the contract as pinned, and says so in the readiness notice (INTEGRATIONS
   rule 2).
@@ -527,8 +533,8 @@ filings need the human's go-ahead each time.
 - **Status:** open.
 - **Scope:** a report tool in `core/tools/`, `docs/stereo-report.md` (generated), checks in
   `core_tests.cpp`. The report measures through the one offline IR renderer,
-  `core/include/echo/ir_render.h`. M4 builds it by 2026-11-06 (D-030, amending D-029); if it
-  is not on main by 2026-11-09, T-019 builds it here, to the criteria below.
+  `core/include/echo/ir_render.h`, which M4 built (T-030, PR #15, on main 2026-10-21;
+  D-030 amending D-029). T-019 adds only the report and its tool.
 - **Acceptance criteria:** per routing mode, D-010's readings: ρ broadband, per repeat
   generation and per octave band; the ⅓-octave-smoothed worst notch and its frequency; on a
   mono impulse, seeded decorrelated noise, and the S-only impulse (labelled *by
