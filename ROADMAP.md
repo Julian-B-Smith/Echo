@@ -113,7 +113,7 @@ commercial delay or borrow its mode names, presets or UI text.
 - **Timing (D-027):** aimed at 1.0, built in parallel with M3. M3 keeps priority:
   nothing in M4 may put a 1.0-bar MUST row at risk before 2026-12-11. If M4 is not
   ready, Echo ships in 1.0 with the house-style UI and M4 follows.
-- **Gate (D-027):**
+- **Gate:** (D-027)
   1. **The drawing is the engine's.** The drawn impulse response equals the
      engine's own offline render bit for bit: one renderer feeds the display,
      the tail oracle and the D-010 mono-fold metric (D-011).
