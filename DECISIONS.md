@@ -555,7 +555,6 @@ Set at M2 close, as D-021 scheduled. By poll:
   collide with M3's, so the M3 session is told, and M4's core work lands in its own files or after M3's batch that
   touches the same ones.
 
-
 ## D-028 — The M3 plan approved; the bank's size, the face and the CPU budget (RATIFIED by poll, 2026-10-21)
 
 The M3 planning session wrote the plan into ROADMAP (M3's evidence map for the 21 MUST rows; queue T-010 – T-027;
@@ -587,3 +586,30 @@ never probed from a live line), and the stereo report measures through it. M4 ad
 so one renderer holds from M3 on. M4 keeps its own gate rows 2–4 (the snapshot label, off the audio thread, the
 100 ms redraw) and whatever caching or worker thread they need. Rejected: T-019 measuring on a plain offline
 instance and M4 re-pointing the metric later (two renderers until M4 closes).
+
+## D-030 — The M4 plan approved; the renderer built early by M4 (amends D-029); WebAssembly; two glasses (RATIFIED by poll, 2026-10-21)
+
+An M4 planning session wrote the plan into ROADMAP (M4: what it found, where things live, batches B4-1 – B4-5; queue
+T-030 – T-035) and polled the human. Every answer took the lead's recommendation, so each deserves a second look at
+its item's gate (the same caution D-028 records).
+- **Q-M4P: the plan, approved as written.** Each item still asks its own human gates as it reaches them. Rejected:
+  core only for now (the screen revisited after M3's B2); rework.
+- **Q-M4R: M4 builds the one renderer early (amends D-029).** D-029, ruled in the M3 session the same day, gave
+  `core/include/echo/ir_render.h` to M3's T-019 (B3, from 2026-11-09). This plan had M4 build it by 2026-11-06, and
+  the two collided; the human ruled for the plan. M4 builds `ir_render.h` in B4-1, to T-019's own renderer criteria
+  (bit-equal to a plain offline render; the plant that skips the output filter) plus M4's. T-019 then measures through
+  it and adds only the stereo report. **M3 never waits:** if the file has not landed on main by 2026-11-09, T-019
+  builds it itself, as D-029 said. Everything else in D-029 holds: one file, one renderer, from M3 on. Rejected:
+  keeping D-029 as ruled (M4's service and display would start after ~11-20, compressing the screen against the
+  cutoff).
+- **Q-M4W: WebAssembly for the screen.** horde's screens are HTML and canvas with no C++ painter (horde's gui2;
+  GUI 3 unbuilt). The page runs the same C++ (`ir_render.h`, `ir_view.h`) compiled to wasm in a Web Worker, so gate 1
+  is proven in the page itself. This adds a toolchain dependency (LLVM's wasm target with lld and a wasi sysroot,
+  locally and in CI), installed at B4-4 with the human told what is installed. In the product the renderer runs
+  natively in horde's process. Rejected: dumped renders only (no dependency, but the screen is not live).
+- **Q-M4G: audition two glasses.** horde's workshop already holds a horde-authored mock Echo glass, SONAR SCOPE (on
+  trial, fed mock values). Echo brings both its own stem-echogram glass and SONAR SCOPE fed by the true IR, from one
+  display model; the human picks in the workshop (horde's ADR-259 ruling 5). Rejected: either glass alone.
+- **Q-M4T: separate test binaries.** M4's checks live in `core/tests/ir_tests.cpp`, built as `echo_ir_tests` and
+  `echo_ir_plants`, so they stay clear of M3's edits to `core_tests.cpp`. The one-time `./verify` edit that runs them
+  in the core gate is approved by this ruling. Rejected: folding them into `core_tests.cpp`.
