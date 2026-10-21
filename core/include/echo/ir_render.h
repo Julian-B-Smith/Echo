@@ -56,6 +56,22 @@
 #include "echo/params.h"
 #include "echo/plants.h"
 
+// No fused multiply-add here either (CLAUDE.md §Domain): scoped exactly as
+// engine.h scopes it, and restored at the end of the file, so the spectra,
+// the EDC and the renderer's own arithmetic contract no a*b+c into one
+// rounding in any build. (libm's pow, log10, sin and cos may still differ
+// between platforms: T-034 compares the wasm build's output with the native
+// one rather than assuming it.) Clang's closing DEFAULT also resets an
+// includer's own OFF: engine.h does the same.
+#if !defined(ECHO_FP_PRAGMA_OFF)
+#if defined(__clang__)
+#pragma STDC FP_CONTRACT OFF
+#elif defined(__GNUC__)
+#pragma GCC push_options
+#pragma GCC optimize("fp-contract=off")
+#endif
+#endif
+
 namespace echo {
 
 inline constexpr double kIrLevelDb = -20.0;  // the display's stated input level
@@ -95,6 +111,7 @@ struct IrInfo {
   // clone was found at rest: the output is exact zero from there on. Block-
   // quantised, so up to kIrBlock - 1 samples late; -1: not at rest by the end.
   std::int64_t restAt = -1;
+  std::array<double, 2> times{};   // the clone's resolved L/R times in seconds (generation spacing, T-032)
 };
 
 // The cache key (T-031): FNV-1a 64 over the bit pattern of every input the
@@ -140,13 +157,29 @@ class IrRenderer {
   // Allocation-free once prepared. Returns false, writing nothing, if the
   // renderer is unprepared for r.sampleRate, an output is too short, or a
   // patch value is refused by the engine (a host bug made visible).
+  // The one-shot form of start() + renderNext(r.length).
   bool render(const IrRequest& r, std::span<double> outL, std::span<double> outR, IrInfo* info = nullptr) {
-    if (!preparedFor(r.sampleRate) || r.length < 0 || static_cast<std::int64_t>(outL.size()) < r.length ||
-        static_cast<std::int64_t>(outR.size()) < r.length)
-      return false;
+    if (static_cast<std::int64_t>(outL.size()) < r.length || static_cast<std::int64_t>(outR.size()) < r.length) return false;
+    if (!start(r)) return false;
+    renderNext(outL, outR, r.length);
+    if (info) *info = info_;
+    return true;
+  }
+
+  // ---- the resumable form (T-031: head-first frames extend ONE render) ----
+  // start() lands the patch; each renderNext(outL, outR, upTo) renders the
+  // samples [position(), min(upTo, length)) into outL / outR at their ABSOLUTE
+  // indices (the buffers hold the whole render). Internal blocks never cross a
+  // multiple of kIrBlock and the rest check runs only there, so ANY split
+  // renders bit-identically to the one-shot render, restAt included (critic
+  // T-030 M2: re-rendering the head for every frame would cost the 100 ms).
+  // Allocation-free. Returns false if the request is refused.
+  bool start(const IrRequest& r) {
+    active_ = false;
+    if (!preparedFor(r.sampleRate) || r.length < 0) return false;
     if (plant::irAllocsInRender) {  // the planted allocation (the service, T-031, preallocates everything)
       std::vector<double> scratch(8, 0.0);
-      if (!outL.empty()) outL[0] = scratch[0];
+      a_ = scratch[0];
     }
     if (plant::irSeedAfterReset) e_.reset();  // the pre-critic order
     for (int k = 0; k < kNumParams; ++k) {
@@ -157,52 +190,61 @@ class IrRenderer {
       if (!e_.setParam(k, v)) return false;
     }
     if (!plant::irReusesState && !plant::irSeedAfterReset) e_.reset();  // AFTER the values: see "WHY setParam THEN reset()" above
-    const double a = plant::irLevelIgnored ? 1.0 : std::pow(10.0, r.levelDb / 20.0);
-    std::uint32_t rng = r.noiseSeed;
-    // The input for sample i of this render. Impulses sit at sample 0.
-    auto input = [&](std::int64_t i, double& l, double& rr) {
-      l = rr = 0.0;
-      switch (r.input) {
-        case IrInput::Mono: if (i == 0) l = rr = a; break;
-        case IrInput::Left: if (i == 0) l = a; break;
-        case IrInput::Right: if (i == 0) rr = a; break;
-        case IrInput::SideOnly: if (i == 0) { l = a; rr = -a; } break;
-        case IrInput::Noise:
-          if (i < r.noiseLength) { l = a * mulberry(rng); rr = a * mulberry(rng); }  // decorrelated: alternate draws
-          break;
-      }
-    };
-    IrInfo inf;
+    r_ = r;
+    a_ = plant::irLevelIgnored ? 1.0 : std::pow(10.0, r.levelDb / 20.0);
+    rng_ = r.noiseSeed;
+    pos_ = 0;
+    resting_ = false;
+    info_ = IrInfo{};
+    active_ = true;
+    return true;
+  }
+  std::int64_t position() const { return pos_; }
+  bool done() const { return active_ && pos_ >= r_.length; }
+  const IrInfo& info() const { return info_; }
+
+  // Returns the new position.
+  std::int64_t renderNext(std::span<double> outL, std::span<double> outR, std::int64_t upTo) {
+    if (!active_) return pos_;
+    const auto room = static_cast<std::int64_t>(std::min(outL.size(), outR.size()));
+    const std::int64_t end = std::min({upTo, r_.length, room});
+    if (plant::irChunkResetsNoise) rng_ = r_.noiseSeed;
     std::array<double, kIrBlock> inL{}, inR{};
-    for (std::int64_t pos = 0; pos < r.length;) {
-      const int n = static_cast<int>(std::min<std::int64_t>(kIrBlock, r.length - pos));
+    while (pos_ < end) {
+      if (resting_) {  // at rest with no input left: exact zero by construction (SPEC §10)
+        for (std::int64_t i = pos_; i < end; ++i) outL[static_cast<std::size_t>(i)] = outR[static_cast<std::size_t>(i)] = 0.0;
+        pos_ = end;
+        break;
+      }
+      const bool boundary = pos_ % kIrBlock == 0;
+      const int n = static_cast<int>(std::min<std::int64_t>(kIrBlock - pos_ % kIrBlock, end - pos_));
       bool any = false;
       for (int i = 0; i < n; ++i) {
-        input(pos + i, inL[static_cast<std::size_t>(i)], inR[static_cast<std::size_t>(i)]);
+        input(pos_ + i, inL[static_cast<std::size_t>(i)], inR[static_cast<std::size_t>(i)]);
         any = any || inL[static_cast<std::size_t>(i)] != 0.0 || inR[static_cast<std::size_t>(i)] != 0.0;
       }
       // Once the clone rests and no input remains, every later sample is exact
       // zero by construction (SPEC §10: silence in, silence out at rest), so the
-      // render stops early and zero-fills. The output equals the full render.
-      if (!any && e_.atRest() && pos > 0 && (r.input != IrInput::Noise || pos >= r.noiseLength)) {
-        if (inf.restAt < 0) inf.restAt = pos;
-        for (std::int64_t i = pos; i < r.length; ++i) outL[static_cast<std::size_t>(i)] = outR[static_cast<std::size_t>(i)] = 0.0;
-        break;
+      // render stops processing and zero-fills. The output equals the full render.
+      if (boundary && !any && e_.atRest() && pos_ > 0 && (r_.input != IrInput::Noise || pos_ >= r_.noiseLength)) {
+        resting_ = true;
+        if (info_.restAt < 0) info_.restAt = pos_;
+        continue;
       }
-      e_.process(inL.data(), inR.data(), outL.data() + pos, outR.data() + pos, n, r.bpm);
-      if (pos == 0) inf.tail = e_.tail();  // the patch has landed by the end of the first block
-      pos += n;
+      e_.process(inL.data(), inR.data(), outL.data() + pos_, outR.data() + pos_, n, r_.bpm);
+      if (pos_ == 0) {  // the patch has landed by the end of the first block
+        info_.tail = e_.tail();
+        info_.times = e_.resolvedTimes();
+      }
+      pos_ += n;
     }
-    if (!plant::irRestAtMissesEnd && inf.restAt < 0 && e_.atRest()) inf.restAt = r.length;  // rested inside the last block (critic T-030 M1)
-    if (info) *info = inf;
-    return true;
+    if (pos_ >= r_.length && !plant::irRestAtMissesEnd && info_.restAt < 0 && e_.atRest())
+      info_.restAt = r_.length;  // rested inside the last block (critic T-030 M1)
+    return pos_;
   }
 
  private:
   // mulberry32 (the project's one generator), here for the noise input only.
-  // This file sits outside engine.h's fp-contract pragma: `q * 2.0 - 1.0` is
-  // safe under contraction only because x2 is exact (fused or not, one
-  // rounding). Keep every scale here a power of two, or scope the pragma.
   static double mulberry(std::uint32_t& s) {
     std::uint32_t t = (s += 0x6D2B79F5u);
     t = (t ^ (t >> 15)) * (t | 1u);
@@ -210,9 +252,31 @@ class IrRenderer {
     return static_cast<double>(t ^ (t >> 14)) / 4294967296.0 * 2.0 - 1.0;
   }
 
+  // The input for sample i of the render. Impulses sit at sample 0; the noise
+  // draws in order, so it is only ever asked for i = position() onward.
+  void input(std::int64_t i, double& l, double& rr) {
+    l = rr = 0.0;
+    switch (r_.input) {
+      case IrInput::Mono: if (i == 0) l = rr = a_; break;
+      case IrInput::Left: if (i == 0) l = a_; break;
+      case IrInput::Right: if (i == 0) rr = a_; break;
+      case IrInput::SideOnly: if (i == 0) { l = a_; rr = -a_; } break;
+      case IrInput::Noise:
+        if (i < r_.noiseLength) { l = a_ * mulberry(rng_); rr = a_ * mulberry(rng_); }  // decorrelated: alternate draws
+        break;
+    }
+  }
+
   Echo e_;
   double sr_ = 0.0;
   bool prepared_ = false;
+  // The render in flight (start / renderNext).
+  IrRequest r_;
+  double a_ = 0.0;
+  std::uint32_t rng_ = 1;
+  std::int64_t pos_ = 0;
+  bool resting_ = false, active_ = false;
+  IrInfo info_;
 };
 
 // One-shot convenience for tools and tests (T-019's report, the oracles):
@@ -236,3 +300,11 @@ inline IrResult renderIr(const IrRequest& r) {
 }
 
 }  // namespace echo
+
+#if !defined(ECHO_FP_PRAGMA_OFF)
+#if defined(__clang__)
+#pragma STDC FP_CONTRACT DEFAULT
+#elif defined(__GNUC__)
+#pragma GCC pop_options
+#endif
+#endif

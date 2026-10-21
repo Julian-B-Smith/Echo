@@ -108,6 +108,21 @@ ECHO_PLANT(irAllocsInRender)     // render() allocates a scratch buffer: unsafe 
 ECHO_PLANT(irSeedAfterReset)     // the clone is reset BEFORE the values are sent: drift follows the last render's seed (critic T-030 H1)
 ECHO_PLANT(irAcceptsClampedRate) // a rate the engine clamped is rendered under the requested rate's hash (critic T-030 M3)
 ECHO_PLANT(irRestAtMissesEnd)    // a clone that rested inside the last block reports restAt -1 (critic T-030 M1)
+// ---- M4, B4-2 (T-031 service, T-032 display model) ----
+ECHO_PLANT(irChunkResetsNoise)   // each renderNext restarts the noise stream: a chunked render differs from the one-shot
+ECHO_PLANT(irRenderInline)       // the service renders inside request(), on the caller's thread
+ECHO_PLANT(irWholeTailFirst)     // the service publishes nothing until the whole window is rendered
+ECHO_PLANT(irRendersWhilePaused) // pause() is ignored: renders run with the editor closed
+ECHO_PLANT(irCacheIgnored)       // the cache never hits: every request re-renders
+ECHO_PLANT(irNoCancel)           // a new request waits for the render in flight to finish
+ECHO_PLANT(viewDecimatesPeaks)   // a display column shows its first sample, not its peak
+ECHO_PLANT(gridFixedTempo)       // the tempo grid is drawn at 120 bpm whatever the tempo
+ECHO_PLANT(viewGenWindowFromBase) // the spectrum strip's windows ignore the L/R offsets (the base time)
+ECHO_PLANT(edcForward)           // the energy decay curve integrates forward, not backward (Schroeder)
+ECHO_PLANT(viewGenIndexOffByOne) // the spectrum strip draws generation n+1 as generation n (critic B4-2 H2)
+ECHO_PLANT(irCancelKeepsSlot)    // a cancelled render stays a valid, freshest slot and pushes complete renders out (critic B4-2 M2)
+ECHO_PLANT(irPublishesEmpty)     // a request is shown before anything is rendered: the screen blanks on every change (critic B4-2 M3)
+ECHO_PLANT(viewUnrenderedIsZero) // a column past what is rendered reads as exact zero: a partial frame draws an ended tail (critic B4-2 M4)
 }  // namespace echo::plant
 
 #undef ECHO_PLANT

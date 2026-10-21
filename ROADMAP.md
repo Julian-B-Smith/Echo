@@ -630,8 +630,8 @@ filings need the human's go-ahead each time.
 - **Out of scope:** hosting Echo in horde (horde's work).
 
 ### T-030 — M4: the offline IR renderer (B4-1)
-- **Status:** in progress (built on branch `m4-renderer`, B4-1's PR; trace
-  `traces/2026-10-21-t030-ir-renderer.md`; critic FIX-THEN-SHIP, all fixed).
+- **Status:** done 2026-10-21 (PR #15, 1f23fe7; trace `traces/2026-10-21-t030-ir-renderer.md`;
+  critic FIX-THEN-SHIP, all fixed).
 - **Scope:** new `core/include/echo/ir_render.h` (the one renderer, D-029 as amended by
   D-030), new `core/tests/ir_tests.cpp` (built as `echo_ir_tests` and `echo_ir_plants`),
   `core/CMakeLists.txt`, an M4 section appended to `plants.h`, the `./verify` core gate
@@ -665,7 +665,12 @@ filings need the human's go-ahead each time.
 - **Out of scope:** threads, the display, `engine.h`.
 
 ### T-031 — M4: the render service (B4-2)
-- **Status:** open (approved 2026-10-21, D-030).
+- **Status:** in progress (built on branch `m4-service`, B4-2's PR; trace
+  `traces/2026-10-21-b4-2-service-view.md`).
+- **Amended 2026-10-21 by poll (D-033):** frame 1 covers the first **96 000 samples** (2 s at
+  48 kHz, 0.5 s at 192 kHz). The render costs per sample, and once built, a 2 s head at
+  192 kHz measured 90–196 ms worst of 20. Every chunk is cancellable, the head's included,
+  so a newer request waits at most one 0.1 s chunk.
 - **Scope:** new `core/include/echo/ir_service.h`, `core/tests/ir_tests.cpp`, `plants.h`
   (M4 section).
 - **Acceptance criteria:**
@@ -691,7 +696,24 @@ filings need the human's go-ahead each time.
 - **Out of scope:** drawing; `engine.h`.
 
 ### T-032 — M4: the display model (B4-2)
-- **Status:** open (approved 2026-10-21, D-030).
+- **Status:** in progress (built on branch `m4-service`, B4-2's PR).
+- **Amended 2026-10-21 by the lead (D-032, for the human's review):**
+  - Criterion 1: the model draws **columns**. Each column is the render's own sample of
+    greatest magnitude in its range. A screen has hundreds of columns and a render millions
+    of samples, so a stem per sample cannot be drawn. When a column covers one sample, the
+    columns are the render.
+  - Criterion 2: **beats and division marks**. Bar lines need the host's meter, which the
+    rack-slot contract does not pass; T-034 raises it with the screen.
+  - Criterion 3's reference is the engine's **own first repeat**, not an analytic |F|. That
+    repeat carries the loop filter once (SPEC §2), and re-deriving |F| in a test would be a
+    second model of the engine.
+    - Every routing is covered, each channel at its own arrivals (SPEC §4).
+    - With every filter off, each generation is flat and the next is exactly
+      p·20 log₁₀ g lower (p passes per channel generation; 2 in ping-pong).
+    - With the loop filter on, each step equals p passes of the first repeat's shape plus
+      g.
+    - Mid/side with side content and unequal times has no strip, and is refused.
+    - (Critic B4-2 H1, H2; D-033.)
 - **Scope:** new `core/include/echo/ir_view.h`, `core/tests/ir_tests.cpp`, `plants.h`
   (M4 section).
 - **Acceptance criteria:**
