@@ -1,0 +1,575 @@
+<!doctype html>
+<!-- echo-plan-map — the visual map of Echo's ROADMAP: what is done and what is left before horde's cutoff.
+     Echo lead, 2026-10-20, at the human's request: "Can we also get up a roadmap visualizer like your sibling
+     projects and Horde have so I can follow the progress and see what's left?" Shape after horde's
+     docs/design/h2-plan-map.html (B387) and the siblings' plan maps (Bulwark D-081, Sluice, Scape): status
+     colour, a side panel per part, a tally of what is left, live ROADMAP rows, self-checks with must-fail
+     controls, ?check=1.
+
+     ONE DIFFERENCE FROM THE SIBLINGS, ON PURPOSE. Their DATA blocks are hand-written, status included, and the
+     live rows sit beside them. Echo's charter makes ROADMAP.md the single source of truth, and a hand-typed
+     status here would be a second copy that drifts. So this page has NO data block: every phase, gate, queue
+     item, open question and the cutoff date is PARSED from ROADMAP.md on load. If the page and the ROADMAP
+     disagree, the parser is wrong, and the self-checks (and tools/plan_map_smoke.mjs) exist to catch that.
+
+     HOW A PHASE'S STATE IS READ (ROADMAP has no per-phase status field today):
+       1. a `- **Status:**` bullet inside the phase's own ### section, if the lead ever adds one, wins;
+       2. else the Status block's `**Phase:**` bullet: it is split into clauses (at '.', ';'), parentheticals
+          are dropped, and a clause that BEGINS with a phase id is classified by its words: "closed" -> closed,
+          "gate met" -> gate met, "in progress" / "started" / "under way" -> in progress, "next" -> next.
+          Only the clause's head counts, so "… Q-A5 and S-1 closed" inside Phase A's clause is not misread;
+       3. else: not started.
+     A clause that begins like a phase id the ROADMAP does not have (a typo, "M5 CLOSED") is a parse error.
+
+     WHERE THE ROADMAP COMES FROM. Served from the repo root (the `plan-map` entry in .claude/launch.json, or
+     any static server, then /docs/design/echo-plan-map.html) it fetches ../../ROADMAP.md, live. Published as
+     an artifact it fetches a ROADMAP.md bundled beside it (a snapshot; the page says which it read). Opened as
+     a plain file it cannot fetch, and offers to open ROADMAP.md from disk instead. A response that does not
+     start with "# ROADMAP" is rejected, so a server's HTML 404 page is never parsed as the roadmap.
+
+     SELF-CHECKS (?check=1, or the button), each with a must-fail control: a mutation of the ROADMAP text
+     that the check must read red. A control that cannot be planted counts as a control that did not fire.
+       1. the ROADMAP parses cleanly: every ### under Phases and Queue, every open question, every phase
+          clause understood (control: a queue heading whose id is broken);
+       2. every phase has a gate, and the cutoff date is found (control: a Gate label misspelt);
+       3. closed phases come first: no closed phase after an unclosed one (control: the last unclosed phase
+          planted as CLOSED);
+       4. ids are unique across phases, queue items and questions (control: a queue heading duplicated).
+     The MODEL section is pure (no DOM, no clock) so tools/plan_map_smoke.mjs runs the same parser, checks and
+     controls headlessly. Only the UI reads a clock, for "days to the cutoff", and says it is the viewer's.
+     Nothing is stored. URL: ?check=1 · ?sel=phase:M1 | T-004 | Q-A3. -->
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Echo Plan Map</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+  /* Tokens follow the siblings' plan maps (Bulwark's), so the family reads as one; Echo's accent is a teal. */
+  :root {
+    --bg:#eef1f4; --panel:#ffffff; --well:#f7f9fb; --line:#c9d0d8; --ink:#14191f; --ink2:#47515c; --dim:#7b8590;
+    --accent:#0f7c86; --link:#1f5f99; --ok:#2f7a3b; --bad:#b3261e; --skip:#8a6400; --cut:#c76a12;
+    --s-done:#5b8a3c; --s-prog:#2a8f9c; --s-next:#c76a12; --s-planned:#8794a3; --s-open:#2f5f9a; --s-block:#b3261e; --s-you:#c76a12;
+    --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    --sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+    --bg:#11151a; --panel:#181d23; --well:#1e242b; --line:#323b45; --ink:#e7ebef; --ink2:#b3bcc6; --dim:#7f8a96;
+    --accent:#4fc3cc; --link:#7fb4e6; --ok:#7cc48a; --bad:#ff8a80; --skip:#e3c26b; --cut:#f0a04b;
+    --s-done:#8fc46a; --s-prog:#5cc8d4; --s-next:#f0a04b; --s-planned:#6d7885; --s-open:#6f9fe0; --s-block:#ff8a80; --s-you:#f0a04b; color-scheme:dark; } }
+  :root[data-theme="dark"] {
+    --bg:#11151a; --panel:#181d23; --well:#1e242b; --line:#323b45; --ink:#e7ebef; --ink2:#b3bcc6; --dim:#7f8a96;
+    --accent:#4fc3cc; --link:#7fb4e6; --ok:#7cc48a; --bad:#ff8a80; --skip:#e3c26b; --cut:#f0a04b;
+    --s-done:#8fc46a; --s-prog:#5cc8d4; --s-next:#f0a04b; --s-planned:#6d7885; --s-open:#6f9fe0; --s-block:#ff8a80; --s-you:#f0a04b; color-scheme:dark; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.5 var(--sans); }
+  .wrap { padding-block:20px 40px; padding-left:max(16px, env(safe-area-inset-left, 0px)); padding-right:max(16px, env(safe-area-inset-right, 0px)); display:grid; gap:16px; max-width:1500px; margin:0 auto; }
+  h1 { font:600 1.9rem/1.1 var(--sans); margin:0; letter-spacing:-0.01em; text-wrap:balance; }
+  h2 { font:600 1.05rem/1.3 var(--sans); margin:0 0 8px; }
+  code { font:0.86em var(--mono); background:var(--well); border:1px solid var(--line); border-radius:3px; padding:0 3px; }
+  .eyebrow { font:500 0.72rem/1 var(--mono); letter-spacing:0.1em; text-transform:uppercase; color:var(--dim); }
+  .hdr { display:flex; gap:12px 20px; align-items:flex-end; flex-wrap:wrap; }
+  .hdr > div:first-child { display:grid; gap:6px; min-width:0; }
+  .hdr .ctl { margin-left:auto; display:flex; gap:8px; flex-wrap:wrap; }
+  button { font:500 0.85rem var(--sans); color:var(--ink); background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:6px 12px; cursor:pointer; min-height:32px; }
+  button:hover { border-color:var(--ink2); }
+  button:focus-visible, [data-sel]:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:14px 16px; min-width:0; }
+  .tally { display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:10px; }
+  .tally div { border-top:3px solid var(--sc); padding-top:6px; min-width:0; }
+  .tally b { font:600 1.6rem/1 var(--mono); display:block; font-variant-numeric:tabular-nums; }
+  .tally span { color:var(--ink2); font-size:0.88rem; }
+  .dot { width:10px; height:10px; border-radius:50%; background:var(--sc); display:inline-block; flex:none; }
+  .legend { display:flex; gap:8px 16px; flex-wrap:wrap; font-size:0.85rem; color:var(--ink2); align-items:center; margin-bottom:12px; }
+  .legend .cutk { display:inline-block; width:0; height:14px; border-left:2px dashed var(--cut); vertical-align:middle; margin-right:5px; }
+
+  /* The progress strip: one segment per phase, in ROADMAP order, with horde's cutoff after the phase that is due. */
+  .strip { display:flex; gap:3px; align-items:stretch; margin:4px 0 14px; }
+  .strip .seg { flex:1 1 0; min-width:0; height:12px; border-radius:3px; background:var(--sc); cursor:pointer; position:relative; }
+  .strip .seg.planned { background:repeating-linear-gradient(135deg, var(--sc) 0 4px, transparent 4px 8px); border:1px solid var(--sc); }
+  .strip .cutm { flex:none; width:0; border-left:2px dashed var(--cut); margin:-6px 4px; }
+  .track { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:10px; }
+  .ph { background:var(--well); border:1px solid var(--line); border-top:5px solid var(--sc); border-radius:6px; padding:10px 12px; display:grid; gap:6px; align-content:start; cursor:pointer; min-width:0; text-align:left; }
+  .ph:hover { border-color:var(--ink2); border-top-color:var(--sc); }
+  .ph.sel { outline:2px solid var(--ink); outline-offset:1px; }
+  .ph.after { opacity:.78; }
+  .ph .pid { font:600 0.78rem var(--mono); letter-spacing:.06em; color:var(--dim); display:flex; justify-content:space-between; align-items:flex-start; gap:4px 6px; flex-wrap:wrap; }
+  .ph .pid .tag { flex:none; }
+  .ph .pt { font-weight:600; line-height:1.3; }
+  .ph .pg { font-size:0.82rem; color:var(--ink2); }
+  .ph .pg b { font:500 0.68rem var(--mono); letter-spacing:.1em; color:var(--dim); text-transform:uppercase; margin-right:4px; }
+  .ph .warn { font-size:0.8rem; color:var(--bad); }
+  .cutcard { border:1.5px dashed var(--cut); border-radius:6px; padding:10px 12px; display:grid; gap:4px; align-content:center; color:var(--ink2); font-size:0.85rem; min-width:0; }
+  .cutcard b { color:var(--cut); font:600 0.78rem var(--mono); letter-spacing:.06em; }
+  .cutcard .big { font:600 1.15rem var(--mono); color:var(--ink); }
+  .tag { display:inline-block; font:600 0.7rem var(--mono); letter-spacing:.05em; padding:2px 7px; border-radius:4px; background:var(--sc); color:#10141a; white-space:nowrap; }
+  .chips { display:flex; flex-wrap:wrap; gap:4px; }
+  .chip { font:500 0.72rem var(--mono); padding:1px 7px; border-radius:3px; background:var(--sc); color:#10141a; cursor:pointer; border:0; min-height:0; }
+  .main { display:grid; grid-template-columns:minmax(0,1fr) 380px; gap:16px; align-items:start; }
+  .left { display:grid; gap:16px; min-width:0; }
+  .cols { display:grid; grid-template-columns:repeat(auto-fit, minmax(260px, 1fr)); gap:14px; }
+  .cols h3 { margin:0 0 6px; font:600 0.95rem var(--sans); display:flex; align-items:center; gap:8px; }
+  .cols ul { margin:0; padding-left:1.1rem; display:grid; gap:5px; }
+  .cols li { color:var(--ink2); }
+  a.go { color:var(--link); cursor:pointer; text-decoration:underline; text-underline-offset:2px; }
+  table.q { width:100%; border-collapse:collapse; font-size:0.9rem; }
+  table.q th { text-align:left; font:500 0.7rem var(--mono); letter-spacing:.1em; color:var(--dim); text-transform:uppercase; padding:4px 6px; border-bottom:1px solid var(--line); }
+  table.q td { padding:7px 6px; border-bottom:1px solid var(--line); vertical-align:top; }
+  table.q tr { cursor:pointer; } table.q tr:hover td { background:var(--well); }
+  table.q td.id { font:600 0.8rem var(--mono); white-space:nowrap; }
+  table.q .st { color:var(--ink2); font-size:0.82rem; margin-top:2px; }
+  .qa { border-left:3px solid var(--sc); padding:4px 0 4px 10px; display:grid; gap:2px; cursor:pointer; }
+  .qa + .qa { margin-top:8px; }
+  .qa .qid { font:600 0.8rem var(--mono); }
+  .qa p { margin:0; color:var(--ink2); font-size:0.9rem; }
+  .side { position:sticky; top:max(12px, env(safe-area-inset-top, 0px)); max-height:calc(100vh - 24px); overflow:auto; display:grid; gap:8px; align-content:start; }
+  .side h3 { margin:0; font:600 1.05rem var(--sans); }
+  .side h4 { margin:8px 0 2px; font:500 0.7rem var(--mono); letter-spacing:.1em; color:var(--dim); text-transform:uppercase; }
+  .side p, .side li { margin:0; color:var(--ink2); font-size:0.9rem; }
+  .side ul { margin:0; padding-left:1.1rem; display:grid; gap:4px; }
+  .chk .r { display:grid; grid-template-columns:150px 1fr; gap:8px; padding:4px 0; border-bottom:1px solid var(--line); font-size:0.88rem; }
+  .ok { color:var(--ok); font-weight:700; } .bad { color:var(--bad); font-weight:700; } .skip { color:var(--skip); font-weight:700; }
+  .note { color:var(--dim); font-size:0.82rem; margin:6px 0 0; }
+  .errs { color:var(--bad); font-size:0.88rem; margin:6px 0 0; padding-left:1.1rem; }
+  .loader { display:grid; gap:10px; justify-items:start; }
+  .drop { border:1.5px dashed var(--line); border-radius:8px; padding:18px; width:100%; color:var(--ink2); text-align:center; }
+  .drop.over { border-color:var(--accent); color:var(--ink); }
+  [hidden] { display:none !important; }
+  @media (max-width:1000px) { .main { grid-template-columns:1fr; } .side { position:static; max-height:none; } }
+  @media (max-width:520px) { .chk .r { grid-template-columns:1fr; } h1 { font-size:1.5rem; } }
+</style></head>
+<body>
+<div class="wrap">
+  <div class="hdr">
+    <div>
+      <div class="eyebrow">Echo · plan map · read from ROADMAP.md</div>
+      <h1>What is done, and what is left before horde’s cutoff</h1>
+    </div>
+    <div class="ctl"><button id="themeBtn" type="button">Theme: system</button><button id="reloadBtn" type="button">Re-read ROADMAP</button><button id="checkBtn" type="button">Run self-check</button></div>
+  </div>
+
+  <div class="card loader" id="loader" hidden>
+    <h2>ROADMAP.md could not be read</h2>
+    <p class="note" id="loaderWhy" style="margin:0"></p>
+    <label class="drop" id="drop">Drop <code>ROADMAP.md</code> here, or <input type="file" id="file" accept=".md,text/markdown,text/plain"></label>
+  </div>
+
+  <div id="app" hidden>
+    <div style="display:grid;gap:16px">
+      <div class="card"><div class="tally" id="tally"></div></div>
+
+      <div class="card">
+        <h2>Phases</h2>
+        <div class="legend" id="legend"></div>
+        <div class="strip" id="strip" aria-hidden="true"></div>
+        <div class="track" id="track"></div>
+      </div>
+
+      <div class="main">
+        <div class="left">
+          <div class="card">
+            <h2>What is left</h2>
+            <div class="cols" id="left"></div>
+          </div>
+          <div class="card">
+            <h2>Queue</h2>
+            <table class="q"><thead><tr><th>Item</th><th>What</th><th>Phase</th><th>Status</th></tr></thead><tbody id="queue"></tbody></table>
+          </div>
+          <div class="card">
+            <h2 id="openH">Open questions</h2>
+            <div id="open"></div>
+          </div>
+          <div class="card" id="closedCard">
+            <h2>Closed questions</h2>
+            <div id="closed"></div>
+          </div>
+          <div class="card" id="defCard">
+            <h2>Deferred</h2>
+            <div class="cols" id="deferred"></div>
+          </div>
+          <div class="card" id="checkCard" hidden>
+            <h2>Self-check</h2>
+            <div class="chk" id="checkOut"></div>
+          </div>
+          <div class="card">
+            <p class="note" id="srcNote" style="margin:0"></p>
+            <ul class="errs" id="errs" hidden></ul>
+          </div>
+        </div>
+        <div class="card side" id="side"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ================= MODEL — pure: parses ROADMAP.md text, runs the self-checks. No DOM, no clock. ================= */
+const PHASE_STATES = ['closed', 'gate met', 'in progress', 'next', 'not started'];
+const QUEUE_STATES = ['done', 'in progress', 'open', 'blocked', 'dropped'];
+const DATE_RE = /\b(\d{4}-\d{2}-\d{2})\b/;
+
+// Split a block of markdown lines into prose paragraphs and top-level bullets (continuation lines are indented).
+function blocks(lines) {
+  const out = []; let cur = null;
+  for (const l of lines) {
+    if (/^- /.test(l)) { cur = { kind: 'bullet', text: l.slice(2).trim() }; out.push(cur); }
+    else if (!l.trim()) cur = null;
+    else if (/^\s+\S/.test(l) && cur && cur.kind === 'bullet') cur.text += ' ' + l.trim();
+    else if (cur && cur.kind === 'prose') cur.text += ' ' + l.trim();
+    else { cur = { kind: 'prose', text: l.trim() }; out.push(cur); }
+  }
+  return out;
+}
+// "**Gate:** text" -> { label:'Gate', text }; an unlabelled bullet -> { label:null, text }.
+function labelled(text) {
+  const m = text.match(/^\*\*([^*]+?):\*\*\s*(.*)$/);
+  return m ? { label: m[1].trim(), text: m[2].trim() } : { label: null, text };
+}
+function sections(lines, level) {
+  const mark = '#'.repeat(level) + ' ', out = []; let cur = null;
+  for (const l of lines) {
+    if (l.startsWith(mark)) { cur = { title: l.slice(mark.length).trim(), lines: [] }; out.push(cur); }
+    else if (cur) cur.lines.push(l);
+  }
+  return out;
+}
+// A phase clause's head, read for its state. Parentheticals and bold are dropped, then the head is cut at ':'.
+function clauseState(clause) {
+  const head = clause.replace(/\*\*/g, '').replace(/\([^)]*\)/g, '').split(':')[0].trim();
+  if (/\bclosed\b/i.test(head)) return 'closed';
+  if (/\bgate met\b/i.test(head)) return 'gate met';
+  if (/\b(in progress|started|under way|underway)\b/i.test(head)) return 'in progress';
+  if (/\bnext\b/i.test(head)) return 'next';
+  return null;
+}
+function queueState(text) {
+  const t = text.toLowerCase();
+  if (/^done\b/.test(t)) return 'done';
+  if (/^(in progress|active|started)\b/.test(t)) return 'in progress';
+  if (/^open\b/.test(t)) return 'open';
+  if (/^blocked\b/.test(t)) return 'blocked';
+  if (/^(dropped|cancelled|canceled|superseded|retired)\b/.test(t)) return 'dropped';
+  return null;
+}
+const PHASE_ID_RE = /^(Phase [0-9A-Z]+|M\d+)\b/;   // what a phase id looks like at the head of a clause or title
+
+function parseRoadmap(text) {
+  const lines = String(text).replace(/\r\n?/g, '\n').split('\n');
+  const errors = [], err = m => errors.push(m);
+  const titleLine = lines.find(l => /^# /.test(l)) || '';
+  if (!/^# ROADMAP\b/.test(titleLine)) err('the file does not start with "# ROADMAP"');
+  const h2 = sections(lines, 2), find = re => h2.filter(s => re.test(s.title));
+  const one = (re, name) => { const f = find(re); if (!f.length) err(`no "## ${name}" section`); return f[0] || { title: name, lines: [] }; };
+
+  // ---- Status block ----
+  const statusSec = one(/^Status\b/, 'Status');
+  const status = {};
+  for (const b of blocks(statusSec.lines)) if (b.kind === 'bullet') { const x = labelled(b.text); if (x.label) status[x.label] = x.text; }
+  const hard = status['Hard date'] || '';
+  const cutoff = (hard.match(DATE_RE) || [])[1] || null;
+  if (!cutoff) err('no date in the Status block\'s "Hard date" bullet');
+
+  // ---- Phases ----
+  const phasesSec = one(/^Phases\b/, 'Phases');
+  const phases = [];
+  for (const s of sections(phasesSec.lines, 3)) {
+    const parts = s.title.split(' — ');
+    if (parts.length < 2) { err(`phase heading without " — ": "${s.title}"`); continue; }
+    const idPart = parts[0].trim(), id = idPart.replace(/\s*\([^)]*\)\s*$/, '').trim();
+    const qualifier = (idPart.match(/\(([^)]*)\)\s*$/) || [])[1] || '';
+    if (!PHASE_ID_RE.test(id)) err(`phase heading id not recognised: "${idPart}"`);
+    const bl = blocks(s.lines), items = [];
+    let gate = null, ownStatus = null;
+    for (const b of bl) {
+      if (b.kind === 'bullet') { const x = labelled(b.text); if (x.label === 'Gate') gate = x.text; else if (x.label === 'Status') ownStatus = x.text; else items.push(x); }
+      else items.push({ label: null, text: b.text, prose: true });
+    }
+    const due = ((gate || '').match(/\bDue (\d{4}-\d{2}-\d{2})/) || [])[1] || null;
+    const undefinedGate = gate ? /^(defined at|to be defined|tbd)\b/i.test(gate) : false;
+    const definedAt = undefinedGate ? ((gate.match(/defined at (.+?) close/i) || [])[1] || null) : null;
+    phases.push({ id, qualifier, title: parts.slice(1).join(' — ').trim(), items, gate, due, undefinedGate, definedAt,
+                  ownStatus, state: null, stateText: null, closedOn: null });
+  }
+  const byPhase = Object.fromEntries(phases.map(p => [p.id, p]));
+
+  // ---- Phase state: own Status bullet, else the Status block's "Phase:" clauses, else not started ----
+  const phaseLine = status['Phase'] || '';
+  if (!phaseLine) err('no "**Phase:**" bullet in the Status block');
+  const clauses = phaseLine.replace(/\([^)]*\)/g, m => m.replace(/[.;]/g, ',')).split(/[.;](?:\s+|\*\*|$)/).map(c => c.replace(/^\W*\*\*/, '').replace(/^\*+/, '').trim()).filter(Boolean);
+  for (const c of clauses) {
+    const head = c.replace(/\*\*/g, '');
+    const m = head.match(PHASE_ID_RE);
+    if (!m) continue;
+    const p = byPhase[m[1]];
+    if (!p) { err(`the Status line names a phase the ROADMAP does not have: "${head.slice(0, 60)}"`); continue; }
+    const st = clauseState(c);
+    if (!st) continue;   // a clause about the phase that states no state ("Phase A closes when …")
+    const rank = s => PHASE_STATES.indexOf(s);
+    if (!p.state || rank(st) < rank(p.state)) { p.state = st; p.stateText = head.trim(); p.closedOn = st === 'closed' ? ((head.match(DATE_RE) || [])[1] || null) : p.closedOn; }
+  }
+  for (const p of phases) {
+    if (p.ownStatus) {
+      const st = clauseState(p.ownStatus) || queueState(p.ownStatus);
+      const map = { done: 'closed', open: 'not started', blocked: 'in progress', dropped: 'closed' };
+      if (!st) err(`phase ${p.id}: its Status bullet states no recognised state`);
+      else { p.state = map[st] || st; p.stateText = p.ownStatus; p.closedOn = (p.ownStatus.match(DATE_RE) || [])[1] || null; }
+    }
+    if (!p.state) { p.state = 'not started'; p.stateText = null; }
+  }
+
+  // ---- Queue ----
+  const queueSec = one(/^Queue\b/, 'Queue');
+  const queue = [];
+  for (const s of sections(queueSec.lines, 3)) {
+    const m = s.title.match(/^(T-\d+[a-z]?) — (.+)$/);
+    if (!m) { err(`queue heading not of the form "T-nnn — title": "${s.title}"`); continue; }
+    const f = {};
+    for (const b of blocks(s.lines)) if (b.kind === 'bullet') { const x = labelled(b.text); if (x.label) f[x.label] = x.text; }
+    const statusText = f['Status'] || '';
+    const state = statusText ? queueState(statusText) : null;
+    if (!statusText) err(`${m[1]}: no Status bullet`);
+    else if (!state) err(`${m[1]}: status "${statusText.slice(0, 40)}" is not in the vocabulary (${QUEUE_STATES.join(', ')})`);
+    // Its phase: the title's head ("Phase A: …", "M1 — …"), else "the <phase> gate" in its acceptance criteria.
+    let phase = null;
+    const th = m[2].match(PHASE_ID_RE);
+    if (th && byPhase[th[1]]) phase = th[1];
+    if (!phase) { const g = (f['Acceptance criteria'] || '').match(/\bthe (Phase [0-9A-Z]+|M\d+) gate\b/); if (g && byPhase[g[1]]) phase = g[1]; }
+    queue.push({ id: m[1], title: m[2].trim(), state, statusText, date: (statusText.match(DATE_RE) || [])[1] || null, phase,
+                 scope: f['Scope'] || null, acceptance: f['Acceptance criteria'] || null, out: f['Out of scope'] || null });
+  }
+
+  // ---- Open questions ----
+  const openSec = one(/^Open questions\b/, 'Open questions');
+  const open = [];
+  for (const b of blocks(openSec.lines)) {
+    if (b.kind !== 'bullet' || /^\(?none\b/i.test(b.text)) continue;
+    const m = b.text.match(/^\*\*([A-Z]+-[A-Z0-9]+)(?:\s+—\s+([^*]+?))?\*\*\s*(?:—\s*)?(.*)$/);
+    if (!m) { err(`open question without a bold id: "${b.text.slice(0, 50)}"`); continue; }
+    open.push({ id: m[1], title: (m[2] || '').trim(), text: m[3].trim() });
+  }
+
+  // ---- Closed questions (every "## Closed …" section), deferred items ----
+  const closed = [];
+  for (const s of find(/^Closed\b/)) for (const b of blocks(s.lines)) if (b.kind === 'bullet')
+    closed.push({ section: s.title, text: b.text, ids: [...b.text.matchAll(/\*\*([A-Z]+-[A-Z0-9]+)\*\*/g)].map(x => x[1]) });
+  const deferred = [];
+  for (const s of find(/^Deferred\b/)) for (const b of blocks(s.lines)) if (b.kind === 'bullet') {
+    const m = b.text.match(/^\*\*([^*]+)\*\*\s*(?:—\s*)?(.*)$/); deferred.push(m ? { title: m[1], text: m[2] } : { title: '', text: b.text });
+  }
+
+  // Derived: the phase horde's cutoff falls after (the one whose gate is due), and gates overdue for definition.
+  const dueIdx = phases.findIndex(p => p.due);
+  for (const p of phases) p.definitionOverdue = !!(p.definedAt && byPhase[p.definedAt] && byPhase[p.definedAt].state === 'closed');
+  return { title: titleLine.replace(/^# /, ''), status, phaseLine, cutoff, hard, phases, dueIdx, queue, open,
+           openHeading: openSec.title, closed, deferred, errors };
+}
+
+/* ---- self-checks: each returns { ok, msg }; each has a must-fail control (a mutation of the text) ---- */
+function checkParses(md) { return md.errors.length ? { ok: false, msg: md.errors.length + ' parse error(s): ' + md.errors.join('; ') } : { ok: true, msg: 'every phase, queue item, question and phase clause understood' }; }
+function checkGates(md) {
+  const miss = md.phases.filter(p => !p.gate).map(p => p.id);
+  if (!md.phases.length) return { ok: false, msg: 'no phases' };
+  if (miss.length) return { ok: false, msg: 'no gate: ' + miss.join(', ') };
+  if (!md.cutoff) return { ok: false, msg: 'no cutoff date' };
+  return { ok: true, msg: md.phases.length + ' phases, each with a gate; cutoff ' + md.cutoff };
+}
+function checkOrder(md) {
+  const first = md.phases.findIndex(p => p.state !== 'closed');
+  const late = first < 0 ? [] : md.phases.slice(first).filter(p => p.state === 'closed').map(p => p.id);
+  return late.length ? { ok: false, msg: 'closed after an unclosed phase: ' + late.join(', ') } : { ok: true, msg: 'closed phases come first (' + md.phases.filter(p => p.state === 'closed').length + ')' };
+}
+function checkUnique(md) {
+  const ids = [...md.phases.map(p => p.id), ...md.queue.map(q => q.id), ...md.open.map(q => q.id)];
+  const dup = ids.filter((x, i) => ids.indexOf(x) !== i);
+  return dup.length ? { ok: false, msg: 'duplicated: ' + [...new Set(dup)].join(', ') } : { ok: true, msg: ids.length + ' ids, all unique' };
+}
+// A control that cannot be planted (its anchor is gone) returns null, and counts as a control that did NOT fire:
+// a mutation that silently matches nothing would make its check look proven when it is blind.
+function plantOnce(text, re, repl) { return re.test(text) ? text.replace(re, repl) : null; }
+const CONTROLS = {
+  parses: t => plantOnce(t, /^### T-(\d)/m, '### T-x$1'),
+  gates:  t => plantOnce(t, /^- \*\*Gate:\*\*/m, '- **Gait:**'),
+  order:  t => { const md = parseRoadmap(t), last = [...md.phases].reverse().find(p => p.state !== 'closed');
+                 return last ? plantOnce(t, /^(- \*\*Phase:\*\*)/m, `$1 ${last.id} CLOSED 2099-01-01.`) : null; },
+  unique: t => plantOnce(t, /^(### T-\d+[a-z]? — .*)$/m, '$1\n- **Status:** open\n\n$1'),
+};
+const CHECKS = [
+  ['1 parses cleanly', checkParses, 'parses'],
+  ['2 gates + cutoff', checkGates, 'gates'],
+  ['3 closed come first', checkOrder, 'order'],
+  ['4 ids unique', checkUnique, 'unique'],
+];
+// -> [{ name, real:{ok,msg}, control:{fired, msg} }]; all good iff every real.ok and every control.fired.
+function runSelfChecks(text) {
+  const md = parseRoadmap(text);
+  return CHECKS.map(([name, fn, ctl]) => {
+    const real = fn(md), planted = CONTROLS[ctl](text);
+    const control = planted === null ? { fired: false, msg: 'control could not be planted (its anchor is missing)' }
+      : (r => ({ fired: !r.ok, msg: r.msg }))(fn(parseRoadmap(planted)));
+    return { name, real, control };
+  });
+}
+
+/* ================= UI — DOM, fetch, and the one clock read (days to the cutoff, by the viewer's clock) ================= */
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
+// Inline markdown only: `code` and **bold**, after escaping.
+const md = s => esc(s).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+const cut = (s, n) => { s = String(s || ''); return s.length > n ? s.slice(0, n - 1).replace(/\s+\S*$/, '') + '…' : s; };
+const PCOLOR = { 'closed':'--s-done', 'gate met':'--s-prog', 'in progress':'--s-prog', 'next':'--s-next', 'not started':'--s-planned' };
+const QCOLOR = { 'done':'--s-done', 'in progress':'--s-prog', 'open':'--s-open', 'blocked':'--s-block', 'dropped':'--s-planned', null:'--s-block' };
+const params = new URLSearchParams(location.search);
+const ST = { text: null, md: null, source: '', sel: params.get('sel') };
+
+// Candidates in order: the repo's own ROADMAP when served from the repo root; a bundled copy beside the page
+// (the artifact). A body that does not start with "# ROADMAP" is not the roadmap (e.g. a server's 404 page).
+async function fetchRoadmap() {
+  for (const [url, label] of [['../../ROADMAP.md', 'the repo\'s ROADMAP.md, read live'], ['ROADMAP.md', 'a ROADMAP.md bundled beside this page (a snapshot)']]) {
+    try {
+      const r = await fetch(url, { cache: 'no-store' });
+      if (!r.ok) continue;
+      const t = await r.text();
+      if (/^# ROADMAP\b/.test(t)) return { text: t, source: label + ' (' + url + ')' };
+    } catch (e) { /* file:// or offline: try the next candidate */ }
+  }
+  return null;
+}
+function load(text, source) { ST.text = text; ST.source = source; ST.md = parseRoadmap(text); $('loader').hidden = true; $('app').hidden = false; render(); if (params.get('check') === '1') runChecksUI(); }
+
+function daysTo(date) {
+  // The page's only clock read: the viewer's today, in UTC days, against the cutoff date in the ROADMAP.
+  const now = new Date(), t0 = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const [y, m, d] = date.split('-').map(Number);
+  return Math.round((Date.UTC(y, m - 1, d) - t0) / 86400000);
+}
+
+function render() {
+  const M = ST.md, P = M.phases;
+  const nClosed = P.filter(p => p.state === 'closed').length;
+  const qOpen = M.queue.filter(q => q.state !== 'done' && q.state !== 'dropped');
+  const before = M.dueIdx >= 0 ? P.slice(0, M.dueIdx + 1) : P;
+  const leftBefore = before.filter(p => p.state !== 'closed');
+  const days = M.cutoff ? daysTo(M.cutoff) : null;
+  $('tally').innerHTML = [
+    ['--s-done', nClosed + ' / ' + P.length, 'phases closed'],
+    ['--s-next', leftBefore.length, 'phases left before the cutoff' + (M.dueIdx >= 0 ? ' (through ' + P[M.dueIdx].id + ')' : '')],
+    ['--s-open', qOpen.length + ' / ' + M.queue.length, 'queue items open'],
+    ['--s-you', M.open.length, 'open questions for you'],
+    ['--cut', days === null ? '—' : days, M.cutoff ? (days >= 0 ? 'days to horde’s cutoff, ' : 'days PAST horde’s cutoff, ') + M.cutoff + ' (by your clock)' : 'no cutoff found'],
+  ].map(([c, b, l]) => `<div style="--sc:var(${c})"><b>${esc(b)}</b><span>${esc(l)}</span></div>`).join('');
+
+  $('legend').innerHTML = PHASE_STATES.map(s => `<span style="--sc:var(${PCOLOR[s]})"><span class="dot"></span> ${s}</span>`).join('') +
+    (M.cutoff ? `<span><span class="cutk"></span>horde’s module cutoff (${esc(M.cutoff)})</span>` : '');
+
+  let strip = '', track = '';
+  P.forEach((p, i) => {
+    const sel = ST.sel === 'phase:' + p.id;
+    strip += `<div class="seg ${p.state === 'not started' ? 'planned' : ''}" style="--sc:var(${PCOLOR[p.state]})" data-sel="phase:${esc(p.id)}" title="${esc(p.id + ': ' + p.state)}"></div>`;
+    const tItems = M.queue.filter(q => q.phase === p.id);
+    track += `<div class="ph ${sel ? 'sel' : ''} ${M.dueIdx >= 0 && i > M.dueIdx ? 'after' : ''}" style="--sc:var(${PCOLOR[p.state]})" data-sel="phase:${esc(p.id)}" tabindex="0" role="button" aria-label="${esc(p.id + ', ' + p.state)}">` +
+      `<div class="pid"><span>${esc(p.id)}${p.qualifier ? ' · ' + esc(p.qualifier) : ''}</span><span class="tag">${esc(p.state.toUpperCase())}</span></div>` +
+      `<div class="pt">${md(p.title)}</div>` +
+      (p.closedOn ? `<div class="pg"><b>closed</b>${esc(p.closedOn)}</div>` : '') +
+      `<div class="pg"><b>gate</b>${p.gate ? md(cut(p.gate, 150)) : '<span class="bad">none found</span>'}</div>` +
+      (p.definitionOverdue ? `<div class="warn">Gate still to be defined; the ROADMAP says at ${esc(p.definedAt)} close, which is closed.</div>` : p.undefinedGate ? '<div class="warn">Gate not yet defined.</div>' : '') +
+      (tItems.length ? `<div class="chips">${tItems.map(q => `<span class="chip" style="--sc:var(${QCOLOR[q.state]})">${esc(q.id)} ${esc(q.state || '?')}</span>`).join('')}</div>` : '') +
+      `</div>`;
+    if (i === M.dueIdx) {
+      strip += '<div class="cutm"></div>';
+      track += `<div class="cutcard"><b>HORDE’S CUTOFF</b><span class="big">${esc(M.cutoff || p.due)}</span><span>${esc(p.id)}’s gate is due here: ${md(cut(M.hard, 160))}</span>${days !== null ? `<span>${days >= 0 ? days + ' days from today (your clock)' : Math.abs(days) + ' days ago'}</span>` : ''}</div>`;
+    }
+  });
+  $('strip').innerHTML = strip; $('track').innerHTML = track;
+
+  // What is left: phases before the cutoff, the open queue, your questions; then what comes after.
+  const after = M.dueIdx >= 0 ? P.slice(M.dueIdx + 1).filter(p => p.state !== 'closed') : [];
+  const li = (sel, label, extra) => `<li><a class="go" data-sel="${esc(sel)}">${label}</a>${extra ? ' <span class="note">' + extra + '</span>' : ''}</li>`;
+  $('left').innerHTML =
+    `<div><h3 style="--sc:var(--s-next)"><span class="dot"></span>Phases before the cutoff</h3><ul>${leftBefore.map(p => li('phase:' + p.id, esc(p.id) + ' — ' + md(p.title), esc(p.state))).join('') || '<li>none: every phase through the cutoff is closed</li>'}</ul></div>` +
+    `<div><h3 style="--sc:var(--s-open)"><span class="dot"></span>Open queue items</h3><ul>${qOpen.map(q => li(q.id, esc(q.id) + ' — ' + md(q.title), esc(q.state || 'unreadable status'))).join('') || '<li>none</li>'}</ul></div>` +
+    `<div><h3 style="--sc:var(--s-you)"><span class="dot"></span>Questions only you can answer</h3><ul>${M.open.map(q => li(q.id, esc(q.id) + (q.title ? ' — ' + md(q.title) : ''))).join('') || '<li>none</li>'}</ul></div>` +
+    (after.length ? `<div><h3 style="--sc:var(--s-planned)"><span class="dot"></span>After the cutoff</h3><ul>${after.map(p => li('phase:' + p.id, esc(p.id) + ' — ' + md(p.title), esc(p.state))).join('')}</ul></div>` : '');
+
+  $('queue').innerHTML = M.queue.map(q => `<tr data-sel="${esc(q.id)}"><td class="id">${esc(q.id)}</td><td>${md(q.title)}<div class="st">${md(cut(q.statusText, 140))}</div></td><td>${esc(q.phase || '—')}</td>` +
+    `<td><span class="tag" style="--sc:var(${QCOLOR[q.state]})">${esc((q.state || 'unreadable').toUpperCase())}</span>${q.date ? '<div class="st">' + esc(q.date) + '</div>' : ''}</td></tr>`).join('');
+
+  $('openH').textContent = M.openHeading;
+  $('open').innerHTML = M.open.map(q => `<div class="qa" style="--sc:var(--s-you)" data-sel="${esc(q.id)}"><span class="qid">${esc(q.id)}${q.title ? ' — ' + md(q.title) : ''}</span><p>${md(q.text)}</p></div>`).join('') || '<p class="note">None open.</p>';
+  $('closedCard').hidden = !M.closed.length;
+  $('closed').innerHTML = M.closed.map(c => `<div class="qa" style="--sc:var(--s-done)"><span class="qid">${esc(c.ids.join(' · ') || c.section)}</span><p>${md(c.text)}</p></div>`).join('');
+  $('defCard').hidden = !M.deferred.length;
+  $('deferred').innerHTML = M.deferred.map(d => `<div><h3 style="--sc:var(--s-planned)"><span class="dot"></span>${md(d.title)}</h3><p class="note" style="margin:0">${md(d.text)}</p></div>`).join('');
+
+  $('srcNote').innerHTML = 'Everything on this page is parsed from ' + esc(ST.source) + '; nothing is typed by hand. ' +
+    (M.status['Last human ratification'] ? 'Last human ratification: ' + md(M.status['Last human ratification']) : '');
+  $('errs').hidden = !M.errors.length;
+  $('errs').innerHTML = M.errors.map(e => `<li>Could not read: ${esc(e)}</li>`).join('');
+  side();
+}
+
+function side() {
+  const M = ST.md, sel = ST.sel || (M.phases.find(p => p.state !== 'closed') ? 'phase:' + M.phases.find(p => p.state !== 'closed').id : null);
+  const el = $('side');
+  if (sel && sel.startsWith('phase:')) {
+    const p = M.phases.find(x => x.id === sel.slice(6));
+    if (p) {
+      const tItems = M.queue.filter(q => q.phase === p.id);
+      el.innerHTML = `<div class="eyebrow">${ST.sel ? 'Phase' : 'Current phase'}</div><h3>${esc(p.id)} — ${md(p.title)}</h3>` +
+        `<div><span class="tag" style="--sc:var(${PCOLOR[p.state]})">${esc(p.state.toUpperCase())}</span>${p.due ? ' <span class="note">due ' + esc(p.due) + '</span>' : ''}</div>` +
+        (p.stateText ? `<h4>Where it stands</h4><p>${md(p.stateText)}</p>` : '<h4>Where it stands</h4><p>Not started: the ROADMAP\'s Status block does not mention it yet.</p>') +
+        `<h4>Gate</h4><p>${p.gate ? md(p.gate) : '<span class="bad">none found</span>'}</p>` +
+        (p.definitionOverdue ? `<p class="bad" style="font-weight:400">The ROADMAP says this gate is defined at ${esc(p.definedAt)} close; ${esc(p.definedAt)} is closed and the gate is still undefined.</p>` : '') +
+        (p.items.length ? '<h4>Scope</h4><ul>' + p.items.map(x => `<li>${x.label ? '<b>' + md(x.label) + ':</b> ' : ''}${md(x.text)}</li>`).join('') + '</ul>' : '') +
+        '<h4>Queue items</h4>' + (tItems.length ? '<ul>' + tItems.map(q => `<li><a class="go" data-sel="${esc(q.id)}">${esc(q.id)}</a> ${md(q.title)} — ${esc(q.state)}</li>`).join('') + '</ul>' : '<p>none filed under this phase yet</p>');
+      return;
+    }
+  }
+  const q = M.queue.find(x => x.id === sel);
+  if (q) {
+    el.innerHTML = `<div class="eyebrow">Queue item</div><h3>${esc(q.id)} — ${md(q.title)}</h3><div><span class="tag" style="--sc:var(${QCOLOR[q.state]})">${esc((q.state || 'unreadable').toUpperCase())}</span>${q.phase ? ` <a class="go note" data-sel="phase:${esc(q.phase)}">${esc(q.phase)}</a>` : ' <span class="note">not tied to one phase</span>'}</div>` +
+      `<h4>Status</h4><p>${md(q.statusText)}</p>` + (q.scope ? `<h4>Scope</h4><p>${md(q.scope)}</p>` : '') +
+      (q.acceptance ? `<h4>Acceptance criteria</h4><p>${md(q.acceptance)}</p>` : '') + (q.out ? `<h4>Out of scope</h4><p>${md(q.out)}</p>` : '');
+    return;
+  }
+  const o = M.open.find(x => x.id === sel);
+  if (o) { el.innerHTML = `<div class="eyebrow">${esc(M.openHeading)}</div><h3>${esc(o.id)}${o.title ? ' — ' + md(o.title) : ''}</h3><p>${md(o.text)}</p>`; return; }
+  el.innerHTML = '<h3>Pick a part</h3><p>Click a phase, a queue row or a question to see it in full, as the ROADMAP states it.</p>';
+}
+
+function runChecksUI() {
+  const rows = runSelfChecks(ST.text);
+  let allOk = true;
+  $('checkOut').innerHTML = rows.map(({ name, real, control }) => {
+    if (!real.ok || !control.fired) allOk = false;
+    return `<div class="r"><b>${esc(name)}</b><span>${real.ok ? '<span class="ok">PASS</span>' : '<span class="bad">FAIL</span>'} ${esc(real.msg)}<br>` +
+      `${control.fired ? '<span class="ok">control fires</span>' : '<span class="bad">CONTROL DID NOT FIRE</span>'} — ${esc(control.msg)}</span></div>`;
+  }).join('') + `<p class="note">${allOk ? 'All checks pass on the ROADMAP, and every control fired on its planted fault.' : 'A check failed or a control did not fire: the page may be misreading the ROADMAP.'}</p>`;
+  $('checkCard').hidden = false;
+  $('checkCard').scrollIntoView({ block: 'nearest' });
+}
+
+/* ---- wiring ---- */
+document.addEventListener('click', e => { const t = e.target.closest('[data-sel]'); if (t && ST.md) { ST.sel = t.dataset.sel; render(); if (matchMedia('(max-width:1000px)').matches) $('side').scrollIntoView({ block: 'nearest' }); } });
+document.addEventListener('keydown', e => { const t = e.target.closest && e.target.closest('[data-sel][tabindex]'); if (t && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); ST.sel = t.dataset.sel; render(); } });
+$('checkBtn').addEventListener('click', () => ST.text && runChecksUI());
+$('reloadBtn').addEventListener('click', boot);
+const THEMES = ['system', 'light', 'dark'];
+$('themeBtn').addEventListener('click', () => {
+  const cur = document.documentElement.dataset.theme || 'system', next = THEMES[(THEMES.indexOf(cur) + 1) % 3];
+  if (next === 'system') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = next;
+  $('themeBtn').textContent = 'Theme: ' + next;
+});
+const readFile = f => f && f.text().then(t => /^# ROADMAP\b/.test(t) ? load(t, 'the file you opened (' + f.name + '), a snapshot') : ($('loaderWhy').textContent = f.name + ' does not start with "# ROADMAP".'));
+$('file').addEventListener('change', e => readFile(e.target.files[0]));
+$('drop').addEventListener('dragover', e => { e.preventDefault(); $('drop').classList.add('over'); });
+$('drop').addEventListener('dragleave', () => $('drop').classList.remove('over'));
+$('drop').addEventListener('drop', e => { e.preventDefault(); $('drop').classList.remove('over'); readFile(e.dataTransfer.files[0]); });
+async function boot() {
+  const got = await fetchRoadmap();
+  if (got) return load(got.text, got.source);
+  $('app').hidden = true; $('loader').hidden = false;
+  $('loaderWhy').textContent = location.protocol === 'file:'
+    ? 'Opened as a file, the browser will not let the page read ../../ROADMAP.md. Serve the repo root (the plan-map entry in .claude/launch.json, or python3 -m http.server from the repo root) and open /docs/design/echo-plan-map.html, or open ROADMAP.md below.'
+    : 'Neither ../../ROADMAP.md nor ROADMAP.md beside the page was found. Open it below.';
+}
+boot();
+</script>
+</body></html>
