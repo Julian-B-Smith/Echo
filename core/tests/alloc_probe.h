@@ -100,6 +100,14 @@ inline void* takeAligned(std::size_t n, std::size_t a) {
 }  // namespace alloc_probe
 
 #if ECHO_ALLOC_PROBE
+// The replacements below allocate with malloc, so the matching deletes call
+// free: correct by construction. GCC 13's -Wmismatched-new-delete cannot see
+// that the pairing is ours and flags every delete (CI, -Werror); silenced for
+// these definitions only, GCC only (clang has no such warning).
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmismatched-new-delete"
+#endif
 void* operator new(std::size_t n) {
   if (void* p = alloc_probe::take(n)) return p;
   throw std::bad_alloc();
@@ -126,4 +134,7 @@ void operator delete(void* p, std::align_val_t) noexcept { std::free(p); }
 void operator delete[](void* p, std::align_val_t) noexcept { std::free(p); }
 void operator delete(void* p, std::size_t, std::align_val_t) noexcept { std::free(p); }
 void operator delete[](void* p, std::size_t, std::align_val_t) noexcept { std::free(p); }
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 #endif  // ECHO_ALLOC_PROBE
