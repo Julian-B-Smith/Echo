@@ -39,6 +39,7 @@ modulation, now built in M2; horde's ABI, meters and presets are M3.**
 | `lab/echo-lab.html` | The listening twin: A/B panels and a blind bench for the Phase A choices; free play with every key; an IR echogram. Open it in Chrome or Safari, or serve it: `python3 -m http.server -d lab` | built |
 | `tools/lab_smoke.mjs` | The lab smoke in `./verify fast`, every detector with a planted control | green |
 | `core/` | The C++ core: `include/echo/engine.h` (header-only, C++20; M1 + M2), its invariant suite `tests/core_tests.cpp` (52 checks), run twice by `./verify` (clean, and under each of 75 planted faults); CI adds ASan + UBSan | M2 closed 2026-10-21; M3 next |
+| `core/include/echo/ir_render.h` | The one offline impulse-response renderer (D-011, D-030): what M4's display draws, what the tail oracle and M3's mono-fold metric measure. Its suite `core/tests/ir_tests.cpp` runs in `./verify fast` as `echo_ir_tests` / `echo_ir_plants` | M4, T-030 built |
 | `tools/check_manifest.py` | The C++ parameter table checked against `spec/params.json` | green |
 | `tools/plan_map_smoke.mjs` | The plan map's parser run headless against `ROADMAP.md`: its self-checks, all seven phases found, a pure model; each with a planted control. In `./verify fast` | green |
 | `verify` | The oracle: `./verify fast` / `full` / `report` | live |

@@ -14,15 +14,20 @@
 // GUI may only read published atomics anyway (rack-slot contract §8). The patch
 // arrives as plain values copied on the UI side.
 //
-// WHY reset() + setParam, NOT A FRESH INSTANCE PER RENDER. prepare() allocates
-// and clears ~18 MiB at 192 kHz; reset() is bit-identical to a fresh instance
-// (contract A2, the suite's determinism check), so one prepared clone serves
-// every render at a rate. Every key, Device keys included, is re-sent on every
-// render: a reset keeps the stored values, so a key left unsent would carry the
-// previous patch into this one (plant irReusesState / irDropsDevice).
-// A reset instance is AT REST, so each sent value lands with no ramp (SPEC §10)
-// and the response is the patch's settled response: the heads on their
-// resolved times, the modulation at phase 0 from its seed.
+// WHY setParam THEN reset(), NOT A FRESH INSTANCE PER RENDER. prepare()
+// allocates and clears ~18 MiB at 192 kHz; reset() is bit-identical to a fresh
+// instance (contract A2), so one prepared clone serves every render at a rate.
+// Every key, Device keys included, is STORED first (setParam), then reset()
+// lands them all and restarts the modulation from the stored mod.seed at phase
+// 0. The order is load-bearing (critic T-030 H1): setParam(mod.seed) AFTER a
+// reset reseeds only on a change and blends from the CURRENT drift stream
+// (D-026's knob path), so the drawing would depend on whatever was rendered
+// before, the cache (keyed by the request alone) would serve a history-
+// dependent curve, and two identical requests would differ.
+// So the response drawn is the patch's response AS HEARD RIGHT AFTER LOADING IT
+// (D-026: a load restarts the modulation from the patch's seed alone; D-031):
+// the heads on their resolved times, every ramp landed, the modulation at
+// phase 0 from its seed. Only that response is a function of the patch.
 //
 // THE STATED LEVEL. The delay is linear until the ceiling engages (knee 0.9 on
 // the returning term, SPEC §5.1), so the response depends on the input level.
@@ -86,7 +91,10 @@ struct IrRequest {
 // What a render reports beside the samples.
 struct IrInfo {
   std::int64_t tail = 0;           // the clone's declared tail(), in samples, once the patch landed
-  std::int64_t restAt = -1;        // the first sample after which the clone was at rest (-1: never)
+  // A block boundary (a multiple of kIrBlock, or the length) at which the
+  // clone was found at rest: the output is exact zero from there on. Block-
+  // quantised, so up to kIrBlock - 1 samples late; -1: not at rest by the end.
+  std::int64_t restAt = -1;
 };
 
 // The cache key (T-031): FNV-1a 64 over the bit pattern of every input the
@@ -122,7 +130,11 @@ class IrRenderer {
     sr_ = sampleRate;
     prepared_ = true;
   }
-  bool preparedFor(double sampleRate) const { return prepared_ && sr_ == sampleRate; }
+  // The engine clamps the rate to 8 kHz .. 768 kHz (and a non-finite one to
+  // 48 kHz); a request it did not keep is refused, not rendered at another
+  // rate under the requested rate's hash (critic T-030 M3: a 4 kHz request
+  // rendered at 8 kHz would put T-032's tempo grid off by 2x).
+  bool preparedFor(double sampleRate) const { return prepared_ && sr_ == sampleRate && (plant::irAcceptsClampedRate || e_.sampleRate() == sampleRate); }
 
   // Renders r.length samples into outL / outR (each at least r.length long).
   // Allocation-free once prepared. Returns false, writing nothing, if the
@@ -136,7 +148,7 @@ class IrRenderer {
       std::vector<double> scratch(8, 0.0);
       if (!outL.empty()) outL[0] = scratch[0];
     }
-    if (!plant::irReusesState) e_.reset();
+    if (plant::irSeedAfterReset) e_.reset();  // the pre-critic order
     for (int k = 0; k < kNumParams; ++k) {
       const auto& def = kParams[static_cast<std::size_t>(k)];
       if (plant::irDropsDevice && def.morph == Morph::Device) continue;
@@ -144,6 +156,7 @@ class IrRenderer {
       if (plant::irSkipsOutputFilter && def.key == "filt.out.on") v = 0.0;
       if (!e_.setParam(k, v)) return false;
     }
+    if (!plant::irReusesState && !plant::irSeedAfterReset) e_.reset();  // AFTER the values: see "WHY setParam THEN reset()" above
     const double a = plant::irLevelIgnored ? 1.0 : std::pow(10.0, r.levelDb / 20.0);
     std::uint32_t rng = r.noiseSeed;
     // The input for sample i of this render. Impulses sit at sample 0.
@@ -180,12 +193,16 @@ class IrRenderer {
       if (pos == 0) inf.tail = e_.tail();  // the patch has landed by the end of the first block
       pos += n;
     }
+    if (!plant::irRestAtMissesEnd && inf.restAt < 0 && e_.atRest()) inf.restAt = r.length;  // rested inside the last block (critic T-030 M1)
     if (info) *info = inf;
     return true;
   }
 
  private:
   // mulberry32 (the project's one generator), here for the noise input only.
+  // This file sits outside engine.h's fp-contract pragma: `q * 2.0 - 1.0` is
+  // safe under contraction only because x2 is exact (fused or not, one
+  // rounding). Keep every scale here a power of two, or scope the pragma.
   static double mulberry(std::uint32_t& s) {
     std::uint32_t t = (s += 0x6D2B79F5u);
     t = (t ^ (t >> 15)) * (t | 1u);

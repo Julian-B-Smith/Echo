@@ -10,12 +10,16 @@
 //                   then once per planted fault it guards (must FAIL). The M4
 //                   plants and the checks must cover each other.
 //
-// THE REFERENCE IS INDEPENDENT OF THE RENDERER. `plain()` below is what the
-// core suite does by hand: a fresh, separately prepared Echo, only the patch's
-// non-default keys set by NAME, the stated input built here, rendered in
-// 333-sample blocks (the renderer uses 512; block independence is the core
-// suite's check). So a renderer that resets wrongly, drops a key, mis-scales
-// the input or rearranges blocks cannot agree with it by sharing the fault.
+// THE REFERENCE IS INDEPENDENT OF THE RENDERER. `plain()` below is what a host
+// does when the user loads the patch: a fresh, separately prepared Echo, the
+// patch keys by NAME through loadState (the D-026 load path), the Device keys
+// (the I/O gains, which a load never writes) by setParam, the stated input
+// built here, rendered in 333-sample blocks (the renderer uses 512; block
+// independence is the core suite's check). The renderer reaches the same state
+// by another route (setParam then reset), so a renderer that resets wrongly,
+// drops a key, mis-scales the input or rearranges blocks cannot agree with it
+// by sharing the fault. (The first reference set keys on a fresh instance by
+// setParam, the renderer's own route, and so shared critic T-030 H1.)
 #include "alloc_probe.h"  // first: replaces operator new for this executable
 
 #include <cmath>
@@ -84,11 +88,16 @@ struct Out {
 Out plain(const Kv& kv, const IrRequest& r) {
   Echo e;
   e.prepare(r.sampleRate, 4096);
-  for (const auto& [k, v] : kv)
-    if (!e.setParam(k, v)) {
-      std::fprintf(stderr, "fixture: setParam(%s, %g) refused\n", k, v);
-      std::abort();
+  std::vector<echo::KeyValue> load;
+  for (const auto& [k, v] : kv) {
+    const auto i = *echo::paramIndex(k);
+    if (echo::kParams[static_cast<std::size_t>(i)].morph == echo::Morph::Device) {
+      if (!e.setParam(k, v)) { std::fprintf(stderr, "fixture: setParam(%s, %g) refused\n", k, v); std::abort(); }
+    } else {
+      load.push_back({k, v});
     }
+  }
+  if (!e.loadState(load)) { std::fprintf(stderr, "fixture: loadState refused\n"); std::abort(); }
   const long n = static_cast<long>(r.length);
   Vec inL(static_cast<std::size_t>(n), 0.0), inR(static_cast<std::size_t>(n), 0.0);
   const double a = std::pow(10.0, r.levelDb / 20.0);
@@ -186,19 +195,23 @@ bool equalsPlainRender(Detail& d) {
 
 // One prepared renderer serves every render at a rate (T-031 keeps one per
 // worker): a render after any other equals a fresh renderer's, and after a
-// long ringing patch nothing of it leaks into the next.
+// long ringing patch nothing of it leaks into the next. The drift patches are
+// rendered after themselves and after a drift patch with another seed (critic
+// T-030 H1: with the values sent after the reset, the curve followed the last
+// render's seed from sample 7460 on).
 bool reuseIsFresh(Detail& d) {
   echo::IrRenderer ren;
   ren.prepare(48000.0);
   Vec L(96000), R(96000);
-  for (std::size_t a : {3u, 4u, 10u})
-    for (std::size_t b : {1u, 8u, 0u}) {
-      REQUIRE(ren.render(req(kPatches[a].kv, 96000), L, R), "render refused");
+  const Kv otherSeed{{"time.sync", 0}, {"time.ms", 160}, {"fb.amount", 70}, {"mod.shape", 1}, {"mod.depthMs", 5}, {"mod.seed", 500}};
+  for (const Kv& first : {kPatches[3].kv, kPatches[4].kv, kPatches[10].kv, otherSeed})
+    for (std::size_t b : {1u, 8u, 0u, 9u, 10u}) {
+      REQUIRE(ren.render(req(first, 96000), L, R), "render refused");
       const auto r = req(kPatches[b].kv, 96000);
       REQUIRE(ren.render(r, L, R), "render refused");
       const auto fresh = echo::renderIr(r);
-      REQUIRE(firstDiff(L, fresh.L) < 0 && firstDiff(R, fresh.R) < 0, "'%s' after '%s' differs from a fresh render at sample %ld", kPatches[b].name,
-              kPatches[a].name, firstDiff(L, fresh.L));
+      REQUIRE(firstDiff(L, fresh.L) < 0 && firstDiff(R, fresh.R) < 0, "'%s' after another patch differs from a fresh render at sample %ld",
+              kPatches[b].name, firstDiff(L, fresh.L) < 0 ? firstDiff(R, fresh.R) : firstDiff(L, fresh.L));
     }
   return true;
 }
@@ -228,6 +241,12 @@ bool hashCoversEveryInput(Detail& d) {
   REQUIRE(echo::irHash(r) != h0, "the length is not in the hash");
   r = base, r.input = IrInput::SideOnly;
   REQUIRE(echo::irHash(r) != h0, "the input is not in the hash");
+  const auto noise = req({{"time.sync", 0}}, 48000, 48000.0, IrInput::Noise);
+  const auto hn = echo::irHash(noise);
+  r = noise, r.noiseSeed += 1;
+  REQUIRE(echo::irHash(r) != hn, "the noise seed is not in the hash (critic T-030 M3)");
+  r = noise, r.noiseLength += 1;
+  REQUIRE(echo::irHash(r) != hn, "the noise length is not in the hash");
   return true;
 }
 
@@ -246,6 +265,18 @@ bool tailThroughRenderer(Detail& d) {
     REQUIRE(got.info.restAt >= 0 && got.info.restAt <= T + echo::kIrBlock, "fb %.0f %%: the clone rested at %ld, after the tail %ld", fb,
             static_cast<long>(got.info.restAt), T);
   }
+  // restAt when the clone rests inside the LAST block (critic T-030 M1): a long
+  // render finds rest at boundary B; a render of exactly B samples ends on the
+  // block the clone rested in, with no later boundary to look at, and must
+  // still report it.
+  {
+    const Kv kv{{"time.sync", 0}, {"time.ms", 50}, {"fb.amount", 0}, {"mix", 100}};
+    const auto lng = echo::renderIr(req(kv, 48000));
+    const long B = static_cast<long>(lng.info.restAt);
+    REQUIRE(B > 0 && B < 48000, "control: the long render never rested (restAt %ld)", B);
+    const auto got = echo::renderIr(req(kv, B));
+    REQUIRE(got.info.restAt == B, "a render of %ld samples, resting in its last block, reports restAt %ld", B, static_cast<long>(got.info.restAt));
+  }
   const auto held = echo::renderIr(req({{"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 100}}, 48000));
   REQUIRE(held.info.tail == echo::kInfiniteTail && held.info.restAt < 0, "a held loop must declare kInfiniteTail and never rest");
   return true;
@@ -263,6 +294,19 @@ bool levelIsStated(Detail& d) {
     const double want = std::pow(10.0, db / 20.0);
     REQUIRE(std::fabs(peak(got.L) - want) < 1e-6 * want, "at %.0f dBFS the first repeat peaks at %.6g, want %.6g", db, peak(got.L), want);
   }
+  return true;
+}
+
+// A rate the engine would clamp (below 8 kHz, above 768 kHz, non-finite) is
+// refused, never rendered at another rate under this rate's hash (critic T-030
+// M3); every rate in range is kept exactly.
+bool rateIsKept(Detail& d) {
+  for (double sr : {4000.0, 1e6}) {
+    const auto got = echo::renderIr(req({}, 4800, sr));
+    REQUIRE(!got.ok, "a %.0f Hz request was rendered (the engine runs at %.0f Hz)", sr, sr < 8000 ? 8000.0 : 768000.0);
+  }
+  for (double sr : {8000.0, 44100.0, 192000.0, 768000.0})
+    REQUIRE(echo::renderIr(req({}, 4800, sr)).ok, "a %.0f Hz request was refused", sr);
   return true;
 }
 
@@ -293,10 +337,13 @@ struct Check {
 
 const std::vector<Check> kChecks = {
     {"renderer = the plain offline render, bit for bit: 12 patches; 3 at 44.1 / 192 kHz; L, R, S-only and noise inputs", equalsPlainRender,
-     {"irDropsDevice", "irLevelIgnored", "irSkipsOutputFilter"}},
-    {"one renderer reused: every render equals a fresh one (nothing leaks from the last patch)", reuseIsFresh, {"irReusesState"}},
+     {"irDropsDevice", "irLevelIgnored", "irSkipsOutputFilter", "irSeedAfterReset"}},
+    {"one renderer reused: every render equals a fresh one, drift seeds included (nothing leaks from the last patch)", reuseIsFresh,
+     {"irReusesState", "irSeedAfterReset"}},
+    {"rates: a rate the engine would clamp is refused, never rendered under the wrong hash", rateIsKept, {"irAcceptsClampedRate"}},
     {"cache hash: each of the 29 keys, the rate, tempo, level, length and input change it", hashCoversEveryInput, {"irHashSkipsKey"}},
-    {"tail oracle through the renderer: exact zero from the declared tail on; held loop = kInfiniteTail", tailThroughRenderer, {"noTailGate"}},
+    {"tail oracle through the renderer: exact zero from the declared tail on; rest reported; held loop = kInfiniteTail", tailThroughRenderer,
+     {"noTailGate", "irRestAtMissesEnd"}},
     {"stated level: the response is rendered at the request's level (-20, -40 dBFS)", levelIsStated, {"irLevelIgnored"}},
     {"a prepared render allocates nothing", renderNoAlloc, {"irAllocsInRender"}},
 };
@@ -311,6 +358,7 @@ bool* plantFlag(std::string_view n) {
   static const P table[] = {
       {"irHashSkipsKey", &irHashSkipsKey}, {"irReusesState", &irReusesState}, {"irDropsDevice", &irDropsDevice},
       {"irLevelIgnored", &irLevelIgnored}, {"irSkipsOutputFilter", &irSkipsOutputFilter}, {"irAllocsInRender", &irAllocsInRender},
+      {"irSeedAfterReset", &irSeedAfterReset}, {"irAcceptsClampedRate", &irAcceptsClampedRate}, {"irRestAtMissesEnd", &irRestAtMissesEnd},
       {"noTailGate", &noTailGate},  // an engine plant this suite also guards (the tail oracle)
   };
   for (const auto& p : table)
@@ -326,7 +374,8 @@ int main() {
 #ifdef ECHO_PLANTS
   // Every M4 plant must be guarded by a check here (core_tests.cpp guards the
   // engine's; an M4 plant nobody looks for is a fault nobody would see).
-  for (const char* n : {"irHashSkipsKey", "irReusesState", "irDropsDevice", "irLevelIgnored", "irSkipsOutputFilter", "irAllocsInRender"}) {
+  for (const char* n : {"irHashSkipsKey", "irReusesState", "irDropsDevice", "irLevelIgnored", "irSkipsOutputFilter", "irAllocsInRender",
+                        "irSeedAfterReset", "irAcceptsClampedRate", "irRestAtMissesEnd"}) {
     bool guarded = false;
     for (const auto& c : kChecks)
       for (const char* p : c.plants) guarded = guarded || std::string_view(p) == n;

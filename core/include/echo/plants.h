@@ -105,6 +105,9 @@ ECHO_PLANT(irDropsDevice)        // the renderer never sends the Device keys: th
 ECHO_PLANT(irLevelIgnored)       // the renderer's impulse is always 0 dBFS, whatever the stated level
 ECHO_PLANT(irSkipsOutputFilter)  // the renderer forces the output filter off (T-019's named plant)
 ECHO_PLANT(irAllocsInRender)     // render() allocates a scratch buffer: unsafe to run from a preallocated service
+ECHO_PLANT(irSeedAfterReset)     // the clone is reset BEFORE the values are sent: drift follows the last render's seed (critic T-030 H1)
+ECHO_PLANT(irAcceptsClampedRate) // a rate the engine clamped is rendered under the requested rate's hash (critic T-030 M3)
+ECHO_PLANT(irRestAtMissesEnd)    // a clone that rested inside the last block reports restAt -1 (critic T-030 M1)
 }  // namespace echo::plant
 
 #undef ECHO_PLANT
