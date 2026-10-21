@@ -613,3 +613,21 @@ its item's gate (the same caution D-028 records).
 - **Q-M4T: separate test binaries.** M4's checks live in `core/tests/ir_tests.cpp`, built as `echo_ir_tests` and
   `echo_ir_plants`, so they stay clear of M3's edits to `core_tests.cpp`. The one-time `./verify` edit that runs them
   in the core gate is approved by this ruling. Rejected: folding them into `core_tests.cpp`.
+
+## D-031 — The IR drawn is the patch's response as heard right after loading it (lead's record, 2026-10-21; for the human's review on B4-1's PR)
+
+The critic of T-030 (an Opus subagent, fresh context) found that the first renderer sent the patch to a reset clone
+by `setParam`. On that path a changed `mod.seed` blends from the current drift stream (D-026's knob path), so a drift
+patch's drawing depended on what was rendered before. Two identical requests differed from sample 7460 on, and the
+fresh renderer drew a curve no listener hears after loading the preset (critic H1). The critic asked which response
+should be drawn: the one heard right after loading the patch, or the one reached by turning knobs.
+- **Ruled by the lead, because criterion 1 already decides it:** the drawing must be a function of the request alone,
+  or the cache (keyed by the request's hash) serves the wrong curve. Only the post-load response qualifies. D-026 makes
+  a load restart the modulation from the patch's seed at phase 0. The knob-path curve depends on the history of seed
+  changes, and no hash of the patch can name it. So the renderer stores every value and then resets the clone, which
+  lands them all and restarts the modulation from the stored seed.
+- **What the user sees:** the drawing equals what plays right after the preset loads. After live seed changes, the
+  playing drift can differ from the drawing. Gate 2's snapshot label already says "modulated" whenever the time is
+  modulated, so the drawing never claims to be the live curve then.
+- **Guarded by:** `irSeedAfterReset` (the old order), caught by the load-path reference and by the reuse check.
+- **Rejected:** drawing the knob-path curve (not a function of the patch, so it cannot be cached or reproduced).
