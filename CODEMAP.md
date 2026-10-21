@@ -16,4 +16,7 @@ Where things are. Update in the same change that moves them.
 | `spec/params.json` | The parameter manifest (B439/RS-2.1), one key per line; the lab must match it (smoke-checked) |
 | `lab/echo-lab.html` | Single-file listening twin: DSP + ANALYSIS sections (sliced by the smoke, loaded into the AudioWorklet) then the UI |
 | `tools/lab_smoke.mjs` | The lab smoke, in `./verify fast`: determinism, silence, finite, manifest, invariants — each with a planted control |
+| `docs/design/echo-plan-map.html` | The plan map: MODEL section (pure ROADMAP.md parser + self-checks, sliced by the smoke) then the UI. Reads `../../ROADMAP.md` when the repo root is served |
+| `tools/plan_map_smoke.mjs` | Runs the plan map's MODEL against ROADMAP.md headlessly, each check with a planted control |
+| `.claude/launch.json` | `plan-map`: a static server on the repo root for the plan map |
 | `core/` | _planned, M1_ — C++20 library (CMake, Unix Makefiles) |

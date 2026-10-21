@@ -32,9 +32,11 @@ first. **Status: specified in the Phase A spec (revision 2) and playable in the 
 | `integrations/` | Inbound mailbox (`integrations/<sender>/`) and the outbound thread table | live |
 | `docs/prior-art.md` | Phase 0 landscape: interpolation, feedback, time changes, click and mono-fold metrics, IR display, competitors, name check | done 2026-10-19 |
 | `docs/filings/` | Drafts of what Echo files in other repos | live |
+| `docs/design/echo-plan-map.html` | The plan map: every phase with its gate and state, the queue, the open questions and horde's cutoff, **parsed from `ROADMAP.md` on load** (no copy of its own). Serve the repo root (`python3 -m http.server`, or the `plan-map` entry in `.claude/launch.json`) and open `/docs/design/echo-plan-map.html`; `?check=1` runs its self-checks | live |
 | `spec/` | The module spec and its parameter manifest (29 keys) | ratified 2026-10-20 (D-017), protected |
 | `lab/echo-lab.html` | The listening twin: A/B panels and a blind bench for the Phase A choices; free play with every key; an IR echogram. Open it in Chrome or Safari, or serve it: `python3 -m http.server -d lab` | built |
 | `tools/lab_smoke.mjs` | The lab smoke in `./verify fast`, every detector with a planted control | green |
+| `tools/plan_map_smoke.mjs` | The plan map's parser run headless against `ROADMAP.md`: its self-checks, all seven phases found, a pure model; each with a planted control. In `./verify fast` | green |
 | `core/` | The C++ core | M1, not started |
 | `verify` | The oracle: `./verify fast` / `full` / `report` | live |
 
