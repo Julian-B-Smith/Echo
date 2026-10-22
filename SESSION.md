@@ -39,6 +39,12 @@ protected-path poll). Everything else in M3 waits on these two. The M3 session i
   each time). horde has heard nothing from Echo since spin-up.
 - **M4 B4-3 (T-033)** is blocked until M3's T-014 (meter taps) lands on main. B4-4 installs the wasm toolchain (LLVM's
   wasm target, lld, a wasi sysroot), and the human is told what is installed (D-030).
+- **A flaky local gate (found at this close):** M4's gate-4 check in `core/tests/ir_tests.cpp` (frame 1 within
+  100 ms, worst of 20, enforced locally and only reported on CI) turned `./verify fast` red twice in a row on this
+  close's tree, then green four runs straight with nothing changed. It is wall-clock timing on a shared Mac whose
+  scheduler moves processes between core types (single runs swung up to 8× in M2's informal bench). It belongs to M4
+  (T-031) and its `./verify` wiring is a human gate. Options for the M4 session to put to the human: time on CPU
+  rather than the wall, gate on a percentile with a bounded retry, or move the clock check to `./verify full`.
 - **T-005:** the lab still rests on line writes alone (the cut D-018 fixed in C++).
 - **T-007:** the cutoff-glide check, the manifest's rate/smoothing comparison, D-022's unexplained identical GCC render.
 - **T-008:** D-009's residual and AR-whitened click readings, plus B265 beside them (D-023 gates on M2 only).
