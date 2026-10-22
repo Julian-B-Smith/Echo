@@ -19,3 +19,5 @@ performance-budget.
 - [L0012](LIBRARY.md#L0012) — pipefail makes `cmd | grep -q` take cmd's status: capture first when cmd must fail (gates) · candidate
 - [L0013](LIBRARY.md#L0013) — fade click probes in: an abrupt start writes a kink the read replays (modulation-repitch) · candidate
 - [L0014](LIBRARY.md#L0014) — never normalise a detector by the render's own extreme; normalise by a declared bound (gates) · candidate
+- [L0015](LIBRARY.md#L0015) — check a PR's base before merging: a stacked PR merges into its base branch, not main (process) · candidate
+- [L0016](LIBRARY.md#L0016) — push only through a gate that reads the recorded verify exit (act.py push); a chained command pushed red (process) · candidate
