@@ -114,7 +114,8 @@ commercial delay or borrow its mode names, presets or UI text.
      (ADR-257 and its A1; horde's copy now hashes `09f41cc2…`, ours `945108a7…`). The new
      §12.5 adds RS-5.8 (up to four optional *fixed controls*, which A12's round trip then
      covers), RS-4.11 (an optional per-block note context) and admission row A22. The 1.0
-     bar and the I/O gain standard are unchanged. A re-pin is a human gate (T-010).
+     bar and the I/O gain standard are unchanged. A re-pin is a human gate (T-010) **Re-pinned 2026-10-23
+     at horde `d34cd13` (D-034),** with §12.6 (actions, A23) and the macros spec's ADR-251.
   2. **FOUNDATIONS' `fx_operator.h` is still an unfrozen draft** (slices 1–3, DECISIONS
      #127/#129/#131; nothing after #136). It declares `LatencyDecl`, `TailDecl`, `LoadDecl`,
      `OperatorProperties`, `validate()` and the lifecycle and parameter concepts. It has **no**
@@ -387,13 +388,17 @@ catch (charter §Domain); `./verify fast` green; a trace in `traces/`. An edit t
 filings need the human's go-ahead each time.
 
 ### T-010 — M3: Re-pin intake to horde's current contract (ADR-257, §12.5)
-- **Status:** open (human gate: a re-pin).
-- **Scope:** `intake/rack-slot-contract.md`, `intake/MANIFEST`; DECISIONS.
+- **Status:** done 2026-10-23 (D-034, by poll; trace `traces/2026-10-23-t010-repin.md`).
+  Re-pinned at horde `d34cd13`, which by then also carried §12.6 (ADR-267: actions,
+  A23) and ADR-251's macro law in the macros spec.
+- **Scope:** `intake/rack-slot-contract.md`, `intake/MANIFEST`; DECISIONS. **Widened by
+  D-034:** `intake/SPEC-MODULE-MACROS.md`, re-pinned at the same commit.
 - **Acceptance criteria:** the copy is byte-identical to horde's `docs/proposals/rack-slot-contract.md`
   at a named horde commit; `intake_gate` green on the new hash; a decision records what
   §12.5 means for Echo: RS-4.11 (the note context) **not declared** (Echo has no use for
   notes), A22 not applicable, and RS-5.8 (fixed controls) decided in T-011.
-- **Out of scope:** any other intake file (the bar and the I/O gain standard are unchanged).
+- **Out of scope:** any other intake file (the bar and the I/O gain standard are unchanged;
+  the macros spec was brought in by D-034).
 
 ### T-011 — M3: Spec revision 3: what M3 adds to the spec
 - **Status:** open (human gate: `spec/` is protected; ratified by poll).
@@ -408,8 +413,10 @@ filings need the human's go-ahead each time.
   `home`), and which keys a macro may bind (proposed: continuous keys only; a stepped key
   through a macro would flip at an arbitrary threshold); (4) fixed controls (RS-5.8): which,
   if any; (5) the `TailDecl` mapping: tails at or past 2³² − 1 samples saturate to
-  `kInfiniteTail`; (6) `noteContext` and `morphPosition` not declared. Ratified by poll and
-  cited by a decision.
+  `kInfiniteTail`; (6) `noteContext` and `morphPosition` not declared; (7) **added by D-034:**
+  declared actions (RS-4.12), which, if any, each with its key, label and what it does to
+  the runtime state; and in (3), which macro law (`set` / `modify`, ADR-251) the factory
+  bank uses. Ratified by poll and cited by a decision.
 - **Out of scope:** any change to the 29 keys' ranges, defaults or classes.
 
 ### T-012 — M3: FOUNDATIONS brief, then the vendored, pinned header
@@ -502,18 +509,20 @@ filings need the human's go-ahead each time.
   resolver (SPEC-MODULE-MACROS §4–§5) hits `lo` and `hi` exactly at v = 0 and 1 for `lin`,
   `exp` and `log`, and matches the closed form to 1e-12 at v ∈ {0, ¼, ½, ¾, 1} with a
   decreasing range. A12: every factory preset saves and loads with slot order, labels,
-  bindings, curves, `home` (and fixed controls, if declared) exact. A13: a preset loaded at each of four corners,
+  bindings, curves, `home`, `macroLaw` (D-034) (and fixed controls, if declared) exact; a
+  `log` curve under `macroLaw: modify` is refused. A13: a preset loaded at each of four corners,
   flipped and round-tripped renders identically before and after. Plants: a load that
   reorders slots; a Device key accepted in a preset; an invalid `log` accepted; an endpoint
   that is not exact.
 - **Out of scope:** horde's resolution at run time (RS-5.5: horde resolves Echo's macros).
 
-### T-018 — M3: Admission self-test: rows A1–A22 mapped and the gaps filled
+### T-018 — M3: Admission self-test: rows A1–A23 mapped and the gaps filled
 - **Status:** open (after T-013 – T-015).
 - **Scope:** `core_tests.cpp`, `plants.h`; a generated `docs/admission.md`.
-- **Acceptance criteria:** `docs/admission.md` lists each row A1–A22 with its check, its plant
+- **Acceptance criteria:** `docs/admission.md` lists each row A1–A23 with its check, its plant
   and the result, or "horde's" (A7 "off" is the router's: Echo has no bypass key) or "not
-  declared" (A21, A22), and `./verify` fails if it is stale. New checks: A2 at a stress
+  declared" (A21, A22; A23 unless T-011 declares an action, D-034), and `./verify` fails if
+  it is stale. New checks: A2 at a stress
   preset; A3 with n = 256 added; A4 latency truth (on an impulse and a swept sine, the
   measured delay of the dry path equals the declared 0 samples; plant: a dry path one
   sample late); A8 `|L − R|` kept in stereo routing (plant: a mono sum); A10 a

@@ -692,3 +692,31 @@ Rejected:
 
 D-032's second point (columns) and its open memory question stand. Its memory figures are corrected to binary
 units: 8 slots × 8 s is 46.9 MiB at 48 kHz and 187.5 MiB at 192 kHz (critic L1). `stop()` now frees them.
+
+## D-034 — intake re-pinned to horde d34cd13: the rack-slot contract and the macros spec; what §12.5 and §12.6 mean for Echo (RATIFIED by poll, 2026-10-23; T-010)
+
+horde's contract had moved past T-010's brief. Since Echo's pin (horde 4d2288f, 2026-10-19):
+- `rack-slot-contract.md` gained **§12.5** (ADR-257: RS-5.8 fixed controls, RS-4.11 the note context, admission row
+  A22, RS-5.3's modify-law base, A12's round trip with fixed controls) and **§12.6** (ADR-267: RS-4.12 declared
+  actions, admission row A23). T-010 was written for §12.5 alone.
+- `SPEC-MODULE-MACROS.md` gained ADR-251's **macro law**: a preset may carry `macroLaw: modify`, where bindings add
+  contributions to a base (in octaves for a Hz key) instead of setting the value; a `log` curve is invalid under it.
+- The bar, the I/O gain standard and the division list are unchanged (hashes compared; the `DIVS` block in horde's
+  `docs/design/shape-lab-mod.html` is identical, only moved).
+
+Polled:
+- **Re-pin both files** at horde `d34cd13` (2026-10-23), byte-identical, rather than the contract alone. T-011's
+  preset format and T-017's macros build on the macros spec; pinning only the contract would leave them on a
+  superseded law. This widens T-010's scope by one file.
+- **RS-4.12 (actions) is decided in T-011**, as RS-5.8 is: a delay may plausibly want one (a "clear repeats"), so
+  it is not ruled out here.
+
+What the re-pin means for Echo (the lead's record of the contract's text, no new choice):
+- **RS-4.11, the note context: not declared.** Echo has no use for notes. **A22: not applicable.**
+- **RS-5.8, fixed controls:** which, if any, ruled in T-011.
+- **RS-4.12, actions:** which, if any, ruled in T-011. **A23** applies only if one is declared; then its check and
+  its must-fail shim (an action applied at the block's start, not its offset) join T-018.
+- **ADR-251's macro law:** which law the factory bank uses is T-011's; T-017's validator carries `macroLaw` exactly
+  and refuses a `log` curve under `modify`.
+
+Rejected: re-pinning the contract alone (as T-010 was briefed); declaring no actions now.

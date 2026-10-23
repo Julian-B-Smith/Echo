@@ -454,3 +454,27 @@ Ruled by the human, 2026-10-18 ("Offer it, optional"), against the lead's recomm
 | **A21 (new)** | Its admission test, with a permuted-weights control. |
 | **The ABI map** | A new optional entry, proposed to FOUNDATIONS. Until FOUNDATIONS rules, the shape is horde's proposal and a module's local shim carries it. |
 | **RS-4.10, after Scape's review (seq 3, 2026-10-18)** | Three refinements, accepted by the lead within the ruling: the corner map is fixed (A = (0, 0), B = (1, 0), C = (0, 1), D = (1, 1), QM-0 §2's weights); `exact` is judged over the module's declared design keys only; an edited corner is delivered again through the staged load. The shape stays PROPOSED until FOUNDATIONS answers; then it goes to the human for ratification (B513). |
+
+### 12.5 ADR-257 (2026-10-20), on Shriek's briefs `maw-006` (seq 9) and `maw-007` (seq 10)
+
+Ruled by the human, 2026-10-20 ("A declared fixed row", "A per-block note context"). The shapes below are the lead's,
+PROPOSED.
+
+| Row | As amended |
+|---|---|
+| **RS-5.8 (new): fixed controls** | A module **may** declare up to **four fixed controls**: ordered (label, key) pairs naming its own parameters, present in every preset. horde shows them as one fixed row beside the macro slots, in the declared order, on every preset. A fixed control is a module parameter, never a macro. Each gets a host parameter id per FX slot, allocated like the macro slots (RS-5.6), named `FX<n> Fixed <k>`. The label stays in horde's UI. |
+| **RS-5.3 / ADR-251, the modify law's base** | The base is the parameter's value as the preset and the user set it, a fixed control's value included, macro contributions excluded. "The preset's `internal_defaults` value" is that value at load. |
+| **RS-5.1** | Unchanged: "up to 8". A module may use fewer, and empty slots are hidden. |
+| **A12** | Its round trip includes the fixed controls' values. |
+| **RS-4.11 (new): the note context** | A module **may** declare `noteContext`. Before each `process` it then receives a read-only context, valid for the call only. It conforms to ROADMAP B92 (FOUNDATIONS DECISIONS #115), corrected by ADR-257 A1. **Events** (capped and preallocated, in arrival order, each with its sample offset): note-on (identity, base Hz, velocity); per-note pitch offset (identity, semitones: bend and glide); and exactly **one terminal per identity**, through whichever path the note leaves (off, steal or expiry). **Identity** is `NoteRef`-compatible: the host's note id, else (port, channel, key), never a bare key. **Pitch on the bus is canonical:** the note's base frequency from the tuning, without bend, glide or gravity; each consumer derives its own hearing (B92 item 3). **Conveniences:** `lastHz`, the newest held note's base × 2^(offset/12) at the block's start (0 before the first note, held after release); and `held`. It is data, so the same notes give the same context. In the FX device (ADR-254) the MIDI sidechain feeds the same context. |
+| **A22 (new)** | **Judge:** a scripted note stream gives the same output twice, and with the entry absent the output equals a no-note run. **Must fail:** a shim that delivers the events at the wrong sample offsets. |
+| **The ABI map** | A new optional entry, proposed to FOUNDATIONS (brief `note-context`). Until FOUNDATIONS rules, a module's local shim carries it. |
+
+### 12.6 ADR-267 (2026-10-21), on the human's trigger timer
+
+Ruled by the human, 2026-10-21 ("Declared actions"). The shape is the lead's, PROPOSED.
+
+| Row | As amended |
+|---|---|
+| **RS-4.12 (new): declared actions** | A module **may** declare named **actions** (momentary commands such as Sluice's clear), each with a key and a label. horde fires an action as an event, at its sample offset, in the per-block context before `process`, beside the note context (RS-4.11). An action is **not** a host parameter and cannot be automated. Firing one is a **performance event**: it makes no history node and leaves the saved patch and the module's saved state unchanged; only its runtime state may change (ADR-267 A1). Firing is deterministic: the same events at the same offsets give the same output. |
+| **A23 (new)** | **Judge:** an action fired at a given offset gives the same output on every run, and the output is unchanged when no action fires. **Must fail:** a shim that applies the action at the block's start instead of its offset. |

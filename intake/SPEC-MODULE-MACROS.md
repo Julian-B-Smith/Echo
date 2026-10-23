@@ -88,6 +88,7 @@ ModulePreset:
   id: string             # stable, used for re-linking
   module: string         # 'rack' | 'shaper' | ...
   internal_defaults: {param_name: value}
+  macroLaw: 'set' | 'modify'   # optional; absent = 'set' (ADR-251)
   slots:                 # only roles this preset implements
     Amount: {label: 'Size',  bind: {delay: [0.015, 0.22], diff: [1800, 350]}}
     Tone:   {label: 'Damp',  bind: {damp: [1200, 9000]}}
@@ -119,6 +120,17 @@ Rules on the model:
   Every curve returns `lo` exactly at v = 0 and `hi` exactly at v = 1 (special-cased, since neither `lo + (hi − lo)·1` nor `lo·(hi/lo)^1` is guaranteed to round to `hi`).
 
   A module manifest that declares `log` on other endpoints is invalid and fails validation. A host that meets one anyway (a preset from outside the manifest check) resolves it as `lin` and flags the binding in the editor. It never produces a NaN. The names and laws are the ones Sluice already builds (`lo + curve(v)·(hi − lo)`), so one vocabulary serves every module. Sluice's breakpoint curves are not part of this contract: Sluice resolves its own macros (A1).
+- **Macro law** (ADR-251, 2026-10-19; Shriek brief maw-005). A module preset may carry `macroLaw: modify`. Absent, the law is `set`, today's law, so every existing preset is unchanged.
+  - **`set`:** a bound parameter is **set** to `shape(curve, lo, hi, v)` (§5).
+  - **`modify`** (Sluice's law, Sluice D-112/D-113): each binding gives a contribution `c = shape(curve, lo, hi, v)`, and the heard value is `base ⊕ Σc`, clamped to the parameter's range.
+    - `base` is the preset's `internal_defaults` value, or else the parameter's default.
+    - Contributions from every slot bound to one parameter **add** before the ⊕.
+    - **⊕ follows the parameter's unit:** for a parameter whose manifest unit is **Hz**, with base > 0, the value is `base · 2^Σc`, so the range is in octaves. For every other parameter it is `base + Σc`.
+    - Polarity is the range: `[0, x]` is one-sided and `[−x, x]` two-sided.
+    - At v = 0 with `lo` = 0 the preset's own sound is heard exactly.
+    - Under `modify`, a `log` curve is invalid, because a contribution range may cross zero.
+  - `home` (ADR-169 A5) keeps its meaning: where a fresh slot starts.
+
 
 ## 5. Resolution algorithm
 
@@ -138,9 +150,18 @@ for each host h, role r:
 
 for each host h, each live module instance k (see §7):
   ip = preset_k.internal_defaults
-  for role r in preset_k.slots:
+  if preset_k.macroLaw != modify:                            # 'set' (absent): today's law
+    for role r in preset_k.slots:
       for (name, [lo, hi, curve = lin]) in preset_k.slots[r].bind:
           ip[name] = shape(curve, lo, hi, slot[h][r])         # §4 binding curve; lin == lerp
+  else:                                                       # 'modify' (ADR-251)
+    sum = {}                                                  # contributions per parameter
+    for role r in preset_k.slots:
+      for (name, [lo, hi, curve = lin]) in preset_k.slots[r].bind:
+          sum[name] += shape(curve, lo, hi, slot[h][r])
+    for name in sum:
+      b = ip[name]                                            # internal_defaults, else default
+      ip[name] = clamp_range(name, unit(name) == Hz and b > 0 ? b * 2^sum[name] : b + sum[name])
   apply ip to instance k with the module's own smoothing
 ```
 
