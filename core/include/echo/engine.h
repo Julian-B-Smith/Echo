@@ -37,13 +37,17 @@
 // mod.seed), depth limited by the curve's slope and the write head, the offset
 // slew-limited to 0.25 sample/sample, 250 ms ramps, seeded switches.
 //
-// STILL NOT HERE (M3): meters with clip latches (§16.1, B435; T-014), state stored
-// by name (§16.2; T-015), the Clear action (§16.7; T-037). Only the non-finite
-// count and latch exist.
+// M3 (T-014): two meter taps (§16.1, B435), directly after Input Gain and after
+// Output Gain, each the block's peak and a clip latch, published as relaxed
+// atomics once per block.
+//
+// STILL NOT HERE (M3): state stored by name (§16.2; T-015), the Clear action
+// (§16.7; T-037).
 //
 // THREADING. One writer: every method is called from one thread at a time
-// (horde's slot serialises them, RS-6.6). Only the non-finite counters are
-// atomics, readable from another thread (RS-7.9).
+// (horde's slot serialises them, RS-6.6). The non-finite counters (RS-7.9) and
+// the meter taps (§16.1) are atomics, readable from any other thread: the GUI
+// reads published values, never working buffers (contract §8, RC-8).
 #pragma once
 #include <algorithm>
 #include <array>
@@ -197,6 +201,7 @@ class Echo {
     silentRun_ = quietRun_ = tailClock_ = 0;
     nonFinite_.store(0, std::memory_order_relaxed);
     nonFiniteLatch_.store(false, std::memory_order_relaxed);
+    if (plant::resetClearsLatch) clearMeters();  // the meter latches are NEVER reset's (RS-6.13; critic T-014 LOW)
   }
 
   // ---- parameters -----------------------------------------------------------
@@ -288,6 +293,10 @@ class Echo {
       std::vector<double> scratch(8, inL[0]);  // the planted audio-thread allocation
       outL[0] = scratch[0] * 0.0;
     }
+    // The meters (§16.1): this block's peaks and overs, published once after the
+    // loop. The latches are only ever SET here; clearMeters() is their one clear.
+    if (plant::latchClears) { tapIn_.clip.store(false, std::memory_order_relaxed); tapOut_.clip.store(false, std::memory_order_relaxed); }
+    double pkIn = 0.0, pkOut = 0.0;
     const double bpmEnd = (std::isfinite(bpm) && bpm > 1.0) ? bpm : 120.0;
     if (idle_ && !plant::tempoGlidesAtRest) bpmPrev_ = bpmEnd;  // at rest the tempo lands, never glides (§3.3)
     double bpmStart = bpmPrev_;  // re-landed if the instance rests and wakes inside this block
@@ -317,8 +326,14 @@ class Echo {
       tickFilters();
       tickRoute();
 
-      xL *= gIn;
-      xR *= gIn;
+      // Input Gain before every path (B435: the dry path, the loop and every
+      // detector), then the input tap directly after it.
+      const double rawPk = plant::tapReadsRaw ? std::max(std::fabs(inL[i]), std::fabs(inR[i])) : std::max(std::fabs(xL), std::fabs(xR));
+      if (!plant::inGainAfterLoop) {
+        xL *= gIn;
+        xR *= gIn;
+      }
+      pkIn = std::max(pkIn, (plant::tapBeforeGain || plant::tapReadsRaw) ? rawPk : std::max(std::fabs(xL), std::fabs(xR)));
       const bool silentIn = xL == 0.0 && xR == 0.0;
       silentRun_ = silentIn ? silentRun_ + 1 : 0;
       // The tail clock (D-019): counts silent samples since the input stopped,
@@ -333,6 +348,8 @@ class Echo {
       // Encode into the lines (§4), then the input filter on what enters them.
       double u[2];
       for (int k = 0; k < 2; ++k) u[k] = enc_[k][0] * xL + enc_[k][1] * xR;
+      if (plant::inGainDryOnly)  // the planted misplacement (critic T-014 H1): Input Gain reaches the dry path only
+        for (int k = 0; k < 2; ++k) u[k] /= gIn;
       for (int k = 0; k < 2; ++k) u[k] = filterSample(fIn_, k, u[k]);
 
       // Time targets: the tempo moves per sample within the block (D-008).
@@ -411,8 +428,9 @@ class Echo {
       const double wg = loading ? fadeWg_ : (mix <= 0.0 ? 0.0 : std::sin(mix * k::kPi / 2));
       const double dL = plant::dryLimiter ? std::tanh(xL) : xL;
       const double dR = plant::dryLimiter ? std::tanh(xR) : xR;
-      double oL = (dg * dL + wg * wo[0]) * gOut;
-      double oR = (dg * dR + wg * wo[1]) * gOut;
+      const double gLate = plant::inGainAfterLoop ? gIn : 1.0;  // the planted misplaced Input Gain
+      double oL = (dg * dL + wg * wo[0]) * gOut * gLate;
+      double oR = (dg * dR + wg * wo[1]) * gOut * gLate;
       if (!plant::noOutputGuard && (!std::isfinite(oL) || !std::isfinite(oR))) {
         oL = oR = 0.0;
         clearLoop();
@@ -420,6 +438,10 @@ class Echo {
       }
       outL[i] = oL;
       outR[i] = oR;
+      // The output tap: after Output Gain, every path and the tail. (The planted
+      // outTapDryOnly reads the dry term alone, blind to the wet and the tail.)
+      pkOut = std::max(pkOut, plant::outTapDryOnly ? std::max(std::fabs(dg * dL * gOut), std::fabs(dg * dR * gOut))
+                                                   : std::max(std::fabs(oL), std::fabs(oR)));
       if (loadEnds) {
         adoptPatch();  // the old audio has faded: the new patch takes the wet too
         if (!plant::loadKeepsLine) clearLoop();
@@ -440,6 +462,8 @@ class Echo {
       }
     }
     bpmPrev_ = bpmEnd;
+    publishTap(tapIn_, pkIn);
+    publishTap(tapOut_, pkOut);
   }
 
   // ---- declarations (SPEC §10) ----------------------------------------------
@@ -480,6 +504,30 @@ class Echo {
   std::uint64_t nonFiniteCount() const { return nonFinite_.load(std::memory_order_relaxed); }
   bool nonFiniteLatched() const { return nonFiniteLatch_.load(std::memory_order_relaxed); }
   void clearLatches() { nonFiniteLatch_.store(false, std::memory_order_relaxed); }
+
+  // ---- meters (SPEC §16.1, B435, contract RS-4.7; T-014) ---------------------
+  // Two taps: directly after Input Gain (before every path and detector) and
+  // directly after Output Gain (after every path and the tail). Each holds the
+  // last block's peak |x| over both channels, and a clip latch that sets on a
+  // sample with |x| > 1.0 (over 0 dBFS; exactly 1.0 is full scale, not a clip)
+  // and holds until clearMeters(): never cleared by process(), reset() or a load
+  // (B225; RS-6.13's table: a meter latch is live state, never saved).
+  // Readable from any thread; relaxed is enough, as each value stands alone.
+  // M4's T-033 adds its status word and ceiling count beside these (D-030).
+  struct Meter {
+    double peak;
+    bool clip;
+  };
+  Meter inputMeter() const { return readTap(tapIn_); }
+  Meter outputMeter() const { return readTap(tapOut_); }
+  // clearMeters() is the one call meant for ANOTHER thread too (horde's mixer
+  // clears from the GUI): two atomic stores. A block in flight publishes at its
+  // end, so an over earlier in that block can re-set a latch just after a clear;
+  // it was a real over, and the next clear removes it.
+  void clearMeters() {
+    tapIn_.clip.store(false, std::memory_order_relaxed);
+    tapOut_.clip.store(false, std::memory_order_relaxed);
+  }
   // How many time crossfades line k has started (test read: the retrigger queue).
   std::uint64_t fadeCount(int k) const { return fadeCount_[k]; }
   // The sounding head's delay in samples when no fade runs (test read).
@@ -509,6 +557,22 @@ class Echo {
   int maxBlock() const { return maxBlock_; }
 
  private:
+  // ---- meter taps (§16.1) ---------------------------------------------------
+  struct Tap {
+    std::atomic<double> peak{0.0};
+    std::atomic<bool> clip{false};
+  };
+  // A tap that could lock would put a lock on the audio thread (charter §Domain).
+  static_assert(std::atomic<double>::is_always_lock_free && std::atomic<bool>::is_always_lock_free,
+                "the meter taps must be lock-free atomics");
+  static void publishTap(Tap& t, double pk) {
+    t.peak.store(pk, std::memory_order_relaxed);
+    if (pk > 1.0) t.clip.store(true, std::memory_order_relaxed);
+  }
+  static Meter readTap(const Tap& t) {
+    return {t.peak.load(std::memory_order_relaxed), t.clip.load(std::memory_order_relaxed)};
+  }
+
   // ---- smoothing ------------------------------------------------------------
   // A linear ramp of a fixed length: per-sample, so block-size independent.
   struct Ramp {
@@ -1360,8 +1424,18 @@ class Echo {
   // RS-4.5, critic H4).
   void snapAll(bool device) {
     if (device || plant::loadSnapsDevice) {
-      rIn_.target = gainTarget(kInGain); rIn_.snap();
-      rOut_.target = gainTarget(kOutGain); rOut_.snap();
+      if (plant::prepareRampsIn) {
+        // B435 test 3's fault: the gains never OPEN at their value; every landing
+        // (prepare -> reset, and rest) ramps them in from unity instead. Planted
+        // here, not in prepare(): a fresh instance is at rest, and the rest
+        // landing on its first sample would mask a ramp-in set up only there.
+        rIn_.cur = rOut_.cur = 1.0;
+        rIn_.to(gainTarget(kInGain), rampN_);
+        rOut_.to(gainTarget(kOutGain), rampN_);
+      } else {
+        rIn_.target = gainTarget(kInGain); rIn_.snap();
+        rOut_.target = gainTarget(kOutGain); rOut_.snap();
+      }
     }
     rMix_.target = p_[kMix] / 100.0; rMix_.snap();
     rFb_.target = fbTarget(); rFb_.snap();
@@ -1498,6 +1572,7 @@ class Echo {
   double mods_[2] = {0.0, 0.0};
   std::atomic<std::uint64_t> nonFinite_{0};
   std::atomic<bool> nonFiniteLatch_{false};
+  Tap tapIn_, tapOut_;
 };
 
 // The ABI's checkable half (T-013): a build that drifts from the vendored

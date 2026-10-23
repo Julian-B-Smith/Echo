@@ -813,3 +813,41 @@ directory comes first wins in horde's build, and each module's own `vendor_gate`
 Plants added: `propsNoTail`, `tailWraps32`, `paramNoClass`, `processReadsAfterWrite`, `loadBoundShort`. The core
 suite now has 56 checks guarding 80 distinct planted faults (M2's 75 plus these 5); `echo_plants` prints 87
 "plant fires" lines, because some plants are guarded by more than one check.
+
+## D-038 — T-014: the meter taps and the I/O gain standard's tests 1–7 (lead's record, 2026-10-23; for the human's review on batch 2's PR)
+
+**What T-014 built** (`engine.h`, `plants.h`, `core_tests.cpp`), to SPEC §16.1 (D-035) and B435:
+- **Two meter taps:**
+  - the input tap reads directly after Input Gain, on the repaired sample;
+  - the output tap reads directly after Output Gain, every path and the tail.
+- **Each tap** holds the last block's peak |x| over both channels and a clip latch that sets on |x| > 1.0.
+- **The latch is cleared only by `clearMeters()`,** never by `process()`, `reset()` or a load (RS-6.13).
+- **Lock-free relaxed atomics,** with a `static_assert` that they are lock-free. They are published once per
+  `process()` call, and `clearMeters()` may be called from another thread.
+- **No audio path changed** in the clean build: the render hash is unchanged (`85f103b94528512e`, checked by the
+  critic).
+- **Tests 1–7 as checks.** Test 2, already in the suite at 48 and 96 kHz, now covers both trims at 44.1, 48 and
+  96 kHz. It checks every ramp sample against the straight line, with the end landing on sample N − 1.
+
+**Critic (Opus, fresh context): FIX-THEN-SHIP**, from mutants it built by hand that the suite passed. All fixed:
+- **H1:** test 5 showed only that Input Gain is not applied at the output. Input Gain applied to the dry path only
+  passed. Test 5 now requires the +12 dB render to equal a 0 dB instance fed the pre-scaled input, bit for bit. New
+  plant: `inGainDryOnly`.
+- **H2:** the meter checks could not see channel, sign, or the output tap's placement. A signed left-only input tap
+  with a dry-only output tap passed. The checks now put the peak on the right channel and make it negative, and the
+  output tap must read a wet tail after the input stops. New plant: `outTapDryOnly`.
+- **M1:** "reads the repaired sample" had no check. One is added, with a `tapReadsRaw` plant. The first version was
+  itself vacuous (an instance at rest never reaches the taps on a repaired zero), and the plant was caught by the
+  wrong check. It now runs on a live signal and catches the plant itself.
+- **LOW:** a `resetClearsLatch` plant for test 7's reset and load half, and the `clearMeters()` threading note.
+
+**Stated limits** (the critic's LOWs, recorded rather than changed):
+- **Test 6 is mostly by construction.** `doubleGain` is a test-side plant that would fire against any module; the
+  content is that Echo declares both keys, Device class.
+- **Test 4's corner flip lands inside the first load's fade,** so it exercises the second-load branch (D-020).
+- **On an unprepared instance or n ≤ 0,** `process()` returns before publishing, so the last peak stays readable.
+
+**Open for the human (the critic's question).** §16.1 says "the block's peak", which this builds. With small horde
+blocks (down to n = 1) and a GUI polling at 30–60 Hz, the shown peak is close to one arbitrary block; the latch
+still catches every over. The alternative is a peak held since the GUI last read it, which makes the reader a
+writer: an atomic exchange to zero. That would be a spec change (§16.1, a protected path).

@@ -465,7 +465,9 @@ filings need the human's go-ahead each time.
 - **Out of scope:** the state format (T-015); meters (T-014).
 
 ### T-014 — M3: Meter taps, clip latches and the I/O gain tests 1–7 (row A6)
-- **Status:** open (needs T-011's meter ruling).
+- **Status:** done 2026-10-23 (D-038; critic FIX-THEN-SHIP, H1, H2, M1 and LOWs fixed; trace
+  `traces/2026-10-23-t014-meters.md`). Open for the human: the peak per block vs since the last
+  read (D-038).
 - **Scope:** `engine.h`, `plants.h`, `core_tests.cpp`.
 - **Acceptance criteria:** two taps, directly after Input Gain and directly after Output
   Gain, each a peak and a clip latch, published as atomics readable from another thread,

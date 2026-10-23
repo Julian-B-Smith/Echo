@@ -129,6 +129,17 @@ ECHO_PLANT(tailWraps32)          // the 64-bit tail is narrowed to TailDecl's 32
 ECHO_PLANT(paramNoClass)         // the Device class maps to no OQ #33 class (RS-2.2)
 ECHO_PLANT(processReadsAfterWrite) // outputs cleared before the input is read: in place, the input is lost
 ECHO_PLANT(loadBoundShort)       // properties() declares half the real load fade (critic T-013 MED-1)
+// ---- M3, B2 (T-014: meters and the I/O gain standard's tests 1-7) ----
+ECHO_PLANT(latchClears)          // a clip latch clears itself at the next block (B225: it must hold)
+ECHO_PLANT(tapBeforeGain)        // the input tap reads the signal BEFORE Input Gain
+ECHO_PLANT(prepareRampsIn)       // the gains ramp in from unity at every landing instead of opening at their value (test 3)
+ECHO_PLANT(inGainAfterLoop)      // Input Gain applied at the output: it never drives the loop (test 5)
+ECHO_PLANT(doubleGain)           // TEST-SIDE: the simulated rack slot adds its own gain pair beside Echo's (test 6)
+// ---- M3, B2, after the T-014 critic ----
+ECHO_PLANT(inGainDryOnly)        // Input Gain reaches the dry path but is divided back out of what enters the loop (H1)
+ECHO_PLANT(outTapDryOnly)        // the output tap reads the dry term only: blind to the wet and the tail (H2)
+ECHO_PLANT(tapReadsRaw)          // the input tap reads the raw input, before the non-finite repair (M1)
+ECHO_PLANT(resetClearsLatch)     // reset() clears the meter latches (RS-6.13: they are retained)
 }  // namespace echo::plant
 
 #undef ECHO_PLANT

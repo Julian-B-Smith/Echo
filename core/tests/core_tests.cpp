@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <string>
 #include <utility>
@@ -649,17 +650,27 @@ bool noAlloc(Detail& d) {
 // The I/O gain law (B435): unity exactly at 0 dB, a 20 ms ramp linear in
 // amplitude, exact at its end.
 bool ioGainLaw(Detail& d) {
-  for (double sr : {48000.0, 96000.0}) {
-    auto e = mk({{"mix", 0}}, sr);
-    const long n = S(0.2, sr), at = S(0.1, sr), N = S(0.02, sr);
-    const Vec in(n, 0.25);
-    const auto o = run(*e, in, in, {set(at, "io.outGain", 6)});
-    const double G = std::pow(10.0, 6.0 / 20.0);
-    REQUIRE(o.L[at - 1] == 0.25, "unity at 0 dB: %.17g", o.L[at - 1]);
-    const double mid = o.L[at + N / 2 - 1] / 0.25;
-    REQUIRE(std::fabs(mid - (1 + G) / 2) < 1e-9, "at %.0f Hz the gain 10 ms in is %.6f, linear-in-amplitude over 20 ms expects %.6f", sr, mid, (1 + G) / 2);
-    REQUIRE(o.L[at + N] == 0.25 * G, "after 20 ms the gain is %.17g, expected %.17g", o.L[at + N] / 0.25, G);
-  }
+  // B435 test 2: a step from 0 to +6 dB is a linear AMPLITUDE ramp over 20 ms
+  // (+/- one sample), on both trims, at 44.1, 48 and 96 kHz. Every ramp sample
+  // is checked against the straight line, and the end lands exactly on sample
+  // N - 1 (N = 20 ms at the rate), not before.
+  const double G = std::pow(10.0, 6.0 / 20.0);
+  for (const char* key : {"io.inGain", "io.outGain"})
+    for (double sr : {44100.0, 48000.0, 96000.0}) {
+      auto e = mk({{"mix", 0}}, sr);
+      const long n = S(0.2, sr), at = S(0.1, sr), N = S(0.02, sr);
+      const Vec in(n, 0.25);
+      const auto o = run(*e, in, in, {set(at, key, 6)});
+      REQUIRE(o.L[at - 1] == 0.25, "%s: unity at 0 dB: %.17g", key, o.L[at - 1]);
+      for (long k = 0; k < N; ++k) {
+        const double want = 1.0 + (G - 1.0) * static_cast<double>(k + 1) / static_cast<double>(N);
+        REQUIRE(std::fabs(o.L[at + k] / 0.25 - want) < 1e-12, "%s at %.0f Hz: ramp sample %ld reads %.9f, the linear-in-amplitude 20 ms ramp %.9f",
+                key, sr, k, o.L[at + k] / 0.25, want);
+      }
+      REQUIRE(o.L[at + N - 2] != 0.25 * G, "%s at %.0f Hz: the ramp ended early", key, sr);
+      REQUIRE(o.L[at + N - 1] == 0.25 * G && o.L[at + N] == 0.25 * G, "%s at %.0f Hz: after 20 ms the gain is %.17g, expected %.17g", key, sr,
+              o.L[at + N] / 0.25, G);
+    }
   return true;
 }
 
@@ -1610,6 +1621,190 @@ bool abiInPlace(Detail& d) {
   return true;
 }
 
+// ---- M3 B2, T-014: the meter taps and the I/O gain standard's tests 1-7 (row A6, B435) ----
+
+// One block straight through process(), so a meter read after it is that block's.
+void block(Echo& e, const Vec& L, const Vec& R) {
+  Vec oL(L.size()), oR(R.size());
+  e.process(L.data(), R.data(), oL.data(), oR.data(), static_cast<int>(L.size()), 120.0);
+}
+
+// Test 1: at 0 dB both trims are bit-identical to an unprocessed pass.
+bool ioTest1Unity(Detail& d) {
+  g_rng = 11;
+  const long n = S(0.2);
+  Vec L(n), R(n);
+  for (long i = 0; i < n; ++i) { L[i] = 0.9 * noise(); R[i] = 1e-30 * noise(); }
+  auto e = mk({{"mix", 0}});
+  const auto o = run(*e, L, R);
+  for (long i = 0; i < n; ++i)
+    REQUIRE(o.L[i] == L[i] && o.R[i] == R[i], "at 0 dB sample %ld is %.17g / %.17g, not the input %.17g / %.17g", i, o.L[i], o.R[i], L[i], R[i]);
+  return true;
+}
+
+// Test 3: after prepare at a saved +6 dB (set before prepare, as a host restores
+// an instance), the very first sample is already at +6 dB: no ramp in.
+bool ioTest3Opens(Detail& d) {
+  for (double sr : {48000.0, 96000.0}) {
+    Echo e;
+    e.setParam("io.inGain", 6);
+    e.setParam("io.outGain", 6);
+    e.setParam("mix", 0);
+    e.prepare(sr, 4096);
+    const double G = std::pow(10.0, 6.0 / 20.0);
+    double x = 0.25, y = 0;
+    e.process(&x, &x, &y, &y, 1, 120.0);
+    REQUIRE(y == 0.25 * G * G, "at %.0f Hz the first sample after prepare is %.17g, expected %.17g (+6 dB in and out)", sr, y, 0.25 * G * G);
+  }
+  return true;
+}
+
+// Test 4: a patch load and a corner flip (a second load, another corner's patch)
+// leave both gains alone, a ramp in flight included. Bit-identical to the same
+// run without the loads (mix 0 in every patch, so only the gains shape the output).
+bool ioTest4Kept(Detail& d) {
+  const long n = S(0.3), t = S(0.1);
+  const Vec in(n, 0.25);
+  const std::array<echo::KeyValue, 3> a{{{"mix", 0}, {"fb.amount", 30}, {"io.inGain", -12}}};
+  const std::array<echo::KeyValue, 3> b{{{"mix", 0}, {"fb.amount", 70}, {"io.outGain", 12}}};
+  auto ref = mk({{"mix", 0}, {"io.inGain", 6}, {"io.outGain", -6}});
+  auto e = mk({{"mix", 0}, {"io.inGain", 6}, {"io.outGain", -6}});
+  const auto r = run(*ref, in, in, {set(t, "io.outGain", 3)});
+  // The first load starts before the gain ramp and its 20 ms fade ENDS mid-ramp
+  // (where a load lands its patch); the corner flip lands inside the ramp too.
+  const auto o = run(*e, in, in, {set(t, "io.outGain", 3), {t - 500, [&a](Echo& x) { x.loadState(a); }},
+                                  {t + 200, [&b](Echo& x) { x.loadState(b); }}});
+  for (long i = 0; i < n; ++i)
+    REQUIRE(o.L[i] == r.L[i], "a load or corner flip moved the gains: sample %ld is %.17g, without the loads %.17g", i, o.L[i], r.L[i]);
+  REQUIRE(e->getParam(echo::kInGain) == 6.0 && e->getParam(echo::kOutGain) == 3.0, "the Device keys changed across the loads");
+  return true;
+}
+
+// Test 5: Input Gain sits before the loop, so +12 dB drives the returning term
+// into the ceiling and changes the output's SHAPE; Output Gain at +12 dB scales
+// the level only, exactly.
+bool ioTest5Placement(Detail& d) {
+  const long n = S(1.0);
+  Vec in = zeros(n);
+  for (long i = 0; i < n; i += S(0.1)) in[i] = 0.3;  // at +12 dB, 1.19: past the 0.9 knee
+  const char* fb = "fb.amount";
+  // The loop filter off, so the pulses return at full height: 0.9 x 1.19 = 1.07,
+  // past the ceiling's 0.9 knee at +12 dB, while 0.9 x 0.3 stays linear at 0 dB.
+  auto base = mk({{fb, 90}, {"mix", 50}, {"time.sync", 0}, {"time.ms", 50}, {"filt.loop.on", 0}});
+  auto inG = mk({{fb, 90}, {"mix", 50}, {"time.sync", 0}, {"time.ms", 50}, {"filt.loop.on", 0}});
+  auto outG = mk({{fb, 90}, {"mix", 50}, {"time.sync", 0}, {"time.ms", 50}, {"filt.loop.on", 0}});
+  inG->setParam("io.inGain", 12);
+  outG->setParam("io.outGain", 12);
+  // Land the 20 ms ramps before the first pulse (they started at setParam).
+  Vec pre = zeros(S(0.05)), sink = zeros(S(0.05));
+  for (auto* x : {base.get(), inG.get(), outG.get()}) x->process(pre.data(), pre.data(), sink.data(), sink.data(), static_cast<int>(pre.size()), 120.0);
+  const auto r0 = run(*base, in, in), ri = run(*inG, in, in), ro = run(*outG, in, in);
+  const double G = std::pow(10.0, 12.0 / 20.0);
+  for (long i = 0; i < n; ++i) REQUIRE(ro.L[i] == r0.L[i] * G, "Output Gain +12 dB is not a pure level change at sample %ld", i);
+  double dev = 0, pk = 0;
+  for (long i = 0; i < n; ++i) { dev = std::max(dev, std::fabs(ri.L[i] - r0.L[i] * G)); pk = std::max(pk, std::fabs(r0.L[i] * G)); }
+  REQUIRE(pk > 0.1 && dev > 1e-3 * pk, "Input Gain +12 dB only scaled the level (shape change %.3g of peak %.3g): it does not drive the loop",
+          dev, pk);
+  // Input Gain is a TRUE trim before everything (critic T-014 H1): the render at
+  // +12 dB equals a 0 dB instance fed the input pre-scaled by G, bit for bit
+  // (x*G then *1.0 is the same product), so it reaches the loop, not only the dry.
+  auto pre12 = mk({{fb, 90}, {"mix", 50}, {"time.sync", 0}, {"time.ms", 50}, {"filt.loop.on", 0}});
+  pre12->process(pre.data(), pre.data(), sink.data(), sink.data(), static_cast<int>(pre.size()), 120.0);
+  Vec inG12 = in;
+  for (auto& v : inG12) v *= std::pow(10.0, 12.0 / 20.0);
+  const auto rp = run(*pre12, inG12, inG12);
+  for (long i = 0; i < n; ++i)
+    REQUIRE(ri.L[i] == rp.L[i], "Input Gain +12 dB differs from a pre-scaled input at sample %ld (%.17g vs %.17g): not a trim before the loop",
+            i, ri.L[i], rp.L[i]);
+  return true;
+}
+
+// Test 6: Echo declares both keys, so horde's slot adds no gain of its own; a
+// slot that adds a second pair is the planted double gain. The slot is simulated
+// here by B435's rule: supply a gain only where the module declares none.
+bool ioTest6Slot(Detail& d) {
+  const auto in = echo::paramIndex("io.inGain"), out = echo::paramIndex("io.outGain");
+  REQUIRE(in && out, "Echo does not declare both io.inGain and io.outGain");
+  REQUIRE(echo::kParams[*in].morph == echo::Morph::Device && echo::kParams[*out].morph == echo::Morph::Device, "the I/O gains are not Device class");
+  const bool slotIn = !in || echo::plant::doubleGain, slotOut = !out || echo::plant::doubleGain;
+  const double dB = 6.0, G = std::pow(10.0, dB / 20.0);
+  auto e = mk({{"mix", 0}, {"io.inGain", dB}, {"io.outGain", dB}});
+  const long n = S(0.1);
+  Vec x(n, 0.1);
+  if (slotIn) for (auto& v : x) v *= G;  // the slot's own Input Gain, at the same mixer value
+  auto o = run(*e, x, x);
+  if (slotOut) for (auto& v : o.L) v *= G;
+  const double got = o.L[n - 1], want = 0.1 * G * G;
+  REQUIRE(std::fabs(got - want) < 1e-12, "through the slot +6 dB in and out reads %.6f, expected exactly one pair: %.6f", got, want);
+  return true;
+}
+
+// The two taps (§16.1, RS-4.7): the input tap after Input Gain, the output tap
+// after Output Gain, each the last block's peak. +6 dB in and -12 dB out make
+// the two points distinguishable: an over at the input tap that the output
+// tap does not see.
+bool metersTaps(Detail& d) {
+  // First (so its plant is caught HERE): the input tap reads the REPAIRED sample (§16.1, M1): +inf in is a counted
+  // repair to 0, never a peak of inf or a latched over.
+  // The +inf sits inside a live 0.1 signal: alone at rest it would be repaired to
+  // 0 and never wake the instance, so no tap would see it either way (vacuous).
+  auto r = mk({{"mix", 0}});
+  Vec bad(64, 0.1);
+  bad[10] = std::numeric_limits<double>::infinity();
+  block(*r, bad, Vec(64, 0.1));
+  REQUIRE(r->inputMeter().peak == 0.1 && !r->inputMeter().clip, "a +inf input reads peak %g, latch %d at the input tap (the raw sample)",
+          r->inputMeter().peak, r->inputMeter().clip);
+  auto e = mk({{"mix", 0}, {"io.inGain", 6}, {"io.outGain", -12}});
+  const Vec z = zeros(S(0.05));
+  block(*e, z, z);  // land the gain ramps
+  const double Gi = std::pow(10.0, 6.0 / 20.0), Go = std::pow(10.0, -12.0 / 20.0);
+  // The peak is on the RIGHT channel and NEGATIVE (critic T-014 H2): a tap that
+  // read one channel, or a signed max, misses it.
+  const Vec x(256, 0.3), xr(256, -0.6);
+  block(*e, x, xr);
+  const auto mi = e->inputMeter(), mo = e->outputMeter();
+  REQUIRE(mi.peak == 0.6 * Gi, "input tap peak %.17g, expected 0.6 x Input Gain = %.17g (after the gain)", mi.peak, 0.6 * Gi);
+  REQUIRE(mi.clip, "0.6 at +6 dB (%.3f) is over 0 dBFS at the input tap but did not latch", 0.6 * Gi);
+  REQUIRE(std::fabs(mo.peak - 0.6 * Gi * Go) < 1e-15, "output tap peak %.17g, expected %.17g (after Output Gain)", mo.peak, 0.6 * Gi * Go);
+  REQUIRE(!mo.clip, "the output tap latched at %.3f", mo.peak);
+  block(*e, z, z);
+  REQUIRE(e->inputMeter().peak == 0.0 && e->outputMeter().peak == 0.0, "a silent block left a peak: the peak is not per block");
+  // The output tap is after EVERY path and the tail (H2): input stopped, the
+  // repeats still sound, so the input tap reads 0 and the output tap does not.
+  auto w = mk({{"mix", 100}, {"time.sync", 0}, {"time.ms", 10}, {"fb.amount", 50}});
+  block(*w, impulse(256, 0, 0.5), zeros(256));
+  block(*w, zeros(2048), zeros(2048));
+  REQUIRE(w->inputMeter().peak == 0.0 && w->outputMeter().peak > 0.05, "after the input stops the output tap reads %.3g: blind to the wet tail",
+          w->outputMeter().peak);
+  return true;
+}
+
+// Test 7: both latches set on an over (|x| > 1.0; exactly 1.0 is full scale) and
+// hold through silence, reset() and a load, until clearMeters() (B225, RS-6.13).
+bool ioTest7Latches(Detail& d) {
+  auto e = mk({{"mix", 0}});
+  const Vec z(256, 0.0), one(256, 1.0);
+  block(*e, one, one);
+  REQUIRE(!e->inputMeter().clip && !e->outputMeter().clip, "a sample at exactly 1.0 latched a clip");
+  Vec over = z;
+  over[100] = 1.01;
+  block(*e, over, z);
+  REQUIRE(e->inputMeter().clip && e->outputMeter().clip, "an over of 1.01 did not latch both taps (in %d, out %d)", e->inputMeter().clip,
+          e->outputMeter().clip);
+  for (int k = 0; k < 40; ++k) block(*e, z, z);
+  REQUIRE(e->inputMeter().clip && e->outputMeter().clip, "a latch cleared itself over 40 silent blocks");
+  e->reset();
+  const std::array<echo::KeyValue, 1> patch{{{"mix", 0}}};
+  e->loadState(patch);
+  block(*e, z, z);
+  REQUIRE(e->inputMeter().clip && e->outputMeter().clip, "reset() or a load cleared a latch");
+  e->clearMeters();
+  REQUIRE(!e->inputMeter().clip && !e->outputMeter().clip, "clearMeters() did not clear");
+  block(*e, z, z);
+  REQUIRE(!e->inputMeter().clip && !e->outputMeter().clip, "a latch came back without an over");
+  return true;
+}
+
 struct Check {
   const char* name;
   bool (*fn)(Detail&);
@@ -1640,7 +1835,8 @@ const std::vector<Check> kChecks = {
     {"loop repair: a non-finite write clears all loop state; the wet recovers", loopRepair, {"loopRepairPartial"}},
     {"FTZ: the host's FP control word is restored", ftzRestored, {"ftzNotRestored"}},
     {"real time: no allocation in process / setParam / reset / loadState", noAlloc, {"allocInProcess"}},
-    {"I/O gain: unity at 0 dB; a 20 ms ramp linear in amplitude, at 48 and 96 kHz (B435)", ioGainLaw, {"dbRamp", "rampFixedSamples"}},
+    {"I/O gain test 2: unity at 0 dB; a 20 ms ramp linear in amplitude on both trims, at 44.1, 48 and 96 kHz (B435)", ioGainLaw,
+     {"dbRamp", "rampFixedSamples"}},
     {"switches: routing and filter switches are click-free (20 ms equal-gain)", switchesClickFree, {"instantSwitch"}},
     {"crossfade: equal-gain; correlated heads never exceed the signal (D-007)", crossfadeEqualGain, {"equalPower"}},
     {"jump: a 3 ms crossfade, never a bare jump (D-016)", jumpIsShortFade, {"bareJump"}},
@@ -1687,6 +1883,18 @@ const std::vector<Check> kChecks = {
     {"ABI: the tail saturates onto TailDecl's 32 bits (kInfiniteTail at 2^32 - 1 and past; 99.99 %, 12 s, 192 kHz)", abiTail32, {"tailWraps32"}},
     {"ABI: every parameter maps one to one onto OQ #33's MorphKind + MorphParticipation (RS-2.2)", abiParamClasses, {"paramNoClass"}},
     {"ABI: process() in place is bit-identical to out of place (3 routings, blocks 1/64/4096)", abiInPlace, {"processReadsAfterWrite"}},
+    // ---- M3 B2, T-014 ----
+    {"I/O gain test 1: at 0 dB both trims are bit-identical to an unprocessed pass", ioTest1Unity, {"dryLimiter"}},
+    {"I/O gain test 3: after prepare at a saved +6 dB the first sample is already +6 dB (48, 96 kHz)", ioTest3Opens, {"prepareRampsIn"}},
+    {"I/O gain test 4: a load and a corner flip leave both gains and a ramp in flight alone (bit-identical)", ioTest4Kept,
+     {"loadWritesDevice", "loadSnapsDevice"}},
+    {"I/O gain test 5: Input +12 dB is a trim before the loop (= pre-scaled input) and drives the ceiling; Output +12 dB is level only",
+     ioTest5Placement, {"inGainAfterLoop", "inGainDryOnly"}},
+    {"I/O gain test 6: Echo declares both keys; the slot adds no second pair", ioTest6Slot, {"doubleGain"}},
+    {"meters: input tap after Input Gain (repaired, both channels, |x|), output tap after Output Gain and the tail; per-block peaks",
+     metersTaps, {"tapBeforeGain", "outTapDryOnly", "tapReadsRaw"}},
+    {"I/O gain test 7: both latches set on an over (> 1.0, not at 1.0) and hold through silence, reset and a load until cleared",
+     ioTest7Latches, {"latchClears", "resetClearsLatch"}},
 };
 
 #ifdef ECHO_PLANTS
@@ -1721,6 +1929,9 @@ bool* plantFlag(std::string_view n) {
       {"glideFixedRate", &glideFixedRate},
       {"propsNoTail", &propsNoTail}, {"tailWraps32", &tailWraps32}, {"paramNoClass", &paramNoClass},
       {"processReadsAfterWrite", &processReadsAfterWrite}, {"loadBoundShort", &loadBoundShort},
+      {"latchClears", &latchClears}, {"tapBeforeGain", &tapBeforeGain}, {"prepareRampsIn", &prepareRampsIn},
+      {"inGainAfterLoop", &inGainAfterLoop}, {"doubleGain", &doubleGain},
+      {"inGainDryOnly", &inGainDryOnly}, {"outTapDryOnly", &outTapDryOnly}, {"tapReadsRaw", &tapReadsRaw}, {"resetClearsLatch", &resetClearsLatch},
   };
   for (const auto& p : table)
     if (n == p.n) return p.f;
@@ -1784,7 +1995,9 @@ int main(int argc, char** argv) {
                         "tempoModeIgnored", "followNoCap", "integerRead", "blockSteppedD", "tailClockIgnoresMotion",
                         "seedResendRestarts", "loadKeepsModState", "tempoStealsKeyMove", "followNoTrackInFade",
                         "followKeepsResidual", "modNoFloorBound", "wakeOffsetFromZero", "tapeLinearHistory", "glideFixedRate",
-                        "propsNoTail", "tailWraps32", "paramNoClass", "processReadsAfterWrite", "loadBoundShort"}) {
+                        "propsNoTail", "tailWraps32", "paramNoClass", "processReadsAfterWrite", "loadBoundShort",
+                        "latchClears", "tapBeforeGain", "prepareRampsIn", "inGainAfterLoop", "doubleGain",
+                        "inGainDryOnly", "outTapDryOnly", "tapReadsRaw", "resetClearsLatch"}) {
     bool guarded = false;
     for (const auto& c : kChecks)
       for (const char* p : c.plants) guarded = guarded || std::string_view(p) == n;
