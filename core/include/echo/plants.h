@@ -140,6 +140,14 @@ ECHO_PLANT(inGainDryOnly)        // Input Gain reaches the dry path but is divid
 ECHO_PLANT(outTapDryOnly)        // the output tap reads the dry term only: blind to the wet and the tail (H2)
 ECHO_PLANT(tapReadsRaw)          // the input tap reads the raw input, before the non-finite repair (M1)
 ECHO_PLANT(resetClearsLatch)     // reset() clears the meter latches (RS-6.13: they are retained)
+// ---- M3, B2 (T-015: the saved state, echo/state.h) ----
+ECHO_PLANT(stateFloat6g)         // floats written as %.6g: lossy, so save -> load -> save drifts (L0008)
+ECHO_PLANT(stateKeyMissing)      // one key (fb.amount) left out of the saved state (A17)
+ECHO_PLANT(stateLatchSerialised) // the meter latch written into the state (A20: live state saved)
+ECHO_PLANT(stateOversizedAccepted) // a text over 2 KiB is parsed instead of refused first (A19)
+ECHO_PLANT(stateDivByIndex)      // time.div written by index, not by name (SPEC §3.1)
+ECHO_PLANT(stateAcceptsUnknown)  // an unknown key is skipped silently instead of refusing the text
+ECHO_PLANT(adoptResets)          // adoptStaged resets first: a load mid-play cuts the repeats (D-020 broken; critic H1)
 }  // namespace echo::plant
 
 #undef ECHO_PLANT

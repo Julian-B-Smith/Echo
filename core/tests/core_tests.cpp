@@ -19,6 +19,9 @@
 #include <cstdint>
 #include <cstdio>
 #include <functional>
+#include <string_view>
+#include <cstring>
+#include <clocale>
 #include <limits>
 #include <memory>
 #include <string>
@@ -1805,6 +1808,308 @@ bool ioTest7Latches(Detail& d) {
   return true;
 }
 
+// ---- M3 B2, T-015: the saved state (SPEC §16.2; rows A17 - A20; echo/state.h) ----
+
+std::string saveText(const Echo& e) {
+  char b[echo::state::kMaxBytes];
+  const std::size_t n = e.saveState(b, sizeof b);
+  return std::string(b, n);
+}
+bool restore(Echo& e, std::string_view t, const char** why = nullptr) { return e.stageState(t, why) && e.adoptStaged(); }
+std::string replace_once(std::string t, const std::string& from, const std::string& to) {
+  const auto at = t.find(from);
+  return at == std::string::npos ? std::string("<anchor lost>") : t.replace(at, from.size(), to);
+}
+bool g_reportedLocales = false;
+
+// A patch that exercises every awkward value: thirds, a 0.1 sum, the extremes,
+// the longest labels and a value a few ulps off a round number.
+void awkward(Echo& e) {
+  e.setParam("time.ms", 1000.0 / 3.0);
+  e.setParam("mix", 100.0 / 3.0);
+  e.setParam("fb.amount", 0.1 * 7.0);
+  e.setParam("filt.loop.lpHz", std::nextafter(9000.0, 1e9));
+  e.setParam("mod.rateHz", 0.05);
+  e.setParam("time.glide", 0.01);
+  e.setParam("time.offL", -50);
+  e.setParam("time.offR", 49.999999999999993);
+  e.setParam("mod.seed", 65535);
+  e.setParam("time.div", 19);  // 3/128, the longest label
+  e.setParam("route.mode", 2);
+  e.setParam("time.tempoMode", 2);
+  e.setParam("io.inGain", -24);
+  e.setParam("io.outGain", 7.123456789012345);
+}
+// A random in-range patch from the test's own seeded stream.
+void randomPatch(Echo& e) {
+  for (int i = 0; i < echo::kNumParams; ++i) {
+    const auto& p = echo::kParams[static_cast<std::size_t>(i)];
+    const double u = 0.5 + 0.5 * noise();
+    double v = p.min + (p.max - p.min) * u;
+    if (p.stepped) v = std::floor(std::min(v, p.max));
+    e.setParam(i, v);
+  }
+}
+
+// The format (SPEC §16.2): version line, every patch key once in manifest order
+// by name, then the [device] block.
+bool stateFormat(Detail& d) {
+  auto e = mk({});
+  const std::string t = saveText(*e);
+  REQUIRE(t.rfind("echo-state 1\n", 0) == 0, "the state does not open with its version line");
+  for (const char* want : {"\ntime.sync sync\n", "\ntime.div 1/4\n", "\nroute.mode stereo\n", "\ntime.ms 375\n", "\nmix 30\n", "\nmod.seed 1\n",
+                           "\nfilt.loop.on on\n"})
+    REQUIRE(t.find(want) != std::string::npos, "the default state lacks the line `%.*s`", static_cast<int>(std::strlen(want)) - 2, want + 1);
+  const std::string_view dev = "\n[device]\nio.inGain 0\nio.outGain 0\n";
+  REQUIRE(t.size() > dev.size() && t.compare(t.size() - dev.size(), dev.size(), dev) == 0, "the [device] block is not last");
+  std::size_t pos = t.find('\n') + 1;
+  for (const auto& p : echo::kParams) {
+    if (p.morph == echo::Morph::Device) continue;
+    const std::size_t sp = t.find(' ', pos);
+    REQUIRE(sp != std::string::npos && t.compare(pos, sp - pos, p.key) == 0, "key %.*s is not next in manifest order",
+            static_cast<int>(p.key.size()), p.key.data());
+    pos = t.find('\n', pos) + 1;
+  }
+  return true;
+}
+
+// A18: save -> load -> save is byte-identical, every value bit-equal, and the
+// renders after each load are bit-identical; also in a comma locale.
+bool stateExact(Detail& d) {
+  g_rng = 99;
+  for (int c = 0; c < 22; ++c) {
+    auto a = mk({});
+    if (c == 1) awkward(*a);
+    if (c >= 2) randomPatch(*a);
+    const std::string t1 = saveText(*a);
+    auto b = mk({});
+    const char* why = "";
+    REQUIRE(restore(*b, t1, &why), "case %d: its own state was refused (%s)", c, why);
+    const std::string t2 = saveText(*b);
+    REQUIRE(t1 == t2, "case %d: save -> load -> save differs", c);
+    for (int i = 0; i < echo::kNumParams; ++i)
+      REQUIRE(a->getParam(i) == b->getParam(i), "case %d: %.*s read back %.17g, saved %.17g", c,
+              static_cast<int>(echo::kParams[static_cast<std::size_t>(i)].key.size()), echo::kParams[static_cast<std::size_t>(i)].key.data(),
+              b->getParam(i), a->getParam(i));
+    if (c < 3) {
+      auto x = mk({}), y = mk({});
+      restore(*x, t1);
+      restore(*y, t2);
+      const Vec in = impulse(S(0.5));
+      const auto ox = run(*x, in, in), oy = run(*y, in, in);
+      for (long i = 0; i < S(0.5); ++i) REQUIRE(ox.L[i] == oy.L[i] && ox.R[i] == oy.R[i], "case %d: the renders after the two loads differ at %ld", c, i);
+    }
+    if (c == 1) {  // hosts in other locales: a comma, and a two-byte decimal point (critic T-015 M1)
+      int ran = 0;
+      for (const char* loc : {"de_DE.UTF-8", "ar_SA.UTF-8", "fa_IR.UTF-8"}) {
+        if (!std::setlocale(LC_NUMERIC, loc)) continue;
+        ++ran;
+        const std::string tl = saveText(*a);
+        auto z = mk({});
+        const bool ok = restore(*z, tl);
+        const std::string tz = saveText(*z);
+        const bool comma = z->stageState(replace_once(t1, "\nmix ", "\nmix 3,5\nmix_ "));
+        std::setlocale(LC_NUMERIC, "C");
+        REQUIRE(tl == t1, "in %s the state text changed", loc);
+        REQUIRE(ok && tz == t1, "in %s the state did not read back", loc);
+        REQUIRE(!comma, "in %s a decimal comma was accepted", loc);
+      }
+      if (!g_reportedLocales) {
+        std::printf("  REPORT state locales: %d of 3 test locales present here (the C-locale guard is still exercised by every save)\n", ran);
+        g_reportedLocales = true;
+      }
+    }
+    if (c == 2) {  // -0 is written as 0: one patch, one text (critic T-015 L1)
+      auto m = mk({});
+      m->setParam("mix", -0.0);
+      REQUIRE(saveText(*m).find("\nmix 0\n") != std::string::npos, "-0 was not written as 0");
+    }
+  }
+  return true;
+}
+
+// A17: a state saved mid-session, loaded into a fresh instance, renders
+// bit-identically to the original after its reset(): nothing outside the saved
+// state and reset() shapes the sound.
+bool stateComplete(Detail& d) {
+  g_rng = 5;
+  auto a = mk({{"time.sync", 0}, {"time.ms", 80}, {"fb.amount", 70}, {"mod.depthMs", 2}, {"mod.shape", 1}, {"mod.seed", 77}});
+  const long n = S(0.6);
+  Vec in(n);
+  for (auto& v : in) v = 0.3 * noise();
+  run(*a, in, in, {set(S(0.1), "time.ms", 120), set(S(0.2), "fb.amount", 55), set(S(0.3), "io.outGain", -3), set(S(0.4), "route.mode", 1),
+                   set(S(0.45), "filt.out.on", 1), set(S(0.5), "mod.seed", 4242)});
+  const std::string t = saveText(*a);
+  a->reset();
+  auto b = mk({});
+  const char* why = "";
+  REQUIRE(restore(*b, t, &why), "the mid-session state was refused (%s)", why);
+  const auto oa = run(*a, in, in), ob = run(*b, in, in);
+  for (long i = 0; i < n; ++i) REQUIRE(oa.L[i] == ob.L[i] && oa.R[i] == ob.R[i], "the restored instance differs from the reset original at %ld", i);
+  return true;
+}
+
+// A19: the worst case fits 2 KiB; a text of 2 KiB + 1 is refused FIRST, with no
+// allocation; staging a valid state allocates nothing either.
+bool stateSize(Detail& d) {
+  auto w = mk({});
+  for (int i = 0; i < echo::kNumParams; ++i) {  // the longest text per key: a negative value with 17 digits, or the longest label
+    const auto& p = echo::kParams[static_cast<std::size_t>(i)];
+    if (!p.stepped) w->setParam(i, p.min < 0 ? p.min + (p.max - p.min) * (1.0 / 3.0) * 1e-6 : p.min + (p.max - p.min) / 3.0);
+  }
+  w->setParam("time.div", 19);
+  w->setParam("mod.seed", 65535);
+  const std::string worst = saveText(*w);
+  REQUIRE(!worst.empty() && worst.size() <= echo::state::kMaxBytes, "the worst-case state is %zu bytes (budget 2048)", worst.size());
+  std::printf("  REPORT state size: defaults %zu B, worst case %zu B (budget 2048)\n", saveText(*mk({})).size(), worst.size());
+  // No VALID state reaches 2 KiB (the worst case above is far under it), so the
+  // boundary is shown on texts padded with leading zeros on time.ms (a 1.5 KiB
+  // token, which the parser refuses on its own): at exactly 2048 bytes the text
+  // must be refused for something OTHER than its size (the test is >, not >=);
+  // at 2049 it must be refused for its size, FIRST, before any parsing.
+  const std::string base = saveText(*mk({}));
+  const std::size_t at = base.find("\ntime.ms ") + 9;
+  auto padded = [&](std::size_t total) { return base.substr(0, at) + std::string(total - base.size(), '0') + base.substr(at); };
+  auto e = mk({});
+  const std::string at2048 = padded(2048), over = padded(2049);
+  const char *why2048 = "", *whyOver = "", *whyOk = "";
+  alloc_probe::arm();
+  const bool okStaged = e->stageState(base, &whyOk);
+  e->adoptStaged();
+  const bool s2048 = e->stageState(at2048, &why2048);
+  const bool sOver = e->stageState(over, &whyOver);
+  alloc_probe::disarm();
+  REQUIRE(at2048.size() == 2048 && over.size() == 2049, "the padding is wrong (%zu, %zu)", at2048.size(), over.size());
+  REQUIRE(okStaged, "the default state was refused (%s)", whyOk);
+  REQUIRE(!s2048 && std::string_view(why2048) != "over 2 KiB", "a 2048-byte text was refused as oversized: the budget is not inclusive");
+  REQUIRE(!sOver && std::string_view(whyOver) == "over 2 KiB", "the 2049-byte text was refused for `%s`, not its size first", whyOver);
+  REQUIRE(alloc_probe::g_allocs.load() == 0, "staging allocated %ld times", alloc_probe::g_allocs.load());
+  return true;
+}
+
+// A20: a state saved during a ringing tail, ramps in flight and a set latch
+// equals one saved at rest with the same parameters.
+bool stateLiveExcluded(Detail& d) {
+  auto x = mk({{"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 80}, {"mix", 50}});
+  run(*x, impulse(S(0.3), 0, 1.5), zeros(S(0.3)));  // ringing, and an over at the input tap
+  x->setParam("io.outGain", 6);
+  x->setParam("mix", 60);
+  block(*x, zeros(100), zeros(100));  // both 20 ms ramps mid-flight
+  REQUIRE(x->inputMeter().clip && !x->atRest(), "the case is vacuous: no latch, or already at rest");
+  auto y = mk({{"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 80}, {"mix", 60}, {"io.outGain", 6}});
+  REQUIRE(saveText(*x) == saveText(*y), "the state saved while live differs from one saved at rest");
+  return true;
+}
+
+// Undo (RS-6.14 via horde's history): for every one of the 29 keys, restoring a
+// snapshot taken before the key moved gives the byte-identical state and a
+// render bit-identical to a twin that only loaded the snapshot.
+bool stateUndo(Detail& d) {
+  for (int i = 0; i < echo::kNumParams; ++i) {
+    const auto& p = echo::kParams[static_cast<std::size_t>(i)];
+    auto a = mk({{"time.sync", 0}, {"time.ms", 90}, {"fb.amount", 60}, {"mod.depthMs", 1}});
+    const std::string s0 = saveText(*a);
+    const double cur = a->getParam(i);
+    double v = p.stepped ? (cur + 1 > p.max ? p.min : cur + 1) : p.min + (p.max - p.min) * 0.37;
+    if (v == cur) v = p.max;
+    a->setParam(i, v);
+    REQUIRE(saveText(*a) != s0, "%.*s: the move left the state unchanged (vacuous)", static_cast<int>(p.key.size()), p.key.data());
+    const char* why = "";
+    REQUIRE(restore(*a, s0, &why), "%.*s: the snapshot was refused (%s)", static_cast<int>(p.key.size()), p.key.data(), why);
+    REQUIRE(saveText(*a) == s0, "%.*s: undo does not give back the snapshot's bytes", static_cast<int>(p.key.size()), p.key.data());
+    auto twin = mk({});
+    restore(*twin, s0);
+    const Vec in = impulse(S(0.3), 10, 0.5);
+    const auto oa = run(*a, in, in), ot = run(*twin, in, in);
+    for (long k = 0; k < S(0.3); ++k)
+      REQUIRE(oa.L[k] == ot.L[k] && oa.R[k] == ot.R[k], "%.*s: the undone instance renders differently at %ld", static_cast<int>(p.key.size()),
+              p.key.data(), k);
+  }
+  return true;
+}
+
+// All or nothing, and the alias rule: each malformed text is refused and leaves
+// the instance and the staging slot untouched; an alias reads and is written
+// back as the canonical name.
+// A load DURING PLAY (critic T-015 H1): stage + adopt on a ringing instance is
+// exactly a load (D-020: the old repeats fade under their old settings) plus the
+// Device keys through setParam (they ramp), bit for bit, against a twin that
+// does those two things by hand at the same block boundary.
+bool stateAdoptLive(Detail& d) {
+  g_rng = 31;
+  const long n = S(0.8), at = S(0.3);
+  Vec in(n);
+  for (long i = 0; i < S(0.25); ++i) in[static_cast<std::size_t>(i)] = 0.4 * noise();
+  auto a = mk({{"time.sync", 0}, {"time.ms", 90}, {"fb.amount", 75}, {"mix", 50}});
+  auto b = mk({{"time.sync", 0}, {"time.ms", 90}, {"fb.amount", 75}, {"mix", 50}});
+  auto target = mk({{"time.sync", 0}, {"time.ms", 200}, {"fb.amount", 30}, {"mix", 70}, {"io.outGain", -6}});
+  const std::string t = saveText(*target);
+  std::array<echo::KeyValue, echo::kNumParams> kv{};
+  std::size_t nk = 0;
+  for (int i = 0; i < echo::kNumParams; ++i)
+    if (echo::kParams[static_cast<std::size_t>(i)].morph != echo::Morph::Device) kv[nk++] = {echo::kParams[static_cast<std::size_t>(i)].key, target->getParam(i)};
+  const auto oa = run(*a, in, in, {{at, [&t](Echo& x) { x.stageState(t); x.adoptStaged(); }}});
+  const auto ob = run(*b, in, in, {{at, [&](Echo& x) {
+                                     x.loadState(std::span<const echo::KeyValue>(kv.data(), nk));
+                                     x.setParam("io.inGain", target->getParam(echo::kInGain));
+                                     x.setParam("io.outGain", target->getParam(echo::kOutGain));
+                                   }}});
+  REQUIRE(maxAbs(ob.L, at, at + S(0.01)) > 1e-3, "the case is vacuous: the twin has nothing ringing at the load");
+  for (long i = 0; i < n; ++i)
+    REQUIRE(oa.L[i] == ob.L[i] && oa.R[i] == ob.R[i], "an adopt mid-play differs from a load at sample %ld (%.17g vs %.17g)", i, oa.L[i], ob.L[i]);
+  return true;
+}
+
+bool stateRefusals(Detail& d) {
+  auto e = mk({{"fb.amount", 44}});
+  const std::string s = saveText(*e);
+  auto replace = [&](const std::string& from, const std::string& to) {
+    std::string t = s;
+    const auto at = t.find(from);
+    return at == std::string::npos ? std::string("<anchor lost>") : t.replace(at, from.size(), to);
+  };
+  const std::string devIn = "io.inGain 0\n";
+  std::string devUp = replace(devIn, "");
+  devUp.insert(devUp.find('\n') + 1, devIn);
+  const struct { const char* what; std::string text; } bad[] = {
+      {"an unknown key", replace("mix 30\n", "mix 30\nwidth 50\n")},
+      {"a duplicated key", replace("mix 30\n", "mix 30\nmix 30\n")},
+      {"a missing key", replace("mix 30\n", "")},
+      {"out of range", replace("time.ms 375\n", "time.ms 13000\n")},
+      {"a bad label", replace("route.mode stereo\n", "route.mode sideways\n")},
+      {"a division by index", replace("time.div 1/4\n", "time.div 9\n")},
+      {"a fractional seed", replace("mod.seed 1\n", "mod.seed 1.5\n")},
+      {"non-finite", replace("mix 30\n", "mix nan\n")},
+      {"another version", replace("echo-state 1\n", "echo-state 2\n")},
+      {"a Device key in the patch block", devUp},
+      {"a patch key in the device block", replace("mix 30\n", "") + "mix 30\n"},
+      {"no final newline", s.substr(0, s.size() - 1)},
+      {"CRLF", replace("mix 30\n", "mix 30\r\n")},
+      // What a libc's strtod tolerates but the writer never emits (critic T-015 M2):
+      {"a leading +", replace("mix 30\n", "mix +30\n")},
+      {"a tab before the value", replace("mix 30\n", "mix \t30\n")},
+      {"a hex float", replace("mix 30\n", "mix 0x1Ep0\n")},
+      {"a trailing point", replace("mix 30\n", "mix 30.\n")},
+      {"a leading point", replace("mix 30\n", "mix .30e2\n")},
+      {"an underflow", replace("mix 30\n", "mix 1e-400\n")},
+      {"a decimal comma", replace("mix 30\n", "mix 30,5\n")},
+      {"a seed with an exponent", replace("mod.seed 1\n", "mod.seed 1e0\n")},
+      {"a seed with a +", replace("mod.seed 1\n", "mod.seed +1\n")},
+      {"a hex seed", replace("mod.seed 1\n", "mod.seed 0x1\n")},
+  };
+  for (const auto& b : bad) {
+    const char* why = "";
+    REQUIRE(!e->stageState(b.text, &why), "%s was accepted", b.what);
+    REQUIRE(!e->adoptStaged() && saveText(*e) == s, "%s changed the instance or staged something", b.what);
+  }
+  const char* why = "";
+  REQUIRE(restore(*e, replace("time.div 1/4\n", "time.div 1/8D\n"), &why), "the alias 1/8D was refused (%s)", why);
+  REQUIRE(saveText(*e).find("\ntime.div 3/16\n") != std::string::npos, "the alias was not written back as its name 3/16");
+  REQUIRE(e->stageState(s) && !e->stageState(s, &why), "a second stage while one is pending was accepted");
+  e->adoptStaged();
+  return true;
+}
+
 struct Check {
   const char* name;
   bool (*fn)(Detail&);
@@ -1895,6 +2200,17 @@ const std::vector<Check> kChecks = {
      metersTaps, {"tapBeforeGain", "outTapDryOnly", "tapReadsRaw"}},
     {"I/O gain test 7: both latches set on an over (> 1.0, not at 1.0) and hold through silence, reset and a load until cleared",
      ioTest7Latches, {"latchClears", "resetClearsLatch"}},
+    // ---- M3 B2, T-015 ----
+    {"state: version line, every patch key once in manifest order by name, then the [device] block (SPEC §16.2)", stateFormat,
+     {"stateDivByIndex", "stateKeyMissing"}},
+    {"state A18: save -> load -> save byte-identical, values bit-equal, renders identical; also in a comma locale", stateExact, {"stateFloat6g"}},
+    {"state A17: a mid-session state in a fresh instance renders as the original after reset()", stateComplete, {"stateKeyMissing"}},
+    {"state A19: the worst case fits 2 KiB; 2 KiB + 1 refused first; staging allocates nothing", stateSize, {"stateOversizedAccepted"}},
+    {"state A20: saved while ringing, mid-ramp and latched equals saved at rest", stateLiveExcluded, {"stateLatchSerialised"}},
+    {"state undo: for each of the 29 keys, the snapshot restores byte- and bit-identically", stateUndo, {"stateKeyMissing"}},
+    {"state: every malformed text refused whole (strict number grammar), nothing staged; an alias reads and is written back by name",
+     stateRefusals, {"stateAcceptsUnknown"}},
+    {"state: an adopt mid-play is a D-020 load plus the Device keys ramping, bit for bit", stateAdoptLive, {"adoptResets"}},
 };
 
 #ifdef ECHO_PLANTS
@@ -1932,6 +2248,10 @@ bool* plantFlag(std::string_view n) {
       {"latchClears", &latchClears}, {"tapBeforeGain", &tapBeforeGain}, {"prepareRampsIn", &prepareRampsIn},
       {"inGainAfterLoop", &inGainAfterLoop}, {"doubleGain", &doubleGain},
       {"inGainDryOnly", &inGainDryOnly}, {"outTapDryOnly", &outTapDryOnly}, {"tapReadsRaw", &tapReadsRaw}, {"resetClearsLatch", &resetClearsLatch},
+
+      {"stateFloat6g", &stateFloat6g}, {"stateKeyMissing", &stateKeyMissing}, {"stateLatchSerialised", &stateLatchSerialised},
+      {"stateOversizedAccepted", &stateOversizedAccepted}, {"stateDivByIndex", &stateDivByIndex}, {"stateAcceptsUnknown", &stateAcceptsUnknown},
+      {"adoptResets", &adoptResets},
   };
   for (const auto& p : table)
     if (n == p.n) return p.f;
@@ -1997,7 +2317,9 @@ int main(int argc, char** argv) {
                         "followKeepsResidual", "modNoFloorBound", "wakeOffsetFromZero", "tapeLinearHistory", "glideFixedRate",
                         "propsNoTail", "tailWraps32", "paramNoClass", "processReadsAfterWrite", "loadBoundShort",
                         "latchClears", "tapBeforeGain", "prepareRampsIn", "inGainAfterLoop", "doubleGain",
-                        "inGainDryOnly", "outTapDryOnly", "tapReadsRaw", "resetClearsLatch"}) {
+                        "inGainDryOnly", "outTapDryOnly", "tapReadsRaw", "resetClearsLatch",
+                        "stateFloat6g", "stateKeyMissing", "stateLatchSerialised", "stateOversizedAccepted", "stateDivByIndex",
+                        "stateAcceptsUnknown", "adoptResets"}) {
     bool guarded = false;
     for (const auto& c : kChecks)
       for (const char* p : c.plants) guarded = guarded || std::string_view(p) == n;

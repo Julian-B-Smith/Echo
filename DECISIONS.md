@@ -851,3 +851,44 @@ suite now has 56 checks guarding 80 distinct planted faults (M2's 75 plus these 
 blocks (down to n = 1) and a GUI polling at 30–60 Hz, the shown peak is close to one arbitrary block; the latch
 still catches every over. The alternative is a peak held since the GUI last read it, which makes the reader a
 writer: an atomic exchange to zero. That would be a spec change (§16.1, a protected path).
+
+## D-039 — T-015: the saved state, staged and adopted (lead's record, 2026-10-23; for the human's review on batch 2's PR)
+
+**What T-015 built**, to SPEC §16.2 (D-035):
+- **`core/include/echo/state.h`:** the writer and a strict, all-or-nothing parser.
+- **`Echo::saveState`:** writes every key's target, never live state.
+- **`Echo::stageState`:** parses and validates OFF the audio thread into one staging slot. A second stage is refused
+  while one is pending.
+- **`Echo::adoptStaged`:** lands the staged state ON the audio thread between `process()` calls, with no allocation.
+  - The patch keys land through `loadState`, the D-020 load: no ramp-in, and the old repeats fade under their old
+    settings.
+  - The Device keys land through `setParam`, so a restored gain ramps 20 ms mid-play and lands at rest.
+
+Sizes: defaults 460 B, the constructed worst case 616 B (the budget is 2048 B).
+
+**Numbers.** `std::from_chars(double)` is deleted in the dev Mac's libc++, so the writer tries `%.*f` and `%.*g`
+candidates. It keeps the shortest one that the parser reads back bit for bit, preferring fixed on a tie ("30", not
+"3e+01": fewest digits is not shortest text). Both directions run under a thread-local "C" numeric locale
+(`uselocale`). Every token must match a strict grammar: `-?D+(.D+)?([eE][+-]?D+)?`, and `-?D+` for the seed.
+Underflow and overflow are refused, and `-0` reads and writes as `0`.
+
+**Critic (Opus, fresh context): FIX-THEN-SHIP**, from mutant engines and probes. All fixed:
+- **H1:** an adopt was only ever tested on idle instances. A mutant that hard-cut the ringing tail on every load
+  passed. The new `stateAdoptLive` check compares an adopt mid-play bit for bit with a twin that loads and sets the
+  gains by hand; the new plant is `adoptResets`.
+- **M1:** the "locale-proof" claim was false. A two-byte decimal point (ar_SA) produced an unreadable text, and
+  `mix 30,5` loaded in de_DE but not in C. The thread-local C locale and the strict grammar fix both. The check runs
+  three locales where present and reports how many ran, never skipping silently.
+- **M2:** the parser accepted whatever `strtod` does (`+30`, a tab, a hex float, `30.`, `.30e2`, `1e-400`, a seed
+  of `1e0`). Each is now refused, and each is in the refusal check.
+- **M3:** A19's "every factory preset" cannot be checked yet. It is carried into T-021's criteria.
+- **LOW:** `-0`; the THREADING note (`stageState` runs beside `process()`); `strtod` and `printf` may malloc
+  internally (off the audio thread; the comment says so).
+
+**Stated limit.** The A18 render comparison loads two texts already shown equal, so it is a determinism check that
+cannot fail on its own. The byte comparison and the bit-equal values carry A18.
+
+**Open for the human (the critic's question).** When horde's audio is stopped, does it still call `adoptStaged`
+between blocks? If not, a staged load stays pending and every later stage (a second load, an undo) is refused until
+audio runs. The alternative is a later stage replacing a pending one, which needs a different handover (a
+generation counter) to stay safe against an adopt in flight.

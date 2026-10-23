@@ -11,8 +11,9 @@
 // (contract §1.1), each a rename at the call site once FOUNDATIONS rules it:
 //   - process(inL, inR, outL, outR, int n, double bpm): the signature is open
 //     there (Echo's brief echo-002, question 1). Tempo is data, never a clock.
-//   - loadState(span<KeyValue>): the state entry; its arguments are open there
-//     (echo-002, question 2; horde RS-6.9).
+//   - the state entry: saveState / stageState / adoptStaged (T-015, below) and
+//     the older loadState(span<KeyValue>) it lands through; the arguments are
+//     open there (echo-002, question 2; horde RS-6.9).
 //   - latency()/tail()/minBlock()/channels(): the pre-ABI declarations, kept
 //     for the tests; properties() is the ABI's view of the same values.
 //
@@ -41,13 +42,18 @@
 // Output Gain, each the block's peak and a clip latch, published as relaxed
 // atomics once per block.
 //
-// STILL NOT HERE (M3): state stored by name (§16.2; T-015), the Clear action
-// (§16.7; T-037).
+// M3 (T-015): the saved state as text by name (§16.2, echo/state.h), staged off
+// the audio thread and adopted at a block boundary (RS-6.6).
+//
+// STILL NOT HERE (M3): the Clear action (§16.7; T-037).
 //
 // THREADING. One writer: every method is called from one thread at a time
-// (horde's slot serialises them, RS-6.6). The non-finite counters (RS-7.9) and
-// the meter taps (§16.1) are atomics, readable from any other thread: the GUI
-// reads published values, never working buffers (contract §8, RC-8).
+// (horde's slot serialises them, RS-6.6), with two exceptions. stageState may run
+// on another thread BESIDE process() (it touches only the staging slot, handed
+// over by an atomic flag; T-015), and clearMeters() may be called from the GUI.
+// The non-finite counters (RS-7.9) and the meter taps (§16.1) are atomics,
+// readable from any other thread: the GUI reads published values, never working
+// buffers (contract §8, RC-8). saveState stays serialised with process().
 #pragma once
 #include <algorithm>
 #include <array>
@@ -63,6 +69,7 @@
 #include "echo/ftz.h"
 #include "echo/params.h"
 #include "echo/plants.h"
+#include "echo/state.h"
 #include "foundations/fx_operator.h"
 
 // __FINITE_MATH_ONLY__ is always DEFINED by clang (as 0); test its value, or
@@ -504,6 +511,52 @@ class Echo {
   std::uint64_t nonFiniteCount() const { return nonFinite_.load(std::memory_order_relaxed); }
   bool nonFiniteLatched() const { return nonFiniteLatch_.load(std::memory_order_relaxed); }
   void clearLatches() { nonFiniteLatch_.store(false, std::memory_order_relaxed); }
+
+  // ---- saved state (SPEC §16.2, RS-6.6, RS-6.10 – 6.13; T-015) --------------
+  // saveState: any thread that is not running process() concurrently (horde's
+  // main thread). It writes every key's TARGET (never a value mid-ramp) and no
+  // live state (meters, lines, phases: A20), into the caller's buffer, without
+  // allocating. Returns the length, or 0 if cap is too small (state::kMaxBytes
+  // always suffices).
+  std::size_t saveState(char* out, std::size_t cap) const {
+    state::Values v{};
+    for (int i = 0; i < kNumParams; ++i) v[static_cast<std::size_t>(i)] = p_[i];
+    const bool latch = tapIn_.clip.load(std::memory_order_relaxed) || tapOut_.clip.load(std::memory_order_relaxed);
+    return state::write(v, out, cap, latch);
+  }
+  // The load in two steps (RS-6.6). stageState parses and validates OFF the
+  // audio thread (all or nothing; a text over 2 KiB refused first) into one
+  // staging slot; adoptStaged lands it ON the audio thread, between process()
+  // calls, with no allocation. One slot, handed over by an atomic flag: a second
+  // stage while one is pending is refused rather than racing the adopt.
+  bool stageState(std::string_view text, const char** why = nullptr) {
+    if (stagedReady_.load(std::memory_order_acquire)) {
+      if (why) *why = "a staged state is pending";
+      return false;
+    }
+    state::Values v{};
+    if (!state::parse(text, v, why)) return false;
+    staged_ = v;
+    stagedReady_.store(true, std::memory_order_release);
+    return true;
+  }
+  // The patch keys land as a load (D-016, D-020: no ramp-in, the old repeats fade
+  // under their old settings; at rest, straight on). The Device keys are the
+  // INSTANCE's (RS-4.5): restored here, but through setParam, so a gain restored
+  // mid-play ramps its 20 ms like any gain move (B435) and lands at rest.
+  bool adoptStaged() {
+    if (!stagedReady_.load(std::memory_order_acquire)) return false;
+    std::array<KeyValue, kNumParams> kv{};
+    std::size_t n = 0;
+    for (int i = 0; i < kNumParams; ++i)
+      if (kParams[static_cast<std::size_t>(i)].morph != Morph::Device) kv[n++] = {kParams[static_cast<std::size_t>(i)].key, staged_[static_cast<std::size_t>(i)]};
+    if (plant::adoptResets) reset();  // the planted hard cut: the ringing repeats end at the load (critic T-015 H1)
+    loadState(std::span<const KeyValue>(kv.data(), n));
+    for (int i = 0; i < kNumParams; ++i)
+      if (kParams[static_cast<std::size_t>(i)].morph == Morph::Device) setParam(i, staged_[static_cast<std::size_t>(i)]);
+    stagedReady_.store(false, std::memory_order_release);
+    return true;
+  }
 
   // ---- meters (SPEC §16.1, B435, contract RS-4.7; T-014) ---------------------
   // Two taps: directly after Input Gain (before every path and detector) and
@@ -1573,6 +1626,8 @@ class Echo {
   std::atomic<std::uint64_t> nonFinite_{0};
   std::atomic<bool> nonFiniteLatch_{false};
   Tap tapIn_, tapOut_;
+  state::Values staged_{};
+  std::atomic<bool> stagedReady_{false};
 };
 
 // The ABI's checkable half (T-013): a build that drifts from the vendored

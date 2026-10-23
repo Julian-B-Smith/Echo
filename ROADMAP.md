@@ -486,7 +486,10 @@ filings need the human's go-ahead each time.
 - **Out of scope:** horde's mixer page and its feed gating.
 
 ### T-015 — M3: State by name, exact restore, and undo (rows A17–A20; bar row 17)
-- **Status:** open (needs T-011's format ruling).
+- **Status:** done 2026-10-23 (D-039; critic FIX-THEN-SHIP, H1, M1 – M3 and LOWs fixed; trace
+  `traces/2026-10-23-t015-state.md`). A19's "every factory preset" is carried by T-021 (it
+  has no presets to check yet). Open for the human: whether a load can be pending while
+  audio is stopped (D-039).
 - **Scope:** `engine.h` (or a new `core/include/echo/state.h`), `plants.h`, `core_tests.cpp`.
 - **Acceptance criteria:** `saveState` writes the T-011 format; `stageState` parses and
   validates it off the audio thread; `adoptStaged` adopts it at a block boundary without
@@ -595,7 +598,8 @@ filings need the human's go-ahead each time.
   chosen to show the range: a slap, a synced dotted ping-pong, a dark dub loop near
   unity, a modulated chorus-like line, a mid/side wide, a tape-repitch throw, a past-unity
   edge patch. Each passes T-017's validator and T-015's size check and carries up to 8
-  labelled macros. The human picks the final set by listening (T-023).
+  labelled macros. **A19 (carried from T-015, D-039):** a suite check saves every factory
+  preset's state and requires each to be at most 2 KiB, with a planted oversized preset. The human picks the final set by listening (T-023).
 - **Out of scope:** horde's presets lab and its library size (B395/B409).
 
 ### T-022 — M3: The face and expanded view (bar row 16)
