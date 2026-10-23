@@ -720,3 +720,30 @@ What the re-pin means for Echo (the lead's record of the contract's text, no new
   and refuses a `log` curve under `modify`.
 
 Rejected: re-pinning the contract alone (as T-010 was briefed); declaring no actions now.
+
+## D-035 — Spec revision 3: meters, state, presets and macros, the fixed row, the tail mapping, Clear (RATIFIED by poll, 2026-10-23; T-011; cites D-017, D-034)
+
+T-011's seven rulings, put to the human as six polls (rulings 5 and 6 together) against horde's contract as
+re-pinned by D-034. Written into `spec/SPEC.md` §16 (with pointers in §8, §10, §12) and `spec/params.json`
+(`fixedControls`, `actions`). The 29 keys' ranges, defaults and classes are unchanged.
+
+| # | ruling | chosen | rejected |
+|---|---|---|---|
+| 1 | meters | taps after Input Gain and after Output Gain; peak per block; the clip latch sets on \|x\| > 1.0 and holds until cleared | latch at \|x\| ≥ 1.0 (flags a clean full-scale sine) |
+| 2 | state | text, `echo-state 1`, `key value` in manifest order, by name, at target, `[device]` block, ≤ 2 KiB refused before allocation, all or nothing; floats as the shortest decimal that reads back exactly (Bulwark's T-029 shape) | C99 hex floats (exact but unreadable) |
+| 3 | presets and macros | `ModulePreset`; macros bind continuous keys only; the factory bank uses `macroLaw: modify` (Hz keys in octaves), so a macro offsets the preset and the fixed row instead of overriding them | continuous with `set`; any key with `set` |
+| 4 | fixed controls | four: Feedback (`fb.amount`), Tone (`filt.loop.lpHz`), Mod Depth (`mod.depthMs`), Mix (`mix`), all always live | Time, Feedback, Tone, Mix (`time.ms` is dead while synced); none |
+| 5 | the tail mapping | whole samples, rounded up; at or past 2³² − 1 samples, `kInfiniteTail` | clamping to 2³² − 2 (under-declares) |
+| 6 | not declared | `noteContext` (A22 not applicable), `morphPosition` | — |
+| 7 | actions | **declare Clear** (`clear`): at its sample offset the old repeats fade out over 20 ms under the current settings and end, as a load ends them (D-020), with no value landing; a performance event | none for 1.0 (the lead's recommendation, to protect the date while horde's action shape is PROPOSED) |
+
+Consequences:
+- **Ruling 7 went against the lead's recommendation.** Clear costs M3 one more `engine.h` item and a live A23 row,
+  while horde's action delivery (contract §12.6, ADR-267) is PROPOSED and unbuilt in FOUNDATIONS, so Echo's local
+  shim carries it. New queue item **T-037** (B2, after T-015, in sequence on `engine.h`); T-018 maps A23 to its
+  check. If horde's shape changes before 1.0, the shim follows it; the behaviour (§16.7) does not.
+- D-034's "A23 applies only if one is declared" now applies: A23 is live.
+- The fixed row and Clear are new in `params.json`; neither is a parameter, so `check_manifest.py` and the lab's
+  manifest check (which compare `params`) are unaffected. T-016's lock is amended to list them too: horde gives each
+  fixed control a host parameter id by position, so a reordered row is a breaking change.
+- §16.2 accepts §3.1's division aliases on load and writes the name back (T-015 already said so).

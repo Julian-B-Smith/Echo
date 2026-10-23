@@ -8,6 +8,9 @@ defaults of the two keys added by the rulings were ratified with it (D-017). **A
 (§10: rest waits for the wet to fall below −120 dBFS; the tail clock restarts at a hold or a tail change; a load fades
 the old repeats under their old settings), and **2026-10-21 by D-025 and D-026** (§10: the tail clock also restarts
 while a head moves; §7, §10: a seed reseeds only when it changes, and a load restarts the modulation from its seed).
+**Revision 3, RATIFIED 2026-10-23 by poll (D-035):** what rack admission (M3) adds — the meter taps, the saved
+state, module presets and macros, the fixed row, the tail declaration's mapping, the entries not declared, and one
+action, Clear (§16). The 29 keys' ranges, defaults and classes are unchanged.
 
 **What this is.** The behaviour Echo must have, stated so the C++ core (M1–M3) can be built and tested against it.
 The machine-readable half is [`params.json`](params.json): every key, unit, range, default, morph class, rate
@@ -295,7 +298,7 @@ A modulation offset is added to every read head of a line (both heads mid-crossf
 
 - **`io.inGain`, `io.outGain`**: horde's standard exactly (B435, RS-4.6): dB −24 … +24, law 48·(v − ½), exactly unity
   at 0 dB, a 20 ms ramp linear in amplitude, opening at the saved gain, Device class (never in a preset, untouched by
-  a load), meter taps with clip latches after each. Echo owns them (the slot adds none).
+  a load), meter taps with clip latches after each (§16.1). Echo owns them (the slot adds none).
 - **`mix`** 0 – 100 %, **equal-power**: dry = cos(πm/2), wet = sin(πm/2), ramped over 20 ms. Mix 0 is exactly the dry
   signal; mix 100 % is exactly the wet (no cos(π/2) leak).
 
@@ -364,6 +367,8 @@ rule as written) were ratified with the spec (D-017).
 | `changes_image`, `changes_level` | both **true** (ping-pong and mid/side move the image; the wet adds level) (RS-2.4). |
 | `LoadDecl` | **crossfade out, 20 ms** (below). |
 | `morphPosition` | not declared (RS-4.10 is optional; Echo has no costly per-corner design). |
+| `noteContext` | not declared (RS-4.11 is optional; Echo has no use for notes; §16.6). |
+| `TailDecl` | the tail above in whole samples, rounded up; **saturates to `kInfiniteTail`** at or past 2³² − 1 (§16.5). |
 
 **Why that tail.** After the input stops, one pass drains what the input wrote. After that the returning term is at
 most the ceiling times the DC blocker's L1 gain (< 2, the +6 dB) and falls by g per pass (|H_loop| ≤ 1), so n
@@ -415,7 +420,8 @@ budget per corner (RS-6.12).
 
 Echo offers up to 8 macros per preset, ordered and labelled by the preset (ADR-169 A4). It does not resolve them
 itself: horde resolves them through SPEC-MODULE-MACROS §5 (RS-5.5, second case). Nothing is driven by horde's
-intents unless a preset binds it.
+intents unless a preset binds it. What a preset holds, which keys a macro may bind and the factory bank's law:
+§16.3. The fixed row beside the macros: §16.4.
 
 ## 13. Constants
 
@@ -480,3 +486,107 @@ probe reads such jumps as clean and would under-report Echo's time-flip clicks.
 - **Finding on vacuous checks**: once Echo rests, a check driven by an impulse into silence can pass because nothing
   is running. The lab's speed checks are fed a constant non-zero input and require that the gate never fired.
 - M1's C++ invariant suite tests this spec directly (ROADMAP M1); the lab is never its reference.
+
+## 16. Rack admission additions (revision 3, D-035)
+
+Ruled by poll 2026-10-23 (T-011), against horde's contract as re-pinned at `d34cd13` (D-034).
+
+### 16.1 Meter taps (RS-4.6, RS-4.7; A6)
+
+- **Two taps.** *Input*: right after `io.inGain`, before every path and detector. *Output*: right after
+  `io.outGain`, after every path and the tail.
+- **Each tap publishes, once per block:** the block's peak |x| over both channels' samples, and a **clip latch**.
+- **The latch sets on a sample with |x| > 1.0** (over 0 dBFS; a sample at exactly 1.0 is full scale, not a clip) and
+  **holds until horde clears it.**
+- Publishing allocates nothing and takes no lock: the GUI reads published values, never working buffers (contract
+  §8, RC-8). Non-finite input is repaired and counted by the guard (§10), separately; the input tap reads the
+  repaired sample.
+- Peaks and latches are **live state**: never saved (A20).
+
+### 16.2 Saved state (RS-6.10 – 6.12; A17 – A20)
+
+```
+echo-state 1
+mix 30
+time.sync sync
+time.ms 375
+time.div 1/4
+...
+mod.seed 1
+[device]
+io.inGain 0
+io.outGain 0
+```
+
+- **Text.** The first line is the version, `echo-state 1`. Then one `key value` per line, every patch key in
+  manifest order (`params.json`), then a `[device]` line and the Device keys (`io.inGain`, `io.outGain`), saved once
+  per instance, outside every corner (RS-4.5).
+- **Values by name:** stepped keys with labels (`time.sync`, `time.div`, `time.change`, `time.law`,
+  `time.tempoMode`, `route.mode`, `filt.*.on`, `mod.shape`) are written by label, divisions by horde's names (§3.1;
+  an alias is accepted on load and written back as the name); `mod.seed` as a decimal integer.
+- **Each value at its target**, never mid-ramp, so a state saved during a ramp, a ringing tail or a latched clip
+  equals one saved at rest with the same parameters (A20).
+- **Floats: the shortest decimal that reads back exactly**, proven by reading it back as it is written; never
+  `%.6g` (RS-6.11). Save → load → save is byte-identical.
+- **At most 2 KiB** (2048 bytes, the whole text). A larger text is **refused before anything is allocated** (A19).
+- **Loading is all or nothing:** an unknown, missing, duplicated or out-of-range key, a label that is neither the key's
+  label nor a division alias, or a different version refuses the whole text and changes nothing. Out of range is refused, never clamped.
+- Nothing outside the saved state and `reset()` shapes the sound (A17): the 29 keys are the whole patch.
+
+### 16.3 Module presets and macros (SPEC-MODULE-MACROS §4, ADR-251; RS-5.1 – 5.6)
+
+- **Format:** SPEC-MODULE-MACROS §4's `ModulePreset`: `id`, `module: echo`, `internal_defaults` (every patch key, by
+  name as in §16.2), `macroLaw`, and up to 8 `slots`, ordered, each with its `label`, its `bind` map of
+  `key: [lo, hi]` or `[lo, hi, curve]`, and `home` ∈ [0, 1]. **No Device key** appears in a preset.
+- **A macro may bind continuous keys only** (class `continuous`, never `device`). A stepped key through a macro would
+  flip at an arbitrary threshold; the validator refuses a binding on one.
+- **The factory bank uses `macroLaw: modify`** (ADR-251): each binding adds a contribution to the preset's own value
+  (the base, a fixed control's value included, RS-5.3 as amended), clamped to the key's range. For a key in Hz (the
+  six filter cutoffs, `mod.rateHz`) the contribution is in **octaves** (base · 2^Σc). Under `modify`, a `log` curve
+  is refused. A preset from outside the bank may still say `set`.
+- A binding on `time.ms` is inert while `time.sync` is on; that is the key's own behaviour (§3.1), not the macro's.
+
+### 16.4 Fixed controls (RS-5.8)
+
+Echo declares **four**, in this order (also `params.json` → `fixedControls`):
+
+| k | label | key |
+|---|---|---|
+| 1 | Feedback | `fb.amount` |
+| 2 | Tone | `filt.loop.lpHz` |
+| 3 | Mod Depth | `mod.depthMs` |
+| 4 | Mix | `mix` |
+
+All four are always live. Time is not in the row: `time.ms` does nothing while synced and `time.div` is stepped; it
+stays on the face and in the macros. A fixed control is an ordinary parameter: saved in the state (§16.2), present in
+every preset, and in A12's round trip.
+
+### 16.5 The tail declaration's mapping
+
+FOUNDATIONS' `TailDecl` counts samples in 32 bits. Echo's tail (§10) is rounded up to whole samples at the current
+rate; a tail **at or past 2³² − 1 samples** (6.2 h at 192 kHz, reachable at feedback just under unity) **declares
+`kInfiniteTail`**. It never under-declares, and the gate still brings Echo to rest at exact zero.
+
+### 16.6 Not declared
+
+`noteContext` (RS-4.11; A22 not applicable) and `morphPosition` (RS-4.10).
+
+### 16.7 Actions (RS-4.12; A23)
+
+Echo declares **one action** (also `params.json` → `actions`):
+
+| key | label | what it does |
+|---|---|---|
+| `clear` | Clear | ends the repeats |
+
+- **Fired at its sample offset** in the per-block context, before `process`. From that sample the old repeats **fade
+  out over 20 ms under the current settings and end**: the lines and loop state are cleared, exactly as a load ends
+  them (§10, D-020), but **no value lands** and the heads stay where they are. The dry path is untouched; input that
+  arrives during the fade is lost from the line.
+- **A performance event:** not a host parameter, never automated, no history node; the saved state and the patch are
+  unchanged (ADR-267 A1). Only runtime state changes.
+- A second Clear, or a load, during the fade lands nothing new on the fade: it never restarts it (as D-020). A Clear
+  at rest does nothing.
+- **Deterministic:** the same actions at the same offsets give the same output; no action, the output is unchanged
+  (A23's judge). The must-fail control: a shim that applies the action at the block's start instead of its offset.
+- Until FOUNDATIONS rules the action entry, Echo's local shim carries it (contract §12.6, the ABI map).

@@ -172,8 +172,8 @@ commercial delay or borrow its mode names, presets or UI text.
   `engine.h`; M4's core work lands in its own files or after B2, D-027):
   - **B1, the gates (by 2026-10-24):** T-010, T-011, T-012, with T-002's filings under the
     same go-ahead.
-  - **B2, plugging in (2026-10-26 → 11-06):** T-013 → T-014 → T-015 in sequence (all
-    `engine.h`); T-016 beside them (`./verify`, tools).
+  - **B2, plugging in (2026-10-26 → 11-06):** T-013 → T-014 → T-015 → T-037 in sequence
+    (all `engine.h`; T-037 added by D-035); T-016 beside them (`./verify`, tools).
   - **B3, presets and reports (11-09 → 11-20):** T-017, T-018, T-019, T-020 (tools and tests,
     disjoint files); the T-021 bank drafted.
   - **B4, listening (11-23 → 11-27):** T-021 finished, T-022, T-023.
@@ -401,7 +401,9 @@ filings need the human's go-ahead each time.
   the macros spec was brought in by D-034).
 
 ### T-011 — M3: Spec revision 3: what M3 adds to the spec
-- **Status:** open (human gate: `spec/` is protected; ratified by poll).
+- **Status:** done 2026-10-23 (D-035, by poll; SPEC §16, `params.json` `fixedControls` and
+  `actions`; trace `traces/2026-10-23-t011-spec-r3.md`). Ruling 7 declared one action,
+  Clear, which adds T-037.
 - **Scope:** `spec/SPEC.md`, `spec/params.json` if fixed controls are declared; DECISIONS.
 - **Acceptance criteria:** the spec states, each as a ruled line: (1) the meter taps (where they
   sit; peak per block; the clip latch sets on a sample with |x| > 1.0, i.e. over 0 dBFS, and
@@ -494,8 +496,10 @@ filings need the human's go-ahead each time.
 - **Acceptance criteria:** a lock lists every key with its unit, class and stepped labels; a
   gate fails on a renamed, removed or re-classed key and on a new key added without updating the lock, and
   passes clean; the lock's hash is the `module_version` written in every preset (contract
-  §6.2). Also closes T-007's item to compare `rate` and `smoothing`. Plants: a renamed key; a
-  dropped label.
+  §6.2). **Amended by D-035:** the lock also lists the fixed row (in order) and the actions,
+  and the gate fails on a reordered, renamed or dropped fixed control or action. Also closes
+  T-007's item to compare `rate` and `smoothing`. Plants: a renamed key; a dropped label; two
+  fixed controls swapped.
 - **Out of scope:** the date of horde's feature freeze (horde's; the scope list in SPEC §1 is
   frozen on it).
 
@@ -521,7 +525,7 @@ filings need the human's go-ahead each time.
 - **Scope:** `core_tests.cpp`, `plants.h`; a generated `docs/admission.md`.
 - **Acceptance criteria:** `docs/admission.md` lists each row A1–A23 with its check, its plant
   and the result, or "horde's" (A7 "off" is the router's: Echo has no bypass key) or "not
-  declared" (A21, A22; A23 unless T-011 declares an action, D-034), and `./verify` fails if
+  declared" (A21, A22), A23 mapped to T-037's Clear check (D-035), and `./verify` fails if
   it is stale. New checks: A2 at a stress
   preset; A3 with n = 256 added; A4 latency truth (on an impulse and a swept sine, the
   measured delay of the dry path equals the declared 0 samples; plant: a dry path one
@@ -794,6 +798,27 @@ filings need the human's go-ahead each time.
   2. An independent Opus critic review with no open HIGH findings.
   3. M4's gate rows 1–6, each evidenced in the trace.
 - **Out of scope:** any edit inside horde's tree beyond that one path.
+
+### T-037 — M3: the Clear action (RS-4.12, row A23; B2)
+- **Status:** open (ruled by poll 2026-10-23, D-035; after T-015, in sequence on `engine.h`).
+- **Scope:** `core/include/echo/engine.h` (the local shim's per-block action entry, beside
+  `process`), `plants.h`, `core/tests/core_tests.cpp`.
+- **Acceptance criteria (SPEC §16.7):**
+  1. A Clear fired at offset k leaves the output bit-identical to an unfired run before
+     sample k; from k the old repeats fade out over 20 ms (at the rate) under the current
+     settings and end; the lines and loop state are then cleared, the heads stay, and no
+     value lands. The dry path is bit-identical to an unfired run throughout.
+  2. A second Clear, or a load, during the fade never restarts it; a Clear at rest changes
+     nothing.
+  3. The saved state is byte-identical before and after a Clear (a performance event).
+  4. A23: the same actions at the same offsets give bit-identical output on every run, at
+     block sizes 1, 64 and 4096; no action, the output is unchanged.
+  5. Firing allocates nothing and takes no lock (the allocation probe stays green).
+  6. Plants: an action applied at the block's start instead of its offset (A23's must-fail
+     shim); a Clear that cuts with no fade; a Clear that lands the patch's values; a Clear
+     that writes the saved state.
+- **Out of scope:** horde's action delivery and FOUNDATIONS' entry (the shim follows them
+  when they are ruled); any other action.
 
 ## Open questions (blocking — ask the human)
 
