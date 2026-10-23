@@ -171,7 +171,7 @@ commercial delay or borrow its mode names, presets or UI text.
 - **Batches** (one branch and PR each, the human merges; one implementer at a time on
   `engine.h`; M4's core work lands in its own files or after B2, D-027):
   - **B1, the gates (by 2026-10-24):** T-010, T-011, T-012, with T-002's filings under the
-    same go-ahead.
+    same go-ahead. **Done 2026-10-23** (PR #19; D-034 – D-036).
   - **B2, plugging in (2026-10-26 → 11-06):** T-013 → T-014 → T-015 → T-037 in sequence
     (all `engine.h`; T-037 added by D-035); T-016 beside them (`./verify`, tools).
   - **B3, presets and reports (11-09 → 11-20):** T-017, T-018, T-019, T-020 (tools and tests,
@@ -425,11 +425,13 @@ filings need the human's go-ahead each time.
 - **Out of scope:** any change to the 29 keys' ranges, defaults or classes.
 
 ### T-012 — M3: FOUNDATIONS brief, then the vendored, pinned header
-- **Status:** in progress. **The brief is filed** (2026-10-23, `echo-002`, FOUNDATIONS PR #133,
+- **Status:** done 2026-10-23. **The brief is filed** (`echo-002`, FOUNDATIONS PR #133,
   `ball: FOUNDATIONS`, respond by 2026-11-06), with the human's go-ahead by poll. **One change
   from the criteria below, ruled in that poll:** it asks to be *listed* in `not_correspondents`
   as a module inside horde, on FOUNDATIONS #136's Scape precedent, not *registered* as a
-  correspondent. The vendored header and `vendor_gate` (a human gate) remain.
+  correspondent. **The header is vendored** at FOUNDATIONS `301834b` (the bytes Scape pins) and
+  pinned by `vendor_gate`, which catches a planted one-byte edit and an unlisted file every
+  run (D-036). Traces `traces/2026-10-23-filings.md`, `traces/2026-10-23-t012-vendor.md`.
 - **Scope:** FOUNDATIONS' `integrations/echo/brief.md` (a PR touching only that path);
   `core/third_party/foundations/` (Scape's shape: `fx_operator.h` verbatim from a reviewed
   commit, a `MANIFEST` with `commit:` and sha256); `./verify`'s `vendor_gate` (human gate);

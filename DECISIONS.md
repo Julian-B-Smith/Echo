@@ -747,3 +747,24 @@ Consequences:
   manifest check (which compare `params`) are unaffected. T-016's lock is amended to list them too: horde gives each
   fixed control a host parameter id by position, so a reordered row is a breaking change.
 - §16.2 accepts §3.1's division aliases on load and writes the name back (T-015 already said so).
+
+## D-036 — FOUNDATIONS' `fx_operator.h` vendored at `301834b`, pinned by `vendor_gate` (RATIFIED by the human, 2026-10-23; T-012)
+
+The human's instruction: "Vendor fx_operator.h at FOUNDATIONS 301834b in Scape's shape and add vendor_gate to
+./verify with its planted one-byte edit." It covers both human gates: the vendoring and the `./verify` edit.
+
+- **What:** `core/third_party/foundations/include/foundations/fx_operator.h`, verbatim from FOUNDATIONS
+  `301834b` (its `origin/main` on 2026-10-23), and only that file. A `MANIFEST` beside it records `source:`,
+  `commit:` and the upstream and local sha256 (`d60b7eba…`, equal: no private sibling name occurs in it).
+- **The same bytes Scape pins** at FOUNDATIONS `c8e4ccb`: the header has not changed since slice 3 (`1a5995e`).
+  Two horde modules now build against one header, which is the comparison FOUNDATIONS asks for.
+- **`vendor_gate`** (in `./verify fast`, after `intake_gate`): every listed file's sha256 equals its MANIFEST line,
+  and no unlisted file sits beside it. Unlike Scape's gate, it **proves itself every run** on two planted copies in
+  a temp dir: a one-byte edit at offset 2048 (with a `cmp` guard so the plant cannot go vacuous) and an unlisted
+  header. Both must fail. Checked by hand as well: a one-byte edit of the real file turns the gate red.
+- **The header is an unfrozen draft.** `process()` and `loadState()` are open there; Echo's shim carries both,
+  marked DEGRADED (rule 2), and the brief `echo-002` asks about both. Nothing includes the header yet: T-013 (B2)
+  wires the include path and the `static_assert`s.
+- **Re-vendoring is a human gate:** a new commit, both hashes, and a decision citing this one.
+
+Rejected: vendoring `engine_manifest.h` now (`echo-002`'s question 4 asks FOUNDATIONS first).

@@ -111,6 +111,48 @@ intake_gate() {
   return $ok
 }
 
+# Vendored FOUNDATIONS header (T-012, D-036; Scape's vendor_gate, its D-052): each file's
+# sha256 must equal its MANIFEST line and no unlisted file may sit beside it, so a hand
+# edit, a partial re-vendor or a silent upstream copy goes red. vendor_check takes the
+# tree's root so the gate can prove itself on planted copies every run (the charter's
+# must-fail control): a one-byte edit, and an unlisted file. A re-vendor is a human gate.
+vendor_check() {
+  local root="$1" m="$1/MANIFEST" dir="$1/include/foundations" ok=0 h f got n=0
+  [ -f "$m" ] || { echo "verify: vendor — $m missing" >&2; return 1; }
+  while read -r h f; do
+    case "$h" in ''|'#'*|source:|commit:|upstream-sha256) continue ;; esac
+    n=$((n + 1))
+    got=$(shasum -a 256 "$dir/$f" 2>/dev/null | cut -c1-64)
+    [ "$got" = "$h" ] || { echo "verify: vendor — $f does not match its MANIFEST hash" >&2; ok=1; }
+  done < "$m"
+  [ "$n" -gt 0 ] || { echo "verify: vendor — no hashed files in $m" >&2; ok=1; }
+  while IFS= read -r f; do
+    grep -qE "^[0-9a-f]{64}  $f\$" "$m" || { echo "verify: vendor — $f is not pinned in $m" >&2; ok=1; }
+  done < <(cd "$dir" && find . -type f ! -name .DS_Store | sed 's|^\./||' | sort)
+  return $ok
+}
+vendor_gate() {
+  local root=core/third_party/foundations ok=0 t
+  vendor_check "$root" || ok=1
+  t=$(mktemp -d "${TMPDIR:-/tmp}/echo-vendor.XXXXXX") || return 1
+  # Plant 1: one byte of the vendored header changed. The cmp guard keeps the plant from
+  # going vacuous if that byte were ever already the planted one.
+  cp -R "$root/." "$t/a"
+  printf '#' | dd of="$t/a/include/foundations/fx_operator.h" bs=1 seek=2048 conv=notrunc 2>/dev/null
+  if cmp -s "$root/include/foundations/fx_operator.h" "$t/a/include/foundations/fx_operator.h"; then
+    echo "verify: vendor — plant 1 changed nothing (pick another offset)" >&2; ok=1
+  elif vendor_check "$t/a" 2>/dev/null; then
+    echo "verify: vendor — plant 1 NOT caught: a one-byte edit of fx_operator.h passed" >&2; ok=1
+  fi
+  # Plant 2: an unlisted file beside the vendored header.
+  cp -R "$root/." "$t/b"
+  : > "$t/b/include/foundations/unpinned.h"
+  vendor_check "$t/b" 2>/dev/null && { echo "verify: vendor — plant 2 NOT caught: an unlisted header passed" >&2; ok=1; }
+  rm -rf "$t"
+  [ $ok -eq 0 ] && echo "vendor: fx_operator.h pinned; both plants caught"
+  return $ok
+}
+
 # Legal/IP analysis is never tracked (D-014, the human's cross-project rule):
 # it lives in gitignored local/legal/. This fails on the SPECIFIC shapes such a
 # reading leaves behind — patent and registration numbers, trademark-office and
@@ -245,7 +287,8 @@ fast() {
   structure_gate    || ok=1
   manifest_gate     || ok=1
   intake_gate       || ok=1  # intake/ is read-only: pinned bytes
-  legal_gate        || ok=1  # D-014: legal/IP analysis stays in local/legal/
+  vendor_gate       || ok=1  # T-012: the vendored FOUNDATIONS header is the pinned one
+  legal_gate       || ok=1  # D-014: legal/IP analysis stays in local/legal/
   lab_smoke_gate    || ok=1  # Phase A: the listening twin is fit to listen to
   core_gate         || ok=1  # M1: the C++ core's invariant suite, each check proven on its plants
   plan_map_gate     || ok=1  # the plan map still reads ROADMAP.md
