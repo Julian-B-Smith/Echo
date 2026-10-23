@@ -27,8 +27,8 @@ move; `status:` is lifecycle; neither does the other's job.
 
 | provider | file in THEIR tree | what |
 |---|---|---|
-| HYPERSAW (repo `horde`) | `integrations/echo/notice-spinup.md` | we exist; horde is our consumer — draft in `docs/filings/`, **not yet filed** (ROADMAP T-002) |
-| autonomous | `integrations/echo/brief.md` | register Echo in the ecosystem tracks — draft in `docs/filings/`, **not yet filed** (T-002) |
-| FOUNDATIONS | — | deferred until the C++ first touches the FX-operator ABI (survey Q6) |
+| HYPERSAW (repo `horde`) | `integrations/echo/notice-spinup.md` | we exist; horde is our consumer. **Filed 2026-10-23**, horde PR #1201, `ball: none` (T-002) |
+| autonomous | `integrations/echo/brief.md` | register Echo in the ecosystem tracks. **Filed 2026-10-23**, autonomous PR #61, `ball: autonomous`, respond by 2026-11-06 (T-002) |
+| FOUNDATIONS | `integrations/echo/brief.md` | `echo-002`: four ABI questions; listed as a module inside horde. **Filed 2026-10-23**, FOUNDATIONS PR #133, `ball: FOUNDATIONS`, respond by 2026-11-06 (T-012) |
 
 Drafts are kept in `docs/filings/`; the copy in the correspondent's tree is the record.

@@ -372,7 +372,10 @@ commercial delay or borrow its mode names, presets or UI text.
 - **Out of scope:** engine changes.
 
 ### T-002 — Spin-up filings
-- **Status:** open (drafts in `docs/filings/`)
+- **Status:** done 2026-10-23: both filed with the human's go-ahead by poll, refreshed from
+  the 2026-10-19 drafts (horde PR #1201, `ball: none`; autonomous PR #61, `ball: autonomous`,
+  respond by 2026-11-06). The outbound table is updated; merging is each provider's. Trace
+  `traces/2026-10-23-filings.md`.
 - **Scope:** horde's `integrations/echo/notice-spinup.md`; autonomous's
   `integrations/echo/brief.md` (ecosystem-track registration).
 - **Acceptance criteria:** each filed by a PR in the provider's repo touching
@@ -422,7 +425,11 @@ filings need the human's go-ahead each time.
 - **Out of scope:** any change to the 29 keys' ranges, defaults or classes.
 
 ### T-012 — M3: FOUNDATIONS brief, then the vendored, pinned header
-- **Status:** open (outward-facing: the human's go-ahead to file).
+- **Status:** in progress. **The brief is filed** (2026-10-23, `echo-002`, FOUNDATIONS PR #133,
+  `ball: FOUNDATIONS`, respond by 2026-11-06), with the human's go-ahead by poll. **One change
+  from the criteria below, ruled in that poll:** it asks to be *listed* in `not_correspondents`
+  as a module inside horde, on FOUNDATIONS #136's Scape precedent, not *registered* as a
+  correspondent. The vendored header and `vendor_gate` (a human gate) remain.
 - **Scope:** FOUNDATIONS' `integrations/echo/brief.md` (a PR touching only that path);
   `core/third_party/foundations/` (Scape's shape: `fx_operator.h` verbatim from a reviewed
   commit, a `MANIFEST` with `commit:` and sha256); `./verify`'s `vendor_gate` (human gate);
