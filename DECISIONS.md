@@ -768,3 +768,48 @@ The human's instruction: "Vendor fx_operator.h at FOUNDATIONS 301834b in Scape's
 - **Re-vendoring is a human gate:** a new commit, both hashes, and a decision citing this one.
 
 Rejected: vendoring `engine_manifest.h` now (`echo-002`'s question 4 asks FOUNDATIONS first).
+
+## D-037 — T-013: Echo conforms to FOUNDATIONS' FX-operator ABI where the vendored header declares it (lead's record, 2026-10-23; for the human's review on batch 2's PR; one ruling by poll)
+
+**What T-013 built** (`engine.h`, `params.h`, `plants.h`, `core_tests.cpp`, `core/CMakeLists.txt`):
+- `static_assert`s at the end of `engine.h` that `echo::Echo` models `FxOperatorLifecycle` and `FxOperatorParams`.
+  They sit in the header, so every includer (horde included) fails at compile time on drift. Scape puts its asserts
+  in a `.cpp`; the critic judged the header the better place.
+- `Echo::properties()`: latency 0 exact, the tail through `tailDecl32` with `may_change`, `min_block` 1, and a load
+  bound of the 20 ms fade at the rate. Every field is left undeclared before `prepare()`, so `validate()` refuses it
+  (FOUNDATIONS #129).
+- `echo::tailDecl32`: SPEC §16.5's saturation, so a tail at or past 2³² − 1 declares `foundations::kInfiniteTail`.
+- `process()` is in place for `inL == outL`, `inR == outR`, proven bit-identical across routings and block sizes
+  1, 64 and 4096. This settles **T-007's signature item**: the 4-pointer `process` accepts the in-place shape, so
+  the swap is a rename, not a call-site change.
+- The vendored include directory is on `echocore`'s INTERFACE, as Scape has it PUBLIC.
+
+**Readings the lead made (for the human's review):**
+- **OQ #33's two enums are mirrored in `params.h`** (`echo::oq33`), by name and order, `kUndeclared` included,
+  because `engine_manifest.h` is not vendored (`echo-002` question 4). When it is vendored, the mirror becomes a
+  using-declaration.
+- **Device maps to `kContinuous` + `kExcluded`.** SPEC §9 rules only "device = excluded"; the kind is the lead's
+  reading, true while every Device key is a scalar (the two I/O gains in dB). The check now requires each key's
+  mapped kind to match its own `stepped` flag, so a future stepped Device key fails loudly (critic LOW-1). *Open for
+  the human:* ratify `continuous` as Device's kind, or leave it to FOUNDATIONS.
+
+**Ruled by poll, 2026-10-23:** `./verify`'s fast-math guard probe compiles `engine.h` by hand, so it gained
+`-I core/third_party/foundations/include` on both of its compiler calls. Without it the probe could not compile,
+and its "did NOT fire" lines meant nothing. The change restores the gate; it does not weaken it.
+
+**Critic (Opus, fresh context): SHIP**, no HIGH. Fixed:
+- **MED-1:** the load bound was checked only against its own formula. It is now measured against the real fade at
+  four rates, with a new plant, `loadBoundShort`.
+- **MED-2:** T-013's own tail case (99.99 %, 12 s, 192 kHz) now runs first and catches the wrap plant itself. A
+  plain narrowing maps 2³² − 1 and INT64_MAX to `0xFFFFFFFF` by coincidence. The tail figure is about 3.3e11
+  samples, not 1.9e14.
+- **LOW-1** (above); **LOW-2:** the two `kInfiniteTail` names are documented where they meet; **LOW-3:** the
+  in-place contract is stated on `process()`; **LOW-5:** the stale first line is fixed.
+
+**Not acted on, reported:** LOW-4, a fleet item for horde. Echo and Scape each put a copy of
+`foundations/fx_operator.h` on horde's include path. Today the sha256s match. If the two pins ever diverge, whichever
+directory comes first wins in horde's build, and each module's own `vendor_gate` proves nothing there.
+
+Plants added: `propsNoTail`, `tailWraps32`, `paramNoClass`, `processReadsAfterWrite`, `loadBoundShort`. The core
+suite now has 56 checks guarding 80 distinct planted faults (M2's 75 plus these 5); `echo_plants` prints 87
+"plant fires" lines, because some plants are guarded by more than one check.

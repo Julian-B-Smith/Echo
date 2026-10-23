@@ -123,6 +123,12 @@ ECHO_PLANT(viewGenIndexOffByOne) // the spectrum strip draws generation n+1 as g
 ECHO_PLANT(irCancelKeepsSlot)    // a cancelled render stays a valid, freshest slot and pushes complete renders out (critic B4-2 M2)
 ECHO_PLANT(irPublishesEmpty)     // a request is shown before anything is rendered: the screen blanks on every change (critic B4-2 M3)
 ECHO_PLANT(viewUnrenderedIsZero) // a column past what is rendered reads as exact zero: a partial frame draws an ended tail (critic B4-2 M4)
+// ---- M3, B2 (T-013: the ABI and the declarations) ----
+ECHO_PLANT(propsNoTail)          // properties() leaves the tail undeclared (a forgotten field, FOUNDATIONS #129)
+ECHO_PLANT(tailWraps32)          // the 64-bit tail is narrowed to TailDecl's 32 bits and wraps (SPEC §16.5)
+ECHO_PLANT(paramNoClass)         // the Device class maps to no OQ #33 class (RS-2.2)
+ECHO_PLANT(processReadsAfterWrite) // outputs cleared before the input is read: in place, the input is lost
+ECHO_PLANT(loadBoundShort)       // properties() declares half the real load fade (critic T-013 MED-1)
 }  // namespace echo::plant
 
 #undef ECHO_PLANT

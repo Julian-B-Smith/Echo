@@ -15,7 +15,10 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 add_library(echocore INTERFACE)
-target_include_directories(echocore INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+# third_party/foundations: FOUNDATIONS' FX-operator header, vendored and pinned
+# (T-012, D-036; Scape's shape). engine.h includes it for the concepts T-013 asserts.
+target_include_directories(echocore INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include
+                                              ${CMAKE_CURRENT_SOURCE_DIR}/third_party/foundations/include)
 target_compile_features(echocore INTERFACE cxx_std_20)
 # No fp-contract flag here: an INTERFACE flag would change the numerics of every
 # horde translation unit that links echocore (critic M7). The header scopes it

@@ -350,8 +350,9 @@ commercial delay or borrow its mode names, presets or UI text.
 - **Scope:** `core/`, `tools/check_manifest.py`.
 - **Items:** a check that cutoff glides take 10 ms (an instant glide survives the
   suite); `check_manifest.py` to compare `rate` and `smoothing` too (the C++ table
-  has neither yet); the ABI shim's 4-pointer `process` vs the shims' in-place L/R
-  (a call-site change, not a rename, at M3); why GCC's pragma-less probe render
+  has neither yet); ~~the ABI shim's 4-pointer `process` vs the shims' in-place L/R~~
+  (**settled 2026-10-23 by T-013, D-037:** in place is proven bit-identical, so the swap is a
+  rename); why GCC's pragma-less probe render
   stays bit-identical despite 153 fused ops in `process` (D-022).
 - **Acceptance criteria:** each item lands with a planted control, or is ruled out
   in DECISIONS.
@@ -447,7 +448,9 @@ filings need the human's go-ahead each time.
 - **Out of scope:** waiting for the answer: B2 proceeds on the draft (rule 2).
 
 ### T-013 — M3: ABI conformance and the declarations (row A1)
-- **Status:** open (needs T-012's header and T-011's ruling on the tail mapping).
+- **Status:** done 2026-10-23 (D-037; critic SHIP, its MED and LOW findings fixed but one fleet
+  item reported; trace `traces/2026-10-23-t013-abi.md`). Settles T-007's signature item.
+  Open for the human: Device's OQ #33 kind (`continuous`, the lead's reading).
 - **Scope:** `core/include/echo/engine.h`, `plants.h`, `core/tests/core_tests.cpp`.
 - **Acceptance criteria:** `static_assert` that `echo::Echo` models FOUNDATIONS'
   `FxOperatorLifecycle` and `FxOperatorParams`; `properties()` returns an `OperatorProperties`

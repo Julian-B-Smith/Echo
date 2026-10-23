@@ -1,12 +1,20 @@
-// echo/engine.h — Echo's stereo delay core (M1 + M2), behind a local stand-in for
-// FOUNDATIONS' FX-operator ABI.
+// echo/engine.h — Echo's stereo delay core (M1 + M2), conforming to FOUNDATIONS'
+// FX-operator ABI where the vendored header declares it, a local shim elsewhere.
 //
-// DEGRADED AND TEMPORARY SHIM. FOUNDATIONS has not frozen the ABI (OQ #32), so
-// this mirrors the shape horde already admits from Bulwark's shim (contract
-// §1.1): prepare(double, int), reset(), process(double* L/R, int n), setParam by
-// key or by a resolved handle, loadState(span), latency/tail/minBlock/channels.
-// process() also takes the host tempo for the block (Sluice's shape): tempo is
-// data, never a clock. The swap to the real header is a rename at the call site.
+// THE ABI (M3 T-013). Echo models FOUNDATIONS' FX-operator concepts from the
+// vendored, UNFROZEN header (core/third_party/foundations, D-036): the lifecycle
+// prepare(double, int) / reset() and the parameter entry resolve(address) ->
+// handle, setParam(handle, v), both static_assert'ed at the end of this file;
+// properties() reports an OperatorProperties that passes validate() once
+// prepared. What the header does NOT declare yet stays a DEGRADED, TEMPORARY
+// SHIM (INTEGRATIONS rule 2), in the shape horde already admits from Bulwark's
+// (contract §1.1), each a rename at the call site once FOUNDATIONS rules it:
+//   - process(inL, inR, outL, outR, int n, double bpm): the signature is open
+//     there (Echo's brief echo-002, question 1). Tempo is data, never a clock.
+//   - loadState(span<KeyValue>): the state entry; its arguments are open there
+//     (echo-002, question 2; horde RS-6.9).
+//   - latency()/tail()/minBlock()/channels(): the pre-ABI declarations, kept
+//     for the tests; properties() is the ABI's view of the same values.
 //
 // SCOPE (ROADMAP M1). Built to spec/SPEC.md revision 2: the two 12 s lines with
 // 4-point Catmull-Rom reads (D-004), free and synced time with L/R offsets and
@@ -29,8 +37,9 @@
 // mod.seed), depth limited by the curve's slope and the write head, the offset
 // slew-limited to 0.25 sample/sample, 250 ms ramps, seeded switches.
 //
-// STILL NOT HERE (M3): meters with clip latches (§8, B435), the FOUNDATIONS ABI
-// swap, state stored by name. Only the non-finite count and latch exist.
+// STILL NOT HERE (M3): meters with clip latches (§16.1, B435; T-014), state stored
+// by name (§16.2; T-015), the Clear action (§16.7; T-037). Only the non-finite
+// count and latch exist.
 //
 // THREADING. One writer: every method is called from one thread at a time
 // (horde's slot serialises them, RS-6.6). Only the non-finite counters are
@@ -50,6 +59,7 @@
 #include "echo/ftz.h"
 #include "echo/params.h"
 #include "echo/plants.h"
+#include "foundations/fx_operator.h"
 
 // __FINITE_MATH_ONLY__ is always DEFINED by clang (as 0); test its value, or
 // this guard fires on every clean build.
@@ -75,8 +85,27 @@
 
 namespace echo {
 
-// FOUNDATIONS' TailDecl sentinel stand-in (RS-7.3): "never ends".
+// The engine's own "never ends" (RS-7.3). The engine counts its tail in 64 bits;
+// tailDecl32 below maps it onto FOUNDATIONS' 32-bit TailDecl. TWO NAMES MEET in
+// this header: echo::kInfiniteTail (int64 max, what tail() returns) and
+// foundations::kInfiniteTail (uint32 max, what properties().tail holds). Inside
+// namespace echo an unqualified kInfiniteTail is THIS one, so comparing a
+// TailDecl against it is silently always false: qualify foundations:: there.
 inline constexpr std::int64_t kInfiniteTail = std::numeric_limits<std::int64_t>::max();
+
+// SPEC §16.5 (D-035): FOUNDATIONS' TailDecl counts samples in 32 bits. A tail at
+// or past 2^32 - 1 samples (6.2 h at 192 kHz, reachable at feedback just under
+// unity) declares foundations::kInfiniteTail: saturating never under-declares,
+// and the gate still brings Echo to rest at exact zero. A plain narrowing would
+// WRAP, and a host would plan for a short tail and cut a ringing loop (the
+// planted tailWraps32). A negative count is a bug upstream; it saturates too,
+// the conservative reading. Not constexpr: the plant is a runtime flag in
+// echo_plants.
+inline std::uint32_t tailDecl32(std::int64_t t) {
+  if (plant::tailWraps32) return static_cast<std::uint32_t>(t);
+  if (t < 0 || t >= static_cast<std::int64_t>(foundations::kInfiniteTail)) return foundations::kInfiniteTail;
+  return static_cast<std::uint32_t>(t);
+}
 
 struct KeyValue {
   std::string_view key;
@@ -241,12 +270,20 @@ class Echo {
   // ---- process --------------------------------------------------------------
   // bpm: the host tempo for THIS block; <= 1 falls back to 120. Within the block
   // it is interpolated per sample from the previous block's value (§3.3).
+  // IN PLACE is allowed: inL == outL and inR == outR (tested, T-013). Any other
+  // overlap (partial, or crossed: inL == outR) is not.
   void process(const double* inL, const double* inR, double* outL, double* outR, int n, double bpm) {
     if (!prepared_ || n <= 0) {
       for (int i = 0; i < n; ++i) outL[i] = outR[i] = 0.0;
       return;
     }
     const FtzScope ftz;
+    // The planted in-place hazard (T-013): outputs cleared at the top of the
+    // block, before the input is read. Out of place it changes nothing; in place
+    // (inL == outL) it silences the input. The real loop reads sample i's input
+    // before it writes sample i's output, and never reads input after that.
+    if (plant::processReadsAfterWrite)
+      for (int i = 0; i < n; ++i) outL[i] = outR[i] = 0.0;
     if (plant::allocInProcess) {
       std::vector<double> scratch(8, inL[0]);  // the planted audio-thread allocation
       outL[0] = scratch[0] * 0.0;
@@ -413,6 +450,24 @@ class Echo {
   // Samples until the instance is at rest once the input stops (§10, §12.1's
   // reading): (n+2)·T_max + 0.25 s for g < 1, kInfiniteTail for g >= 1.
   std::int64_t tail() const { return tailN_; }
+
+  // FOUNDATIONS' view of the declarations for THIS prepared configuration
+  // (fx_operator.h; horde row A1). Before prepare() every field is left
+  // undeclared, so validate() refuses it: a forgotten declaration must be an
+  // absence, never a confident 0 (FOUNDATIONS #129). Latency 0, exact (nothing
+  // is buffered ahead, §10); the tail mapped by tailDecl32, may_change (it
+  // follows feedback, time and depth); min_block 1 (bit-identical down to one
+  // sample, §10); the load bound is the 20 ms fade-out at this rate (D-020),
+  // the same count the engine fades over.
+  foundations::OperatorProperties properties() const {
+    foundations::OperatorProperties p;
+    if (!prepared_) return p;
+    p.latency = foundations::LatencyDecl{0, 0.0, foundations::ResidualSign::kNone};
+    if (!plant::propsNoTail) p.tail = foundations::TailDecl{tailDecl32(tailN_), true};
+    p.min_block = 1u;
+    p.load = foundations::LoadDecl{static_cast<std::uint32_t>(plant::loadBoundShort ? rampN_ / 2 : rampN_)};
+    return p;
+  }
 
   // ---- reads for the slot, the screen and the tests -------------------------
   bool atRest() const { return idle_; }
@@ -1444,6 +1499,11 @@ class Echo {
   std::atomic<std::uint64_t> nonFinite_{0};
   std::atomic<bool> nonFiniteLatch_{false};
 };
+
+// The ABI's checkable half (T-013): a build that drifts from the vendored
+// header's concepts fails here, in every includer, not in a test.
+static_assert(foundations::FxOperatorLifecycle<Echo>, "echo::Echo must model FOUNDATIONS' FxOperatorLifecycle");
+static_assert(foundations::FxOperatorParams<Echo>, "echo::Echo must model FOUNDATIONS' FxOperatorParams");
 
 }  // namespace echo
 

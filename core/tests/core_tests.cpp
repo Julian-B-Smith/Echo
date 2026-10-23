@@ -1,4 +1,4 @@
-// core_tests.cpp — Echo's invariant suite, M1 + M2 (ROADMAP M1, M2; SPEC revision 2).
+// core_tests.cpp — Echo's invariant suite, M1 + M2 + M3 (ROADMAP M1 – M3; SPEC revision 3).
 //
 // ONE SOURCE, TWO BINARIES (core/CMakeLists.txt):
 //   echo_tests   built WITHOUT ECHO_PLANTS: every plant is constexpr false, so
@@ -1493,6 +1493,123 @@ bool clickSweep(Detail& d) {
 
 // ---- the registry ---------------------------------------------------------------
 
+// ---- M3 B2, T-013: FOUNDATIONS' FX-operator ABI and the declarations (row A1) ----
+
+// properties() passes the vendored header's validate() once prepared, at every
+// rate horde runs, and is refused before prepare(): a forgotten declaration is
+// an absence (FOUNDATIONS #129). The values are the spec's (§10, §16.5).
+bool abiProperties(Detail& d) {
+  {
+    Echo fresh;
+    REQUIRE(!fresh.properties().validate(), "an unprepared instance's properties() validated");
+  }
+  for (double sr : {44100.0, 48000.0, 96000.0, 192000.0}) {
+    auto e = mk({{"time.sync", 0}, {"time.ms", 250}, {"fb.amount", 50}}, sr);
+    const auto p = e->properties();
+    const auto v = p.validate();
+    REQUIRE(static_cast<bool>(v), "validate() refused at %.0f Hz (violation %d)", sr, static_cast<int>(v.violation));
+    REQUIRE(p.latency->samples == 0 && p.latency->residual == 0.0 && p.latency->sign == foundations::ResidualSign::kNone,
+            "latency at %.0f Hz is not an exact 0", sr);
+    REQUIRE(p.tail->may_change, "tail.may_change is false at %.0f Hz (the tail follows feedback, time and depth)", sr);
+    REQUIRE(static_cast<std::int64_t>(p.tail->samples) == e->tail(), "tail %u != the engine's %lld at %.0f Hz", p.tail->samples,
+            static_cast<long long>(e->tail()), sr);
+    REQUIRE(p.min_block && *p.min_block == 1u, "min_block is not 1 at %.0f Hz", sr);
+    // The bound against the REAL fade (critic T-013 MED-1): the formula above
+    // cannot catch a fade that outlasts it. Ringing repeats, a load, then exact
+    // zero from the declared bound on, and sound just before it.
+    REQUIRE(p.load, "no load bound declared at %.0f Hz", sr);
+    auto r = mk({{"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 80}, {"mix", 100}}, sr);
+    const long n = S(1.0, sr), at = S(0.5, sr), b = static_cast<long>(p.load->transition_samples);
+    const std::array<echo::KeyValue, 1> patch{{{"fb.amount", 30}}};
+    const auto o = run(*r, impulse(n), zeros(n), {{at, [&patch](Echo& x) { x.loadState(patch); }}});
+    REQUIRE(maxAbs(o.L, at + b) == 0.0, "at %.0f Hz the load's old audio still sounds %.3g after the declared %ld samples", sr,
+            maxAbs(o.L, at + b), b);
+    REQUIRE(maxAbs(o.L, at + b - S(0.002, sr), at + b) > 0.0, "at %.0f Hz the load ended well before its declared bound", sr);
+    const auto fade = static_cast<std::uint32_t>(std::lround(0.020 * sr));
+    REQUIRE(p.load && p.load->transition_samples == fade, "load bound %u, expected the 20 ms fade = %u at %.0f Hz",
+            p.load ? p.load->transition_samples : 0u, fade, sr);
+  }
+  auto held = mk({{"fb.amount", 100}});
+  REQUIRE(held->properties().tail->samples == foundations::kInfiniteTail, "a held loop (feedback 100 %%) does not declare kInfiniteTail");
+  return true;
+}
+
+// SPEC §16.5: the 64-bit tail maps onto TailDecl's 32 bits by saturating. T-013's
+// own case FIRST (critic T-013 MED-2): 99.99 % feedback, 12 s, 192 kHz, where the
+// engine's tail is ~3.3e11 samples (n = 145 099 passes of ~12 s) and a narrowing
+// would wrap to a short tail. Then the boundary and past it. (A plain narrowing
+// maps 2^32 - 1 and INT64_MAX to 0xFFFFFFFF by coincidence, so those two cannot
+// see the plant; the engine case and 2^32 + 5 can.)
+bool abiTail32(Detail& d) {
+  using foundations::kInfiniteTail;
+  constexpr std::int64_t kMax32 = 0xFFFFFFFFLL;
+  {
+    auto e = mk({{"time.sync", 0}, {"time.ms", 12000}, {"fb.amount", 99.99}}, 192000.0);
+    REQUIRE(e->tail() > kMax32, "the case is vacuous: the engine tail %lld fits 32 bits", static_cast<long long>(e->tail()));
+    const auto p = e->properties();
+    REQUIRE(p.tail && p.tail->samples == kInfiniteTail, "99.99 %%, 12 s, 192 kHz declares %u samples, not kInfiniteTail",
+            p.tail ? p.tail->samples : 0u);
+  }
+  REQUIRE(echo::tailDecl32(0) == 0u && echo::tailDecl32(48000) == 48000u, "small tails are not passed through");
+  REQUIRE(echo::tailDecl32(kMax32 - 1) == 0xFFFFFFFEu, "2^32 - 2 is not passed through");
+  REQUIRE(echo::tailDecl32(kMax32) == kInfiniteTail, "2^32 - 1 does not declare kInfiniteTail");
+  REQUIRE(echo::tailDecl32(kMax32 + 6) == kInfiniteTail, "2^32 + 5 maps to %u, not kInfiniteTail", echo::tailDecl32(kMax32 + 6));
+  REQUIRE(echo::tailDecl32(echo::kInfiniteTail) == kInfiniteTail, "the engine's own infinity is not kInfiniteTail");
+  return true;
+}
+
+// RS-2.2: every parameter has an OQ #33 class (both fields declared), and the
+// local enum maps one to one: distinct local classes never share a pair.
+bool abiParamClasses(Detail& d) {
+  using K = echo::oq33::MorphKind;
+  using M = echo::oq33::MorphParticipation;
+  for (const auto& p : echo::kParams) {
+    const auto c = echo::oq33Class(p.morph);
+    REQUIRE(c.kind != K::kUndeclared && c.participation != M::kUndeclared, "%.*s has no OQ #33 class",
+            static_cast<int>(p.key.size()), p.key.data());
+    REQUIRE((c.participation == M::kExcluded) == (p.morph == echo::Morph::Device), "%.*s: excluded iff Device is broken",
+            static_cast<int>(p.key.size()), p.key.data());
+    // The mapped kind must match the key's own shape (critic T-013 LOW-1): Device
+    // maps to kContinuous by the lead's reading (SPEC §9 rules only "excluded"),
+    // which is right only while every Device key is a scalar.
+    REQUIRE((c.kind == K::kStepped) == p.stepped, "%.*s: kind %s but the key is %s", static_cast<int>(p.key.size()), p.key.data(),
+            c.kind == K::kStepped ? "stepped" : "continuous", p.stepped ? "stepped" : "a scalar");
+  }
+  const echo::Morph all[] = {echo::Morph::Continuous, echo::Morph::Jump, echo::Morph::Device};
+  for (auto a : all)
+    for (auto b : all) {
+      const auto ca = echo::oq33Class(a), cb = echo::oq33Class(b);
+      REQUIRE(a == b || ca.kind != cb.kind || ca.participation != cb.participation, "two local classes share one OQ #33 pair");
+    }
+  return true;
+}
+
+// process() is safe in place (inL == outL, inR == outR): bit-identical to the
+// same render out of place, in every routing, at block sizes 1, 64 and 4096,
+// through a wake from rest. Settles T-007's signature item.
+bool abiInPlace(Detail& d) {
+  for (int route = 0; route < 3; ++route)
+    for (int block : {1, 64, 4096}) {
+      g_rng = 7;
+      const long n = S(0.5);
+      Vec inL = zeros(n), inR = zeros(n);
+      for (long i = S(0.05); i < S(0.3); ++i) { inL[i] = 0.5 * noise(); inR[i] = 0.5 * noise(); }
+      auto a = mk({{"route.mode", static_cast<double>(route)}, {"time.sync", 0}, {"time.ms", 40}, {"fb.amount", 60}, {"mix", 50}});
+      auto b = mk({{"route.mode", static_cast<double>(route)}, {"time.sync", 0}, {"time.ms", 40}, {"fb.amount", 60}, {"mix", 50}});
+      const Out ref = run(*a, inL, inR, {}, 120.0, [block](long) { return block; });
+      Vec L = inL, R = inR;
+      for (long pos = 0; pos < n; pos += block) {
+        const int len = static_cast<int>(std::min<long>(block, n - pos));
+        b->process(L.data() + pos, R.data() + pos, L.data() + pos, R.data() + pos, len, 120.0);
+      }
+      REQUIRE(maxAbs(ref.L) > 0.01, "the case is vacuous: no output (route %d, block %d)", route, block);
+      for (long i = 0; i < n; ++i)
+        REQUIRE(L[i] == ref.L[i] && R[i] == ref.R[i], "in place differs at sample %ld (route %d, block %d): %.17g vs %.17g", i, route,
+                block, L[i], ref.L[i]);
+    }
+  return true;
+}
+
 struct Check {
   const char* name;
   bool (*fn)(Detail&);
@@ -1564,6 +1681,12 @@ const std::vector<Check> kChecks = {
      {"tempoModeIgnored", "followNoCap"}},
     {"click metric (M2 gate, s fixed at 2.25): sweeps, tempo sweeps and single moves under 2.5 and inside the speed invariants; a planted click over",
      clickSweep, {"integerRead", "blockSteppedD", "bareJump", "noLawCap"}},
+    // ---- M3 B2, T-013 ----
+    {"ABI: properties() validates after prepare at 44.1/48/96/192 kHz (latency 0, tail, min_block 1, load 20 ms) and is refused before",
+     abiProperties, {"propsNoTail", "loadBoundShort"}},
+    {"ABI: the tail saturates onto TailDecl's 32 bits (kInfiniteTail at 2^32 - 1 and past; 99.99 %, 12 s, 192 kHz)", abiTail32, {"tailWraps32"}},
+    {"ABI: every parameter maps one to one onto OQ #33's MorphKind + MorphParticipation (RS-2.2)", abiParamClasses, {"paramNoClass"}},
+    {"ABI: process() in place is bit-identical to out of place (3 routings, blocks 1/64/4096)", abiInPlace, {"processReadsAfterWrite"}},
 };
 
 #ifdef ECHO_PLANTS
@@ -1596,6 +1719,8 @@ bool* plantFlag(std::string_view n) {
       {"tempoStealsKeyMove", &tempoStealsKeyMove}, {"followNoTrackInFade", &followNoTrackInFade}, {"followKeepsResidual", &followKeepsResidual},
       {"modNoFloorBound", &modNoFloorBound}, {"wakeOffsetFromZero", &wakeOffsetFromZero}, {"tapeLinearHistory", &tapeLinearHistory},
       {"glideFixedRate", &glideFixedRate},
+      {"propsNoTail", &propsNoTail}, {"tailWraps32", &tailWraps32}, {"paramNoClass", &paramNoClass},
+      {"processReadsAfterWrite", &processReadsAfterWrite}, {"loadBoundShort", &loadBoundShort},
   };
   for (const auto& p : table)
     if (n == p.n) return p.f;
@@ -1658,7 +1783,8 @@ int main(int argc, char** argv) {
                         "shapeInstant", "modDepthUnlimited", "noLawCap", "noFallback", "tapeNoHistory", "expLawLinear",
                         "tempoModeIgnored", "followNoCap", "integerRead", "blockSteppedD", "tailClockIgnoresMotion",
                         "seedResendRestarts", "loadKeepsModState", "tempoStealsKeyMove", "followNoTrackInFade",
-                        "followKeepsResidual", "modNoFloorBound", "wakeOffsetFromZero", "tapeLinearHistory", "glideFixedRate"}) {
+                        "followKeepsResidual", "modNoFloorBound", "wakeOffsetFromZero", "tapeLinearHistory", "glideFixedRate",
+                        "propsNoTail", "tailWraps32", "paramNoClass", "processReadsAfterWrite", "loadBoundShort"}) {
     bool guarded = false;
     for (const auto& c : kChecks)
       for (const char* p : c.plants) guarded = guarded || std::string_view(p) == n;
