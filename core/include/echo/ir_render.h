@@ -74,6 +74,13 @@
 
 namespace echo {
 
+// Where the planted allocation's pointer escapes (irAllocsInRender, test-only).
+// An allocation whose memory is never observed may be ELIDED by the optimiser
+// (C++14 [expr.new]; libstdc++'s allocator permits it): GCC did so on Linux CI
+// once batch 2 changed the inlining, and the plant went vacuous (2026-10-24).
+// A store through a volatile pointer is an observable side effect.
+inline const double* volatile g_irPlantSink = nullptr;
+
 inline constexpr double kIrLevelDb = -20.0;  // the display's stated input level
 inline constexpr int kIrBlock = 512;          // render block (any block renders bit-identically)
 
@@ -179,6 +186,7 @@ class IrRenderer {
     if (!preparedFor(r.sampleRate) || r.length < 0) return false;
     if (plant::irAllocsInRender) {  // the planted allocation (the service, T-031, preallocates everything)
       std::vector<double> scratch(8, 0.0);
+      g_irPlantSink = scratch.data();
       a_ = scratch[0];
     }
     if (plant::irSeedAfterReset) e_.reset();  // the pre-critic order
