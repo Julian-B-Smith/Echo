@@ -1,11 +1,12 @@
 # intake/ pin — horde's copies as handed over 2026-10-19 (HYPERSAW at 4d2288f).
 # sha256  path. Read-only here; a re-pin is a human gate (./verify intake_gate).
-75fb85fa892b16ddc0cf40250ad0704482e4775c031e90fe9e0f93484742cc02  SPEC-MODULE-MACROS.md
+# Re-pinned 2026-10-23 by poll (D-034): rack-slot-contract.md and SPEC-MODULE-MACROS.md at HYPERSAW d34cd13.
+c8b7627b299d44531788533570e716b7e671efd977ff43ee230cc76a316653e7  SPEC-MODULE-MACROS.md
 a0aeba287b68e1525db1220ade069d5a4ef5b0091a1b6c2b543d104b32651439  legacy/ADR-142-standard-delay.md
 43e88e93a2526cbe3350c855958e7eb3215e4459b78fa5fc4bdb6f236ff1501e  legacy/delay_check.cpp
 00bc1c119c61404d3d03a91e75780f1854fb1c0c4cd21934de0bc5b708d96cb3  legacy/delay_core.h
 4b90255ac9f53ea3ee95941c50a38991c086b980c4b5393b26695bed531fef51  legacy/swarm-time-lab.html
 d3cebde507f4c6756079713b664d3e47c7a55ce83c8c0c539f9ef5ca1f4142ae  module-1.0-bar.md
 00df3b024778fe13b1a287715bee2ad6dd6119ea97c6c0193207cc96bc1abec8  module-io-gain.md
-945108a733c7a4b0941ac20523e523bdc3672da34e53c4c217490182596c6374  rack-slot-contract.md
+0a4cbbf89b61a2568f380f54957047fcfb1f0b202651a8c4f725fb36577bdee0  rack-slot-contract.md
 f5e88f4b3091e709ab9f37057a548793fd4964fda8c5fa237ccbad5c8593c726  tempo-divisions.md

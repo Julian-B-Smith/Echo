@@ -1,0 +1,12 @@
+# Vendored from FOUNDATIONS — do not edit these files here (ROADMAP T-012, D-036; Scape's
+# shape, its D-052). Re-vendoring is a human gate: copy core/include/foundations/<file>
+# from FOUNDATIONS at a reviewed commit, update `commit:` and both hashes, and record it in
+# DECISIONS. ./verify's vendor_gate checks that the LOCAL file's sha256 equals the first field
+# of its line below, and that no unlisted file sits beside it.
+# No private sibling name occurs in these files, so they are verbatim (upstream == local).
+# The header is an UNFROZEN draft (slices 1-3): process() and loadState() are still open
+# there, and Echo's local shim carries both, marked DEGRADED (INTEGRATIONS rule 2).
+source: FOUNDATIONS core/include/foundations
+commit: 301834b0f2678594d8e2fbd29dd33092119e0b98
+upstream-sha256 d60b7eba223995bd1eb3cac17ac34d14b7f4a90bcc11eff42a2678db725d6d91  fx_operator.h
+d60b7eba223995bd1eb3cac17ac34d14b7f4a90bcc11eff42a2678db725d6d91  fx_operator.h

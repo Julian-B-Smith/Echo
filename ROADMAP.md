@@ -17,8 +17,8 @@ with HIGH findings the author's own suite had passed.
   green on Mac/clang and Linux/GCC, ASan + UBSan clean in CI. **M2 CLOSED 2026-10-21**
   (PR #10 merged, 4c68da4; T-009; D-023–D-026): both repitch laws, the tempo modes and
   modulation; 52 checks, 75 planted faults caught. **M3 (rack admission, the 1.0 bar,
-  due 2026-12-11) is planned and approved** (D-028; T-010 – T-027), no batch started;
-  batch 1 (T-010, T-011) is next. **M4 (the IR display and Echo's screen) is under way
+  due 2026-12-11) is under way** (D-028; T-010 – T-027, T-037): batch 1 (T-010 – T-012,
+  T-002) done on PR #19 (D-034 – D-036); batch 2 next. **M4 (the IR display and Echo's screen) is under way
   beside it** (D-027, D-030): T-030 – T-032 done (PR #15, PR #16); T-033 blocked on
   M3's T-014; T-036 (gate 4's flicker) open.
 - **Oracle:** `./verify fast` = kit integrity, leak gate, private-name gate,
@@ -123,7 +123,8 @@ commercial delay or borrow its mode names, presets or UI text.
      (ADR-257 and its A1; horde's copy now hashes `09f41cc2…`, ours `945108a7…`). The new
      §12.5 adds RS-5.8 (up to four optional *fixed controls*, which A12's round trip then
      covers), RS-4.11 (an optional per-block note context) and admission row A22. The 1.0
-     bar and the I/O gain standard are unchanged. A re-pin is a human gate (T-010).
+     bar and the I/O gain standard are unchanged. A re-pin is a human gate (T-010) **Re-pinned 2026-10-23
+     at horde `d34cd13` (D-034),** with §12.6 (actions, A23) and the macros spec's ADR-251.
   2. **FOUNDATIONS' `fx_operator.h` is still an unfrozen draft** (slices 1–3, DECISIONS
      #127/#129/#131; nothing after #136). It declares `LatencyDecl`, `TailDecl`, `LoadDecl`,
      `OperatorProperties`, `validate()` and the lifecycle and parameter concepts. It has **no**
@@ -179,9 +180,9 @@ commercial delay or borrow its mode names, presets or UI text.
 - **Batches** (one branch and PR each, the human merges; one implementer at a time on
   `engine.h`; M4's core work lands in its own files or after B2, D-027):
   - **B1, the gates (by 2026-10-24):** T-010, T-011, T-012, with T-002's filings under the
-    same go-ahead.
-  - **B2, plugging in (2026-10-26 → 11-06):** T-013 → T-014 → T-015 in sequence (all
-    `engine.h`); T-016 beside them (`./verify`, tools).
+    same go-ahead. **Done 2026-10-23** (PR #19; D-034 – D-036).
+  - **B2, plugging in (2026-10-26 → 11-06):** T-013 → T-014 → T-015 → T-037 in sequence
+    (all `engine.h`; T-037 added by D-035); T-016 beside them (`./verify`, tools).
   - **B3, presets and reports (11-09 → 11-20):** T-017, T-018, T-019, T-020 (tools and tests,
     disjoint files); the T-021 bank drafted.
   - **B4, listening (11-23 → 11-27):** T-021 finished, T-022, T-023.
@@ -380,7 +381,10 @@ commercial delay or borrow its mode names, presets or UI text.
 - **Out of scope:** engine changes.
 
 ### T-002 — Spin-up filings
-- **Status:** open (drafts in `docs/filings/`)
+- **Status:** done 2026-10-23: both filed with the human's go-ahead by poll, refreshed from
+  the 2026-10-19 drafts (horde PR #1201, `ball: none`; autonomous PR #61, `ball: autonomous`,
+  respond by 2026-11-06). The outbound table is updated; merging is each provider's. Trace
+  `traces/2026-10-23-filings.md`.
 - **Scope:** horde's `integrations/echo/notice-spinup.md`; autonomous's
   `integrations/echo/brief.md` (ecosystem-track registration).
 - **Acceptance criteria:** each filed by a PR in the provider's repo touching
@@ -396,16 +400,22 @@ catch (charter §Domain); `./verify fast` green; a trace in `traces/`. An edit t
 filings need the human's go-ahead each time.
 
 ### T-010 — M3: Re-pin intake to horde's current contract (ADR-257, §12.5)
-- **Status:** open (human gate: a re-pin).
-- **Scope:** `intake/rack-slot-contract.md`, `intake/MANIFEST`; DECISIONS.
+- **Status:** done 2026-10-23 (D-034, by poll; trace `traces/2026-10-23-t010-repin.md`).
+  Re-pinned at horde `d34cd13`, which by then also carried §12.6 (ADR-267: actions,
+  A23) and ADR-251's macro law in the macros spec.
+- **Scope:** `intake/rack-slot-contract.md`, `intake/MANIFEST`; DECISIONS. **Widened by
+  D-034:** `intake/SPEC-MODULE-MACROS.md`, re-pinned at the same commit.
 - **Acceptance criteria:** the copy is byte-identical to horde's `docs/proposals/rack-slot-contract.md`
   at a named horde commit; `intake_gate` green on the new hash; a decision records what
   §12.5 means for Echo: RS-4.11 (the note context) **not declared** (Echo has no use for
   notes), A22 not applicable, and RS-5.8 (fixed controls) decided in T-011.
-- **Out of scope:** any other intake file (the bar and the I/O gain standard are unchanged).
+- **Out of scope:** any other intake file (the bar and the I/O gain standard are unchanged;
+  the macros spec was brought in by D-034).
 
 ### T-011 — M3: Spec revision 3: what M3 adds to the spec
-- **Status:** open (human gate: `spec/` is protected; ratified by poll).
+- **Status:** done 2026-10-23 (D-035, by poll; SPEC §16, `params.json` `fixedControls` and
+  `actions`; trace `traces/2026-10-23-t011-spec-r3.md`). Ruling 7 declared one action,
+  Clear, which adds T-037.
 - **Scope:** `spec/SPEC.md`, `spec/params.json` if fixed controls are declared; DECISIONS.
 - **Acceptance criteria:** the spec states, each as a ruled line: (1) the meter taps (where they
   sit; peak per block; the clip latch sets on a sample with |x| > 1.0, i.e. over 0 dBFS, and
@@ -417,12 +427,20 @@ filings need the human's go-ahead each time.
   `home`), and which keys a macro may bind (proposed: continuous keys only; a stepped key
   through a macro would flip at an arbitrary threshold); (4) fixed controls (RS-5.8): which,
   if any; (5) the `TailDecl` mapping: tails at or past 2³² − 1 samples saturate to
-  `kInfiniteTail`; (6) `noteContext` and `morphPosition` not declared. Ratified by poll and
-  cited by a decision.
+  `kInfiniteTail`; (6) `noteContext` and `morphPosition` not declared; (7) **added by D-034:**
+  declared actions (RS-4.12), which, if any, each with its key, label and what it does to
+  the runtime state; and in (3), which macro law (`set` / `modify`, ADR-251) the factory
+  bank uses. Ratified by poll and cited by a decision.
 - **Out of scope:** any change to the 29 keys' ranges, defaults or classes.
 
 ### T-012 — M3: FOUNDATIONS brief, then the vendored, pinned header
-- **Status:** open (outward-facing: the human's go-ahead to file).
+- **Status:** done 2026-10-23. **The brief is filed** (`echo-002`, FOUNDATIONS PR #133,
+  `ball: FOUNDATIONS`, respond by 2026-11-06), with the human's go-ahead by poll. **One change
+  from the criteria below, ruled in that poll:** it asks to be *listed* in `not_correspondents`
+  as a module inside horde, on FOUNDATIONS #136's Scape precedent, not *registered* as a
+  correspondent. **The header is vendored** at FOUNDATIONS `301834b` (the bytes Scape pins) and
+  pinned by `vendor_gate`, which catches a planted one-byte edit and an unlisted file every
+  run (D-036). Traces `traces/2026-10-23-filings.md`, `traces/2026-10-23-t012-vendor.md`.
 - **Scope:** FOUNDATIONS' `integrations/echo/brief.md` (a PR touching only that path);
   `core/third_party/foundations/` (Scape's shape: `fx_operator.h` verbatim from a reviewed
   commit, a `MANIFEST` with `commit:` and sha256); `./verify`'s `vendor_gate` (human gate);
@@ -496,8 +514,10 @@ filings need the human's go-ahead each time.
 - **Acceptance criteria:** a lock lists every key with its unit, class and stepped labels; a
   gate fails on a renamed, removed or re-classed key and on a new key added without updating the lock, and
   passes clean; the lock's hash is the `module_version` written in every preset (contract
-  §6.2). Also closes T-007's item to compare `rate` and `smoothing`. Plants: a renamed key; a
-  dropped label.
+  §6.2). **Amended by D-035:** the lock also lists the fixed row (in order) and the actions,
+  and the gate fails on a reordered, renamed or dropped fixed control or action. Also closes
+  T-007's item to compare `rate` and `smoothing`. Plants: a renamed key; a dropped label; two
+  fixed controls swapped.
 - **Out of scope:** the date of horde's feature freeze (horde's; the scope list in SPEC §1 is
   frozen on it).
 
@@ -511,18 +531,20 @@ filings need the human's go-ahead each time.
   resolver (SPEC-MODULE-MACROS §4–§5) hits `lo` and `hi` exactly at v = 0 and 1 for `lin`,
   `exp` and `log`, and matches the closed form to 1e-12 at v ∈ {0, ¼, ½, ¾, 1} with a
   decreasing range. A12: every factory preset saves and loads with slot order, labels,
-  bindings, curves, `home` (and fixed controls, if declared) exact. A13: a preset loaded at each of four corners,
+  bindings, curves, `home`, `macroLaw` (D-034) (and fixed controls, if declared) exact; a
+  `log` curve under `macroLaw: modify` is refused. A13: a preset loaded at each of four corners,
   flipped and round-tripped renders identically before and after. Plants: a load that
   reorders slots; a Device key accepted in a preset; an invalid `log` accepted; an endpoint
   that is not exact.
 - **Out of scope:** horde's resolution at run time (RS-5.5: horde resolves Echo's macros).
 
-### T-018 — M3: Admission self-test: rows A1–A22 mapped and the gaps filled
+### T-018 — M3: Admission self-test: rows A1–A23 mapped and the gaps filled
 - **Status:** open (after T-013 – T-015).
 - **Scope:** `core_tests.cpp`, `plants.h`; a generated `docs/admission.md`.
-- **Acceptance criteria:** `docs/admission.md` lists each row A1–A22 with its check, its plant
+- **Acceptance criteria:** `docs/admission.md` lists each row A1–A23 with its check, its plant
   and the result, or "horde's" (A7 "off" is the router's: Echo has no bypass key) or "not
-  declared" (A21, A22), and `./verify` fails if it is stale. New checks: A2 at a stress
+  declared" (A21, A22), A23 mapped to T-037's Clear check (D-035), and `./verify` fails if
+  it is stale. New checks: A2 at a stress
   preset; A3 with n = 256 added; A4 latency truth (on an impulse and a swept sine, the
   measured delay of the dry path equals the declared 0 samples; plant: a dry path one
   sample late); A8 `|L − R|` kept in stereo routing (plant: a mono sum); A10 a
@@ -812,6 +834,27 @@ filings need the human's go-ahead each time.
   3. `./verify fast` green 10 runs in a row on the dev Mac under the load that turned it
      red (another build running), each run recorded.
 - **Out of scope:** the render service's behaviour; CI (which only reports the timing).
+
+### T-037 — M3: the Clear action (RS-4.12, row A23; B2)
+- **Status:** open (ruled by poll 2026-10-23, D-035; after T-015, in sequence on `engine.h`).
+- **Scope:** `core/include/echo/engine.h` (the local shim's per-block action entry, beside
+  `process`), `plants.h`, `core/tests/core_tests.cpp`.
+- **Acceptance criteria (SPEC §16.7):**
+  1. A Clear fired at offset k leaves the output bit-identical to an unfired run before
+     sample k; from k the old repeats fade out over 20 ms (at the rate) under the current
+     settings and end; the lines and loop state are then cleared, the heads stay, and no
+     value lands. The dry path is bit-identical to an unfired run throughout.
+  2. A second Clear, or a load, during the fade never restarts it; a Clear at rest changes
+     nothing.
+  3. The saved state is byte-identical before and after a Clear (a performance event).
+  4. A23: the same actions at the same offsets give bit-identical output on every run, at
+     block sizes 1, 64 and 4096; no action, the output is unchanged.
+  5. Firing allocates nothing and takes no lock (the allocation probe stays green).
+  6. Plants: an action applied at the block's start instead of its offset (A23's must-fail
+     shim); a Clear that cuts with no fade; a Clear that lands the patch's values; a Clear
+     that writes the saved state.
+- **Out of scope:** horde's action delivery and FOUNDATIONS' entry (the shim follows them
+  when they are ruled); any other action.
 
 ## Open questions (blocking — ask the human)
 

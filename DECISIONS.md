@@ -692,3 +692,79 @@ Rejected:
 
 D-032's second point (columns) and its open memory question stand. Its memory figures are corrected to binary
 units: 8 slots × 8 s is 46.9 MiB at 48 kHz and 187.5 MiB at 192 kHz (critic L1). `stop()` now frees them.
+
+## D-034 — intake re-pinned to horde d34cd13: the rack-slot contract and the macros spec; what §12.5 and §12.6 mean for Echo (RATIFIED by poll, 2026-10-23; T-010)
+
+horde's contract had moved past T-010's brief. Since Echo's pin (horde 4d2288f, 2026-10-19):
+- `rack-slot-contract.md` gained **§12.5** (ADR-257: RS-5.8 fixed controls, RS-4.11 the note context, admission row
+  A22, RS-5.3's modify-law base, A12's round trip with fixed controls) and **§12.6** (ADR-267: RS-4.12 declared
+  actions, admission row A23). T-010 was written for §12.5 alone.
+- `SPEC-MODULE-MACROS.md` gained ADR-251's **macro law**: a preset may carry `macroLaw: modify`, where bindings add
+  contributions to a base (in octaves for a Hz key) instead of setting the value; a `log` curve is invalid under it.
+- The bar, the I/O gain standard and the division list are unchanged (hashes compared; the `DIVS` block in horde's
+  `docs/design/shape-lab-mod.html` is identical, only moved).
+
+Polled:
+- **Re-pin both files** at horde `d34cd13` (2026-10-23), byte-identical, rather than the contract alone. T-011's
+  preset format and T-017's macros build on the macros spec; pinning only the contract would leave them on a
+  superseded law. This widens T-010's scope by one file.
+- **RS-4.12 (actions) is decided in T-011**, as RS-5.8 is: a delay may plausibly want one (a "clear repeats"), so
+  it is not ruled out here.
+
+What the re-pin means for Echo (the lead's record of the contract's text, no new choice):
+- **RS-4.11, the note context: not declared.** Echo has no use for notes. **A22: not applicable.**
+- **RS-5.8, fixed controls:** which, if any, ruled in T-011.
+- **RS-4.12, actions:** which, if any, ruled in T-011. **A23** applies only if one is declared; then its check and
+  its must-fail shim (an action applied at the block's start, not its offset) join T-018.
+- **ADR-251's macro law:** which law the factory bank uses is T-011's; T-017's validator carries `macroLaw` exactly
+  and refuses a `log` curve under `modify`.
+
+Rejected: re-pinning the contract alone (as T-010 was briefed); declaring no actions now.
+
+## D-035 — Spec revision 3: meters, state, presets and macros, the fixed row, the tail mapping, Clear (RATIFIED by poll, 2026-10-23; T-011; cites D-017, D-034)
+
+T-011's seven rulings, put to the human as six polls (rulings 5 and 6 together) against horde's contract as
+re-pinned by D-034. Written into `spec/SPEC.md` §16 (with pointers in §8, §10, §12) and `spec/params.json`
+(`fixedControls`, `actions`). The 29 keys' ranges, defaults and classes are unchanged.
+
+| # | ruling | chosen | rejected |
+|---|---|---|---|
+| 1 | meters | taps after Input Gain and after Output Gain; peak per block; the clip latch sets on \|x\| > 1.0 and holds until cleared | latch at \|x\| ≥ 1.0 (flags a clean full-scale sine) |
+| 2 | state | text, `echo-state 1`, `key value` in manifest order, by name, at target, `[device]` block, ≤ 2 KiB refused before allocation, all or nothing; floats as the shortest decimal that reads back exactly (Bulwark's T-029 shape) | C99 hex floats (exact but unreadable) |
+| 3 | presets and macros | `ModulePreset`; macros bind continuous keys only; the factory bank uses `macroLaw: modify` (Hz keys in octaves), so a macro offsets the preset and the fixed row instead of overriding them | continuous with `set`; any key with `set` |
+| 4 | fixed controls | four: Feedback (`fb.amount`), Tone (`filt.loop.lpHz`), Mod Depth (`mod.depthMs`), Mix (`mix`), all always live | Time, Feedback, Tone, Mix (`time.ms` is dead while synced); none |
+| 5 | the tail mapping | whole samples, rounded up; at or past 2³² − 1 samples, `kInfiniteTail` | clamping to 2³² − 2 (under-declares) |
+| 6 | not declared | `noteContext` (A22 not applicable), `morphPosition` | — |
+| 7 | actions | **declare Clear** (`clear`): at its sample offset the old repeats fade out over 20 ms under the current settings and end, as a load ends them (D-020), with no value landing; a performance event | none for 1.0 (the lead's recommendation, to protect the date while horde's action shape is PROPOSED) |
+
+Consequences:
+- **Ruling 7 went against the lead's recommendation.** Clear costs M3 one more `engine.h` item and a live A23 row,
+  while horde's action delivery (contract §12.6, ADR-267) is PROPOSED and unbuilt in FOUNDATIONS, so Echo's local
+  shim carries it. New queue item **T-037** (B2, after T-015, in sequence on `engine.h`); T-018 maps A23 to its
+  check. If horde's shape changes before 1.0, the shim follows it; the behaviour (§16.7) does not.
+- D-034's "A23 applies only if one is declared" now applies: A23 is live.
+- The fixed row and Clear are new in `params.json`; neither is a parameter, so `check_manifest.py` and the lab's
+  manifest check (which compare `params`) are unaffected. T-016's lock is amended to list them too: horde gives each
+  fixed control a host parameter id by position, so a reordered row is a breaking change.
+- §16.2 accepts §3.1's division aliases on load and writes the name back (T-015 already said so).
+
+## D-036 — FOUNDATIONS' `fx_operator.h` vendored at `301834b`, pinned by `vendor_gate` (RATIFIED by the human, 2026-10-23; T-012)
+
+The human's instruction: "Vendor fx_operator.h at FOUNDATIONS 301834b in Scape's shape and add vendor_gate to
+./verify with its planted one-byte edit." It covers both human gates: the vendoring and the `./verify` edit.
+
+- **What:** `core/third_party/foundations/include/foundations/fx_operator.h`, verbatim from FOUNDATIONS
+  `301834b` (its `origin/main` on 2026-10-23), and only that file. A `MANIFEST` beside it records `source:`,
+  `commit:` and the upstream and local sha256 (`d60b7eba…`, equal: no private sibling name occurs in it).
+- **The same bytes Scape pins** at FOUNDATIONS `c8e4ccb`: the header has not changed since slice 3 (`1a5995e`).
+  Two horde modules now build against one header, which is the comparison FOUNDATIONS asks for.
+- **`vendor_gate`** (in `./verify fast`, after `intake_gate`): every listed file's sha256 equals its MANIFEST line,
+  and no unlisted file sits beside it. Unlike Scape's gate, it **proves itself every run** on two planted copies in
+  a temp dir: a one-byte edit at offset 2048 (with a `cmp` guard so the plant cannot go vacuous) and an unlisted
+  header. Both must fail. Checked by hand as well: a one-byte edit of the real file turns the gate red.
+- **The header is an unfrozen draft.** `process()` and `loadState()` are open there; Echo's shim carries both,
+  marked DEGRADED (rule 2), and the brief `echo-002` asks about both. Nothing includes the header yet: T-013 (B2)
+  wires the include path and the `static_assert`s.
+- **Re-vendoring is a human gate:** a new commit, both hashes, and a decision citing this one.
+
+Rejected: vendoring `engine_manifest.h` now (`echo-002`'s question 4 asks FOUNDATIONS first).
