@@ -72,6 +72,7 @@
 #include <vector>
 
 #include "echo/ftz.h"
+#include "echo/module_version.h"
 #include "echo/params.h"
 #include "echo/plants.h"
 #include "echo/state.h"
@@ -599,7 +600,8 @@ class Echo {
   static constexpr int kActionClear = 0;
   static constexpr int kMaxActions = 8;
   static std::optional<int> resolveAction(std::string_view key) {
-    if (key == "clear") return kActionClear;
+    for (std::size_t i = 0; i < kActionKeys.size(); ++i)
+      if (kActionKeys[i] == key) return static_cast<int>(i);
     return std::nullopt;
   }
   // Refused: an unknown id, a full queue, or an offset outside [0, maxBlock)
