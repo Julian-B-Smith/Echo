@@ -818,7 +818,8 @@ filings need the human's go-ahead each time.
 - **Out of scope:** any edit inside horde's tree beyond that one path.
 
 ### T-037 — M3: the Clear action (RS-4.12, row A23; B2)
-- **Status:** open (ruled by poll 2026-10-23, D-035; after T-015, in sequence on `engine.h`).
+- **Status:** done 2026-10-23 (D-040; critic FIX-THEN-SHIP: H1 and M3 settled by two polls,
+  which clarified SPEC §16.7; the rest fixed; trace `traces/2026-10-23-t037-clear.md`).
 - **Scope:** `core/include/echo/engine.h` (the local shim's per-block action entry, beside
   `process`), `plants.h`, `core/tests/core_tests.cpp`.
 - **Acceptance criteria (SPEC §16.7):**

@@ -892,3 +892,39 @@ cannot fail on its own. The byte comparison and the bit-equal values carry A18.
 between blocks? If not, a staged load stays pending and every later stage (a second load, an undo) is refused until
 audio runs. The alternative is a later stage replacing a pending one, which needs a different handover (a
 generation counter) to stay safe against an adopt in flight.
+
+## D-040 — T-037: the Clear action; during a Clear the heads keep moving and the wet follows the live mix (RATIFIED by poll, 2026-10-23, two rulings; the rest the lead's record)
+
+**What T-037 built** (`engine.h`, `plants.h`, `core_tests.cpp`), to SPEC §16.7 (D-035, ruling 7):
+- **The entry:** `resolveAction("clear")` resolves the key off the audio thread. `fireAction(id, offset)` queues the
+  action for the next `process()` call in a preallocated queue of 8, kept in offset order. It refuses an unknown
+  id, a full queue, and an offset outside [0, maxBlock); nothing is relocated silently.
+- **The landing:** each action lands at its own sample, before that sample is read.
+- **Clear reuses the load's fade (D-020).** A new flag, `fadeLands_`, records whether the running fade ends by
+  adopting a patch. A Clear's fade alone ends with `clearLoop()` only: no `adoptPatch`, no `landHead`. A load that
+  joins it still lands, and neither restarts the fade.
+- **Clear at rest does nothing.**
+- **The no-action path is unchanged:** the render hash is `85f103b94528512e`.
+
+**Ruled by poll, 2026-10-23** (the critic's question; both rulings clarify SPEC §16.7, amended in place):
+- **The heads keep moving, not landed.** Built literally like a load's fade, the heads froze. A tempo move during the
+  fade then crossfaded as a repitch (the wrong mode), and a tape glide in flight came out about 950 samples off for
+  the rest of its run (critic H1). A Clear's fade now steps the heads exactly as a run without it does; a load's
+  fade still holds them until they land.
+- **The fading wet follows the live mix.** A load's fade keeps the old wet level because its new patch has already
+  landed; a Clear has no new patch, so "current settings" means live (critic M3).
+
+**Critic (Opus, fresh context): FIX-THEN-SHIP.** Fixed:
+- **H1 and M1:** the "heads stay" assertion had no moving head, so it could not fail. The new check
+  `clearMovingHeads` covers a tape glide and a tempo crossfade, with the plant `clearFreezesHeads`.
+- **M2:** the fade length was tested at 48 kHz only. `clearFade` now also runs at 44.1 kHz.
+- **M3:** the new check `clearLiveWet`, with the plant `clearFreezesWet`.
+- **L1:** out-of-range offsets are refused and tested.
+- **L3:** the queue's array is sized by `kMaxActions`.
+- **L5:** the A23 check now has two Clears in one block, the second after the first's fade.
+
+**Stated limits:**
+- `clearDryNoLand` shows the dry path bit-identical while the wet is silent. With the wet ringing, the dry path's
+  identity is covered by `clearFade` (silent input) and `clearLiveWet`, not by one check (critic L4).
+- Actions queued before `reset()`, before an unprepared `process()`, or before a call with n ≤ 0 are discarded with
+  that call. This is documented, not tested (critic L2).

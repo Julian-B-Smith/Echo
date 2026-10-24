@@ -148,6 +148,14 @@ ECHO_PLANT(stateOversizedAccepted) // a text over 2 KiB is parsed instead of ref
 ECHO_PLANT(stateDivByIndex)      // time.div written by index, not by name (SPEC §3.1)
 ECHO_PLANT(stateAcceptsUnknown)  // an unknown key is skipped silently instead of refusing the text
 ECHO_PLANT(adoptResets)          // adoptStaged resets first: a load mid-play cuts the repeats (D-020 broken; critic H1)
+// ---- M3, B2 (T-037: the Clear action, SPEC §16.7, row A23) ----
+ECHO_PLANT(actionAtBlockStart)   // A23's must-fail shim: an action lands at the block's start, not its offset
+ECHO_PLANT(clearCuts)            // Clear cuts the repeats with no fade
+ECHO_PLANT(clearLandsValues)     // Clear's fade ends by adopting the patch (snapping ramps): a value lands
+ECHO_PLANT(clearWritesState)     // Clear edits the patch (feedback to 0): the saved state changes
+ECHO_PLANT(clearRestartsFade)    // a Clear during a fade restarts it (D-020: never)
+ECHO_PLANT(clearFreezesHeads)    // a Clear's fade holds the heads like a load's (critic T-037 H1; D-040: they keep moving)
+ECHO_PLANT(clearFreezesWet)      // a Clear's fading wet is frozen at the Clear (D-040: it follows the live mix)
 }  // namespace echo::plant
 
 #undef ECHO_PLANT

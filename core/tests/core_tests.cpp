@@ -2110,6 +2110,218 @@ bool stateRefusals(Detail& d) {
   return true;
 }
 
+// ---- M3 B2, T-037: the Clear action (SPEC §16.7; RS-4.12; row A23) ----
+
+// Blocks of a fixed size, with actions fired at their TRUE offset inside the
+// block (run() cuts a block at every event, which would put every action at
+// offset 0 and hide A23's must-fail shim). Parameter sets land at the start of
+// the block that contains them; the callers align them to the block size.
+struct Fire {
+  long at;
+  int id;
+};
+struct SetAt {
+  long at;
+  const char* key;
+  double v;
+};
+// Into a preallocated Out, so an allocation probe around it sees only the engine.
+void runActionsInto(Echo& e, const Vec& L, const Vec& R, const std::vector<Fire>& fires, int bs, Out& o, const std::vector<SetAt>& sets = {}) {
+  const long n = static_cast<long>(L.size());
+  for (long pos = 0; pos < n; pos += bs) {
+    const long len = std::min<long>(bs, n - pos);
+    for (const auto& st : sets)
+      if (st.at >= pos && st.at < pos + len) e.setParam(st.key, st.v);
+    for (const auto& f : fires)
+      if (f.at >= pos && f.at < pos + len) e.fireAction(f.id, static_cast<int>(f.at - pos));
+    const auto u = static_cast<std::size_t>(pos);
+    e.process(L.data() + u, R.data() + u, o.L.data() + u, o.R.data() + u, static_cast<int>(len), 120.0);
+  }
+}
+Out runActions(Echo& e, const Vec& L, const Vec& R, const std::vector<Fire>& fires, int bs, const std::vector<SetAt>& sets = {}) {
+  Out o{zeros(static_cast<long>(L.size())), zeros(static_cast<long>(L.size()))};
+  runActionsInto(e, L, R, fires, bs, o, sets);
+  return o;
+}
+constexpr int kClear = echo::Echo::kActionClear;
+
+// Criterion 1: before the Clear, nothing changes; from its sample the repeats
+// fade over 20 ms under the current settings (the read scaled by the load's own
+// ramp) and end; the heads stay.
+bool clearFade(Detail& d) {
+  for (double sr : {48000.0, 44100.0}) {  // "20 ms at the rate" (critic T-037 M2)
+  g_rng = 41;
+  const long n = S(0.6, sr), T = S(0.35, sr) + 37, N = S(0.02, sr);
+  Vec in = zeros(n);
+  for (long i = 0; i < S(0.25, sr); ++i) in[static_cast<std::size_t>(i)] = 0.3 * noise();
+  auto a = mk({{"time.sync", 0}, {"time.ms", 90}, {"fb.amount", 75}, {"mix", 50}}, sr);
+  auto b = mk({{"time.sync", 0}, {"time.ms", 90}, {"fb.amount", 75}, {"mix", 50}}, sr);
+  const auto oa = runActions(*a, in, in, {{T, kClear}}, 512), ob = runActions(*b, in, in, {}, 512);
+  for (long i = 0; i < T; ++i) REQUIRE(oa.L[i] == ob.L[i] && oa.R[i] == ob.R[i], "the Clear changed sample %ld, before its offset %ld", i, T);
+  REQUIRE(maxAbs(ob.L, T, T + N) > 1e-3, "the case is vacuous: nothing rings at the Clear");
+  for (long j = 0; j < N; ++j) {
+    const double g = static_cast<double>(N - 1 - j) / static_cast<double>(N);
+    REQUIRE(std::fabs(oa.L[T + j] - ob.L[T + j] * g) <= 1e-12, "at %.0f Hz, %ld after the Clear the output is %.9g, the 20 ms fade expects %.9g",
+            sr, j, oa.L[T + j], ob.L[T + j] * g);
+  }
+  REQUIRE(maxAbs(oa.L, T + N) == 0.0 && maxAbs(oa.R, T + N) == 0.0, "at %.0f Hz the repeats still sound %.3g after the 20 ms fade", sr,
+          maxAbs(oa.L, T + N));
+  }
+  return true;
+}
+
+// Criterion 1, "the heads stay" (ruled 2026-10-23, D-040: they keep moving, not
+// landed; critic T-037 H1, M1): a Clear during a tape glide, and during a tempo
+// move in crossfade mode, leaves every head exactly where a run without the
+// Clear has it, sample for sample, and each move in its own mode.
+bool clearMovingHeads(Detail& d) {
+  {  // a key move gliding by the tape law
+    auto a = mk({{"time.sync", 0}, {"time.ms", 20}, {"time.change", 0}, {"time.law", 0}, {"time.glide", 1}, {"fb.amount", 60}});
+    auto b = mk({{"time.sync", 0}, {"time.ms", 20}, {"time.change", 0}, {"time.law", 0}, {"time.glide", 1}, {"fb.amount", 60}});
+    const Vec in(S(0.8), 0.05);
+    const std::vector<SetAt> sets{{64 * 300, "time.ms", 200}};
+    Out oa{zeros(S(0.8)), zeros(S(0.8))}, ob{zeros(S(0.8)), zeros(S(0.8))};
+    runActionsInto(*a, in, in, {{64 * 310 + 5, kClear}}, 64, oa, sets);
+    runActionsInto(*b, in, in, {}, 64, ob, sets);
+    REQUIRE(b->headDelay(0) != 200.0 * 48.0 && b->headDelay(0) > 20.0 * 48.0, "the case is vacuous: the glide is not in flight at the end");
+    REQUIRE(a->headDelay(0) == b->headDelay(0) && a->headDelay(1) == b->headDelay(1),
+            "a Clear moved a gliding head: %.6f vs %.6f samples without it", a->headDelay(0), b->headDelay(0));
+  }
+  {  // a tempo move in tempoMode crossfade, while time.change is repitch
+    auto mkS = [] { return mk({{"time.sync", 1}, {"time.div", 9}, {"time.change", 0}, {"time.tempoMode", 0}, {"fb.amount", 60}}); };
+    auto a = mkS(), b = mkS();
+    double x[64], y[64], z[64];
+    for (double& v : x) v = 0.05;
+    for (int blk = 0; blk < 900; ++blk) {
+      const double bpm = blk < 400 ? 120.0 : 130.0;  // the tempo moves inside the Clear's fade
+      if (blk == 395) a->fireAction(kClear, 3);
+      a->process(x, x, y, z, 64, bpm);
+      b->process(x, x, y, z, 64, bpm);
+      REQUIRE(a->headDelay(0) == b->headDelay(0), "block %d: a Clear changed a tempo move's head (%.4f vs %.4f): wrong mode", blk,
+              a->headDelay(0), b->headDelay(0));
+    }
+    REQUIRE(b->fadeCount(0) >= 1, "the case is vacuous: the tempo move did not crossfade");
+  }
+  return true;
+}
+
+// "Under the current settings" (ruled 2026-10-23, D-040): with a mix ramp
+// running through the fade, the fading wet follows the LIVE mix, so the output
+// is the no-Clear output scaled by the fade, sample for sample.
+bool clearLiveWet(Detail& d) {
+  g_rng = 59;
+  const long n = S(0.5), T0 = 64 * 260, T = T0 + 5, N = S(0.02);
+  Vec in = zeros(n);
+  for (long i = 0; i < S(0.25); ++i) in[static_cast<std::size_t>(i)] = 0.3 * noise();
+  const std::vector<SetAt> sets{{T0, "mix", 90}};  // the 20 ms mix ramp starts 5 samples before the Clear
+  auto a = mk({{"time.sync", 0}, {"time.ms", 90}, {"fb.amount", 75}, {"mix", 30}});
+  auto b = mk({{"time.sync", 0}, {"time.ms", 90}, {"fb.amount", 75}, {"mix", 30}});
+  const auto oa = runActions(*a, in, in, {{T, kClear}}, 64, sets), ob = runActions(*b, in, in, {}, 64, sets);
+  REQUIRE(maxAbs(ob.L, T, T + N) > 1e-3, "the case is vacuous: nothing rings at the Clear");
+  for (long j = 0; j < N; ++j) {
+    const double g = static_cast<double>(N - 1 - j) / static_cast<double>(N);
+    REQUIRE(std::fabs(oa.L[T + j] - ob.L[T + j] * g) <= 1e-12, "%ld into the fade the wet is %.9g, the live mix expects %.9g", j, oa.L[T + j],
+            ob.L[T + j] * g);
+  }
+  return true;
+}
+
+// Criterion 1, the dry path and "no value lands": with live input and a mix ramp
+// running through the fade's end, the output (all dry here: the first repeat is
+// 2 s away) is bit-identical to a run without the Clear.
+bool clearDryNoLand(Detail& d) {
+  g_rng = 43;
+  const long n = S(0.5), T = 64 * 300 + 17;
+  Vec L(n), R(n);
+  for (long i = 0; i < n; ++i) { L[i] = 0.4 * noise(); R[i] = 0.4 * noise(); }
+  const std::vector<SetAt> sets{{64 * 302, "mix", 80}};  // a 20 ms mix ramp, still running when the Clear's fade ends
+  auto a = mk({{"time.sync", 0}, {"time.ms", 2000}, {"fb.amount", 50}, {"mix", 40}});
+  auto b = mk({{"time.sync", 0}, {"time.ms", 2000}, {"fb.amount", 50}, {"mix", 40}});
+  const auto oa = runActions(*a, L, R, {{T, kClear}}, 64, sets), ob = runActions(*b, L, R, {}, 64, sets);
+  for (long i = 0; i < n; ++i)
+    REQUIRE(oa.L[i] == ob.L[i] && oa.R[i] == ob.R[i], "the dry path differs at sample %ld (%.17g vs %.17g): a Clear touched it", i, oa.L[i], ob.L[i]);
+  return true;
+}
+
+// Criterion 2: a second Clear, or a load, during the fade never restarts it; a
+// Clear at rest changes nothing.
+bool clearNoRestart(Detail& d) {
+  g_rng = 47;
+  const long n = S(0.6), T = S(0.35) + 11, N = S(0.02);
+  Vec in = zeros(n);
+  for (long i = 0; i < S(0.25); ++i) in[static_cast<std::size_t>(i)] = 0.3 * noise();
+  auto mkRing = [] { return mk({{"time.sync", 0}, {"time.ms", 90}, {"fb.amount", 75}, {"mix", 50}}); };
+  auto one = mkRing(), two = mkRing();
+  const auto o1 = runActions(*one, in, in, {{T, kClear}}, 64), o2 = runActions(*two, in, in, {{T, kClear}, {T + 300, kClear}}, 64);
+  for (long i = 0; i < n; ++i) REQUIRE(o1.L[i] == o2.L[i], "a second Clear mid-fade changed sample %ld: it restarted the fade", i);
+  auto ld = mkRing();
+  const std::array<echo::KeyValue, 2> patch{{{"fb.amount", 30}, {"time.ms", 200}}};
+  Out ol{zeros(n), zeros(n)};
+  for (long pos = 0; pos < n; pos += 64) {
+    if (pos == (T / 64) * 64) ld->fireAction(kClear, static_cast<int>(T - pos));
+    if (pos == ((T + 300) / 64) * 64) ld->loadState(patch);
+    const auto u = static_cast<std::size_t>(pos);
+    ld->process(in.data() + u, in.data() + u, ol.L.data() + u, ol.R.data() + u, 64, 120.0);
+  }
+  REQUIRE(maxAbs(ol.L, T + N) == 0.0, "a load mid-Clear restarted the fade: sound %.3g after the Clear's 20 ms", maxAbs(ol.L, T + N));
+  REQUIRE(ld->getParam(echo::kFb) == 30.0 && ld->headDelay(0) == 0.2 * kSr, "the load that joined the Clear's fade did not land its patch");
+  auto rest = mk({{"time.sync", 0}, {"time.ms", 90}, {"fb.amount", 75}}), twin = mk({{"time.sync", 0}, {"time.ms", 90}, {"fb.amount", 75}});
+  const Vec pulse = impulse(S(0.3), 100, 0.5);
+  const auto orest = runActions(*rest, pulse, pulse, {{0, kClear}}, 64), otwin = runActions(*twin, pulse, pulse, {}, 64);
+  for (long i = 0; i < S(0.3); ++i) REQUIRE(orest.L[i] == otwin.L[i], "a Clear at rest changed sample %ld", i);
+  return true;
+}
+
+// Criterion 3: a performance event: the saved state is byte-identical before
+// and after a Clear (ADR-267 A1).
+bool clearState(Detail& d) {
+  auto e = mk({{"time.sync", 0}, {"time.ms", 90}, {"fb.amount", 75}, {"mix", 50}});
+  run(*e, impulse(S(0.2), 0, 0.5), zeros(S(0.2)));
+  const std::string before = saveText(*e);
+  runActions(*e, zeros(S(0.1)), zeros(S(0.1)), {{5, kClear}}, 256);
+  REQUIRE(saveText(*e) == before, "a Clear changed the saved state");
+  return true;
+}
+
+// Criterion 4 (A23) and 5: the same actions at the same offsets give bit-identical
+// output on every run and at block sizes 1, 64 and 4096; firing allocates
+// nothing; an unknown action is refused and changes nothing; the queue's cap
+// refuses rather than drops.
+bool clearA23(Detail& d) {
+  g_rng = 53;
+  const long n = S(0.5);
+  Vec L(n), R(n);
+  for (long i = 0; i < S(0.4); ++i) { L[i] = 0.3 * noise(); R[i] = 0.3 * noise(); }
+  // Two Clears in one 4096 block, the second after the first's fade has ended
+  // (critic T-037 L5), and one on a block's last sample.
+  const std::vector<Fire> fires{{3001, kClear}, {9000, kClear}, {10200, kClear}, {15000 + 4095, kClear}};
+  auto mkE = [] { return mk({{"time.sync", 0}, {"time.ms", 45}, {"fb.amount", 70}, {"mix", 50}}); };
+  REQUIRE(echo::Echo::resolveAction("clear") == kClear && !echo::Echo::resolveAction("freeze"), "the action keys resolve wrongly");
+  auto ref = mkE();
+  const auto oref = runActions(*ref, L, R, fires, 1);
+  for (int bs : {64, 4096, 1}) {
+    auto e = mkE();
+    Out o{zeros(n), zeros(n)};
+    alloc_probe::arm();
+    runActionsInto(*e, L, R, fires, bs, o);
+    alloc_probe::disarm();
+    REQUIRE(alloc_probe::g_allocs.load() == 0, "firing and processing actions allocated %ld times (block %d)", alloc_probe::g_allocs.load(), bs);
+    for (long i = 0; i < n; ++i)
+      REQUIRE(o.L[i] == oref.L[i] && o.R[i] == oref.R[i], "block %d differs from block 1 at sample %ld: an action is not at its offset", bs, i);
+  }
+  auto plain = mkE(), unk = mkE();
+  const auto op = runActions(*plain, L, R, {}, 64);
+  REQUIRE(!unk->fireAction(7, 10), "an unknown action id was accepted");
+  const auto ou = runActions(*unk, L, R, {}, 64);
+  for (long i = 0; i < n; ++i) REQUIRE(op.L[i] == ou.L[i], "a refused action changed sample %ld", i);
+  auto cap = mkE();
+  for (int k = 0; k < echo::Echo::kMaxActions; ++k) REQUIRE(cap->fireAction(kClear, k), "action %d of the cap was refused", k);
+  REQUIRE(!cap->fireAction(kClear, 9), "an action past the cap of %d was accepted", echo::Echo::kMaxActions);
+  auto off = mkE();
+  REQUIRE(!off->fireAction(kClear, -1) && !off->fireAction(kClear, off->maxBlock()), "an offset outside [0, maxBlock) was accepted");
+  return true;
+}
+
 struct Check {
   const char* name;
   bool (*fn)(Detail&);
@@ -2211,6 +2423,16 @@ const std::vector<Check> kChecks = {
     {"state: every malformed text refused whole (strict number grammar), nothing staged; an alias reads and is written back by name",
      stateRefusals, {"stateAcceptsUnknown"}},
     {"state: an adopt mid-play is a D-020 load plus the Device keys ramping, bit for bit", stateAdoptLive, {"adoptResets"}},
+    // ---- M3 B2, T-037 ----
+    {"Clear: nothing changes before its sample; from it the repeats fade over 20 ms (48, 44.1 kHz) and end", clearFade, {"clearCuts"}},
+    {"Clear: the heads keep moving as without it (a tape glide; a tempo move keeps its crossfade mode)", clearMovingHeads, {"clearFreezesHeads"}},
+    {"Clear: the fading wet follows the live mix (a mix ramp through the fade)", clearLiveWet, {"clearFreezesWet"}},
+    {"Clear: the dry path is bit-identical to no Clear, and no value lands (a mix ramp runs on through the fade's end)", clearDryNoLand,
+     {"clearLandsValues"}},
+    {"Clear: a second Clear or a load mid-fade never restarts it; a Clear at rest changes nothing", clearNoRestart, {"clearRestartsFade"}},
+    {"Clear: a performance event, the saved state byte-identical before and after", clearState, {"clearWritesState"}},
+    {"Clear A23: same actions, same offsets, bit-identical at blocks 1/64/4096; no allocation; unknown refused; the cap refuses", clearA23,
+     {"actionAtBlockStart"}},
 };
 
 #ifdef ECHO_PLANTS
@@ -2252,6 +2474,9 @@ bool* plantFlag(std::string_view n) {
       {"stateFloat6g", &stateFloat6g}, {"stateKeyMissing", &stateKeyMissing}, {"stateLatchSerialised", &stateLatchSerialised},
       {"stateOversizedAccepted", &stateOversizedAccepted}, {"stateDivByIndex", &stateDivByIndex}, {"stateAcceptsUnknown", &stateAcceptsUnknown},
       {"adoptResets", &adoptResets},
+      {"actionAtBlockStart", &actionAtBlockStart}, {"clearCuts", &clearCuts}, {"clearLandsValues", &clearLandsValues},
+      {"clearWritesState", &clearWritesState}, {"clearRestartsFade", &clearRestartsFade},
+      {"clearFreezesHeads", &clearFreezesHeads}, {"clearFreezesWet", &clearFreezesWet},
   };
   for (const auto& p : table)
     if (n == p.n) return p.f;
@@ -2319,7 +2544,9 @@ int main(int argc, char** argv) {
                         "latchClears", "tapBeforeGain", "prepareRampsIn", "inGainAfterLoop", "doubleGain",
                         "inGainDryOnly", "outTapDryOnly", "tapReadsRaw", "resetClearsLatch",
                         "stateFloat6g", "stateKeyMissing", "stateLatchSerialised", "stateOversizedAccepted", "stateDivByIndex",
-                        "stateAcceptsUnknown", "adoptResets"}) {
+                        "stateAcceptsUnknown", "adoptResets",
+                        "actionAtBlockStart", "clearCuts", "clearLandsValues", "clearWritesState", "clearRestartsFade",
+                        "clearFreezesHeads", "clearFreezesWet"}) {
     bool guarded = false;
     for (const auto& c : kChecks)
       for (const char* p : c.plants) guarded = guarded || std::string_view(p) == n;

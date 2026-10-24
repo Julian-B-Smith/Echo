@@ -14,6 +14,9 @@
 //   - the state entry: saveState / stageState / adoptStaged (T-015, below) and
 //     the older loadState(span<KeyValue>) it lands through; the arguments are
 //     open there (echo-002, question 2; horde RS-6.9).
+//   - the action entry: resolveAction / fireAction (T-037, below), horde's
+//     per-block context (contract §12.6) carried by this shim until FOUNDATIONS
+//     rules an entry for it.
 //   - latency()/tail()/minBlock()/channels(): the pre-ABI declarations, kept
 //     for the tests; properties() is the ABI's view of the same values.
 //
@@ -45,7 +48,9 @@
 // M3 (T-015): the saved state as text by name (§16.2, echo/state.h), staged off
 // the audio thread and adopted at a block boundary (RS-6.6).
 //
-// STILL NOT HERE (M3): the Clear action (§16.7; T-037).
+// M3 (T-037): one declared action, Clear (§16.7, RS-4.12): fired at a sample
+// offset of the next block, it fades the repeats out over 20 ms and ends them,
+// landing no value (the load's fade, D-020, with nothing to adopt).
 //
 // THREADING. One writer: every method is called from one thread at a time
 // (horde's slot serialises them, RS-6.6), with two exceptions. stageState may run
@@ -192,6 +197,8 @@ class Echo {
     if (!plant::resetKeepsLine) clearLoop();
     bpm_ = bpmPrev_ = 120.0;
     loadLeft_ = 0;
+    fadeLands_ = false;
+    actionsN_ = 0;
     n_ = 0;
     paramMoved_ = false;
     fadeCount_[0] = fadeCount_[1] = 0;
@@ -256,6 +263,7 @@ class Echo {
       restDirty_ = true;  // the resting instance lands everything, Device ramps too
       return ok;
     }
+    fadeLands_ = true;  // this fade ends by adopting the patch (a Clear's fade alone lands nothing)
     if (plant::loadClearsInstantly) {  // no fade: the old audio is cut at the boundary
       adoptPatch();
       clearLoop();
@@ -287,6 +295,7 @@ class Echo {
   void process(const double* inL, const double* inR, double* outL, double* outR, int n, double bpm) {
     if (!prepared_ || n <= 0) {
       for (int i = 0; i < n; ++i) outL[i] = outR[i] = 0.0;
+      actionsN_ = actionsDone_ = 0;
       return;
     }
     const FtzScope ftz;
@@ -310,6 +319,12 @@ class Echo {
     const bool sync = p_[kSync] >= 0.5;
 
     for (int i = 0; i < n; ++i) {
+      // Actions fired for this block land at their own sample (RS-4.12, A23),
+      // before that sample is read. Offsets past the block land on its last
+      // sample. The planted shim applies them all at the block's start.
+      while (actionsDone_ < actionsN_ &&
+             (plant::actionAtBlockStart || std::min(actions_[actionsDone_].offset, n - 1) <= i))
+        applyAction(actions_[actionsDone_++].id);
       // Input guard (RS-7.9): non-finite input becomes 0, each repair counted.
       double xL = inL[i], xR = inR[i];
       if (!std::isfinite(xL)) { xL = 0.0; countRepair(); }
@@ -379,7 +394,12 @@ class Echo {
       // Read each line (a crossfade sounds both heads, equal-gain), then the
       // loop filter: the wet already carries it once (§2).
       double y[2];
-      if (!loading)
+      // A load's fade holds the heads (they land on the new times at its end,
+      // D-020). A Clear's fade lands nothing, so its heads keep moving exactly as
+      // without it: a glide continues, a move keeps its mode (ruled by poll
+      // 2026-10-23, D-040; freezing them broke "a moving time does what its mode
+      // says": critic T-037 H1).
+      if (!loading || (!fadeLands_ && !plant::clearFreezesHeads))
         for (int k = 0; k < 2; ++k) stepHead(k, cls);
       if (plant::blockSteppedD && i == 0)  // the plant: the read holds its position for the call, then steps
         for (int k = 0; k < 2; ++k) heldD_[k] = head_[k].D;
@@ -432,7 +452,11 @@ class Echo {
       quietRun_ = loud ? 0 : quietRun_ + 1;
       const double dg = (mix >= 1.0 && !plant::mixLeak) ? 0.0 : std::cos(mix * k::kPi / 2);
       // While a load fades, the old wet keeps the OLD mix's wet level (D-020).
-      const double wg = loading ? fadeWg_ : (mix <= 0.0 ? 0.0 : std::sin(mix * k::kPi / 2));
+      // A Clear's fading wet follows the LIVE mix ("under the current settings",
+      // ruled by poll 2026-10-23, D-040); only a load's fade keeps the old wet
+      // level, because its new patch has already landed (D-020).
+      const bool frozenWet = loading && (fadeLands_ || plant::clearFreezesWet);
+      const double wg = frozenWet ? fadeWg_ : (mix <= 0.0 ? 0.0 : std::sin(mix * k::kPi / 2));
       const double dL = plant::dryLimiter ? std::tanh(xL) : xL;
       const double dR = plant::dryLimiter ? std::tanh(xR) : xR;
       const double gLate = plant::inGainAfterLoop ? gIn : 1.0;  // the planted misplaced Input Gain
@@ -450,9 +474,14 @@ class Echo {
       pkOut = std::max(pkOut, plant::outTapDryOnly ? std::max(std::fabs(dg * dL * gOut), std::fabs(dg * dR * gOut))
                                                    : std::max(std::fabs(oL), std::fabs(oR)));
       if (loadEnds) {
-        adoptPatch();  // the old audio has faded: the new patch takes the wet too
-        if (!plant::loadKeepsLine) clearLoop();
-        for (int k = 0; k < 2; ++k) landHead(k);
+        if (fadeLands_ || plant::clearLandsValues) {
+          adoptPatch();  // the old audio has faded: the new patch takes the wet too
+          if (!plant::loadKeepsLine) clearLoop();
+          for (int k = 0; k < 2; ++k) landHead(k);
+        } else {
+          clearLoop();  // a Clear's fade (§16.7): the repeats end, nothing lands, the heads stay
+        }
+        fadeLands_ = false;
       }
 
       // The tail gate (§10, D-018, D-019): input silent and every write AND the
@@ -469,6 +498,7 @@ class Echo {
       }
     }
     bpmPrev_ = bpmEnd;
+    actionsN_ = actionsDone_ = 0;  // the block's actions are spent
     publishTap(tapIn_, pkIn);
     publishTap(tapOut_, pkOut);
   }
@@ -558,6 +588,33 @@ class Echo {
     return true;
   }
 
+  // ---- actions (SPEC §16.7, contract §12.6 RS-4.12, row A23; T-037) ---------
+  // One action: Clear. The key resolves OFF the audio thread (no string on the
+  // audio thread, FOUNDATIONS #131's rule for parameters); fireAction queues it
+  // for the NEXT process() call at a sample offset within that block, in the
+  // per-block context horde builds before process. Up to kMaxActions per block,
+  // preallocated; a further one is refused, never dropped silently. Same events
+  // at the same offsets give the same output; no event, no change (A23). An
+  // action is not a parameter: not automated, not saved, no history (ADR-267 A1).
+  static constexpr int kActionClear = 0;
+  static constexpr int kMaxActions = 8;
+  static std::optional<int> resolveAction(std::string_view key) {
+    if (key == "clear") return kActionClear;
+    return std::nullopt;
+  }
+  // Refused: an unknown id, a full queue, or an offset outside [0, maxBlock)
+  // (critic T-037 L1: never relocated silently). An offset at or past the
+  // NEXT block's n (when that block is shorter than maxBlock) lands on its last
+  // sample. Actions queued before reset(), an unprepared process() or n <= 0 are
+  // discarded with that call.
+  bool fireAction(int id, int offset) {
+    if (id != kActionClear || actionsN_ >= kMaxActions || offset < 0 || offset >= maxBlock_) return false;
+    int j = actionsN_++;  // insertion keeps offset order; equal offsets keep firing order
+    while (j > 0 && actions_[j - 1].offset > offset) { actions_[j] = actions_[j - 1]; --j; }
+    actions_[j] = {id, offset};
+    return true;
+  }
+
   // ---- meters (SPEC §16.1, B435, contract RS-4.7; T-014) ---------------------
   // Two taps: directly after Input Gain (before every path and detector) and
   // directly after Output Gain (after every path and the tail). Each holds the
@@ -610,6 +667,28 @@ class Echo {
   int maxBlock() const { return maxBlock_; }
 
  private:
+  // ---- actions (§16.7) ------------------------------------------------------
+  struct ActionEvent {
+    int id = 0;
+    int offset = 0;
+  };
+  // Clear: the repeats fade out over 20 ms under the current settings and end,
+  // through the load's own fade (§10, D-020) with nothing to adopt. At rest
+  // nothing rings: it does nothing. During a fade (a load's or a Clear's) it
+  // never restarts it, as a second load never does (D-020).
+  void applyAction(int id) {
+    if (id != kActionClear || idle_) return;
+    if (plant::clearWritesState) { p_[kFb] = 0.0; applied(kFb); }  // the planted Clear that edits the patch
+    if (plant::clearCuts) { clearLoop(); return; }                   // the planted hard cut, no fade
+    if (loadLeft_ > 0) {
+      if (plant::clearRestartsFade) loadLeft_ = rampN_;
+      return;
+    }
+    fadeWg_ = rMix_.cur <= 0.0 ? 0.0 : std::sin(rMix_.cur * k::kPi / 2);  // the current wet level, frozen for the fade
+    loadLeft_ = rampN_;
+    fadeLands_ = false;
+  }
+
   // ---- meter taps (§16.1) ---------------------------------------------------
   struct Tap {
     std::atomic<double> peak{0.0};
@@ -1598,6 +1677,9 @@ class Echo {
   double bpm_ = 120.0, bpmPrev_ = 120.0;
   int loadLeft_ = 0;
   double fadeWg_ = 0.0;          // the old wet level, frozen while a load fades (D-020)
+  bool fadeLands_ = false;       // the running fade ends by adopting a patch (a load); false for a Clear alone
+  std::array<ActionEvent, kMaxActions> actions_{};  // the next block's actions, in offset order
+  int actionsN_ = 0, actionsDone_ = 0;
   bool idle_ = true;
   bool restDirty_ = true;        // a change arrived while resting: land it once
   std::int64_t silentRun_ = 0, quietRun_ = 0;
