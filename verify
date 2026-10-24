@@ -111,6 +111,11 @@ intake_gate() {
   return $ok
 }
 
+# Manifest lock and scope freeze (T-016, D-041; 1.0 bar rows 1-2, horde B428): spec/params.json's
+# key identities, fixed row and actions, and SPEC §1's scope list, against core/manifest.lock.json. The
+# tool proves itself on nine planted drifts every run. Regenerating the lock is a human gate.
+params_lock_gate() { python3 tools/manifest_lock.py check; }
+
 # Vendored FOUNDATIONS header (T-012, D-036; Scape's vendor_gate, its D-052): each file's
 # sha256 must equal its MANIFEST line and no unlisted file may sit beside it, so a hand
 # edit, a partial re-vendor or a silent upstream copy goes red. vendor_check takes the
@@ -288,6 +293,7 @@ fast() {
   manifest_gate     || ok=1
   intake_gate       || ok=1  # intake/ is read-only: pinned bytes
   vendor_gate       || ok=1  # T-012: the vendored FOUNDATIONS header is the pinned one
+  params_lock_gate  || ok=1  # T-016: keys, fixed row, actions and the scope list match the lock
   legal_gate       || ok=1  # D-014: legal/IP analysis stays in local/legal/
   lab_smoke_gate    || ok=1  # Phase A: the listening twin is fit to listen to
   core_gate         || ok=1  # M1: the C++ core's invariant suite, each check proven on its plants
