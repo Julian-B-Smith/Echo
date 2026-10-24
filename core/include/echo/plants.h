@@ -123,6 +123,39 @@ ECHO_PLANT(viewGenIndexOffByOne) // the spectrum strip draws generation n+1 as g
 ECHO_PLANT(irCancelKeepsSlot)    // a cancelled render stays a valid, freshest slot and pushes complete renders out (critic B4-2 M2)
 ECHO_PLANT(irPublishesEmpty)     // a request is shown before anything is rendered: the screen blanks on every change (critic B4-2 M3)
 ECHO_PLANT(viewUnrenderedIsZero) // a column past what is rendered reads as exact zero: a partial frame draws an ended tail (critic B4-2 M4)
+// ---- M3, B2 (T-013: the ABI and the declarations) ----
+ECHO_PLANT(propsNoTail)          // properties() leaves the tail undeclared (a forgotten field, FOUNDATIONS #129)
+ECHO_PLANT(tailWraps32)          // the 64-bit tail is narrowed to TailDecl's 32 bits and wraps (SPEC §16.5)
+ECHO_PLANT(paramNoClass)         // the Device class maps to no OQ #33 class (RS-2.2)
+ECHO_PLANT(processReadsAfterWrite) // outputs cleared before the input is read: in place, the input is lost
+ECHO_PLANT(loadBoundShort)       // properties() declares half the real load fade (critic T-013 MED-1)
+// ---- M3, B2 (T-014: meters and the I/O gain standard's tests 1-7) ----
+ECHO_PLANT(latchClears)          // a clip latch clears itself at the next block (B225: it must hold)
+ECHO_PLANT(tapBeforeGain)        // the input tap reads the signal BEFORE Input Gain
+ECHO_PLANT(prepareRampsIn)       // the gains ramp in from unity at every landing instead of opening at their value (test 3)
+ECHO_PLANT(inGainAfterLoop)      // Input Gain applied at the output: it never drives the loop (test 5)
+ECHO_PLANT(doubleGain)           // TEST-SIDE: the simulated rack slot adds its own gain pair beside Echo's (test 6)
+// ---- M3, B2, after the T-014 critic ----
+ECHO_PLANT(inGainDryOnly)        // Input Gain reaches the dry path but is divided back out of what enters the loop (H1)
+ECHO_PLANT(outTapDryOnly)        // the output tap reads the dry term only: blind to the wet and the tail (H2)
+ECHO_PLANT(tapReadsRaw)          // the input tap reads the raw input, before the non-finite repair (M1)
+ECHO_PLANT(resetClearsLatch)     // reset() clears the meter latches (RS-6.13: they are retained)
+// ---- M3, B2 (T-015: the saved state, echo/state.h) ----
+ECHO_PLANT(stateFloat6g)         // floats written as %.6g: lossy, so save -> load -> save drifts (L0008)
+ECHO_PLANT(stateKeyMissing)      // one key (fb.amount) left out of the saved state (A17)
+ECHO_PLANT(stateLatchSerialised) // the meter latch written into the state (A20: live state saved)
+ECHO_PLANT(stateOversizedAccepted) // a text over 2 KiB is parsed instead of refused first (A19)
+ECHO_PLANT(stateDivByIndex)      // time.div written by index, not by name (SPEC §3.1)
+ECHO_PLANT(stateAcceptsUnknown)  // an unknown key is skipped silently instead of refusing the text
+ECHO_PLANT(adoptResets)          // adoptStaged resets first: a load mid-play cuts the repeats (D-020 broken; critic H1)
+// ---- M3, B2 (T-037: the Clear action, SPEC §16.7, row A23) ----
+ECHO_PLANT(actionAtBlockStart)   // A23's must-fail shim: an action lands at the block's start, not its offset
+ECHO_PLANT(clearCuts)            // Clear cuts the repeats with no fade
+ECHO_PLANT(clearLandsValues)     // Clear's fade ends by adopting the patch (snapping ramps): a value lands
+ECHO_PLANT(clearWritesState)     // Clear edits the patch (feedback to 0): the saved state changes
+ECHO_PLANT(clearRestartsFade)    // a Clear during a fade restarts it (D-020: never)
+ECHO_PLANT(clearFreezesHeads)    // a Clear's fade holds the heads like a load's (critic T-037 H1; D-040: they keep moving)
+ECHO_PLANT(clearFreezesWet)      // a Clear's fading wet is frozen at the Clear (D-040: it follows the live mix)
 }  // namespace echo::plant
 
 #undef ECHO_PLANT

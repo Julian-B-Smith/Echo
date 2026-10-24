@@ -768,3 +768,163 @@ The human's instruction: "Vendor fx_operator.h at FOUNDATIONS 301834b in Scape's
 - **Re-vendoring is a human gate:** a new commit, both hashes, and a decision citing this one.
 
 Rejected: vendoring `engine_manifest.h` now (`echo-002`'s question 4 asks FOUNDATIONS first).
+
+## D-037 — T-013: Echo conforms to FOUNDATIONS' FX-operator ABI where the vendored header declares it (lead's record, 2026-10-23; for the human's review on batch 2's PR; one ruling by poll)
+
+**What T-013 built** (`engine.h`, `params.h`, `plants.h`, `core_tests.cpp`, `core/CMakeLists.txt`):
+- `static_assert`s at the end of `engine.h` that `echo::Echo` models `FxOperatorLifecycle` and `FxOperatorParams`.
+  They sit in the header, so every includer (horde included) fails at compile time on drift. Scape puts its asserts
+  in a `.cpp`; the critic judged the header the better place.
+- `Echo::properties()`: latency 0 exact, the tail through `tailDecl32` with `may_change`, `min_block` 1, and a load
+  bound of the 20 ms fade at the rate. Every field is left undeclared before `prepare()`, so `validate()` refuses it
+  (FOUNDATIONS #129).
+- `echo::tailDecl32`: SPEC §16.5's saturation, so a tail at or past 2³² − 1 declares `foundations::kInfiniteTail`.
+- `process()` is in place for `inL == outL`, `inR == outR`, proven bit-identical across routings and block sizes
+  1, 64 and 4096. This settles **T-007's signature item**: the 4-pointer `process` accepts the in-place shape, so
+  the swap is a rename, not a call-site change.
+- The vendored include directory is on `echocore`'s INTERFACE, as Scape has it PUBLIC.
+
+**Readings the lead made (for the human's review):**
+- **OQ #33's two enums are mirrored in `params.h`** (`echo::oq33`), by name and order, `kUndeclared` included,
+  because `engine_manifest.h` is not vendored (`echo-002` question 4). When it is vendored, the mirror becomes a
+  using-declaration.
+- **Device maps to `kContinuous` + `kExcluded`.** SPEC §9 rules only "device = excluded"; the kind is the lead's
+  reading, true while every Device key is a scalar (the two I/O gains in dB). The check now requires each key's
+  mapped kind to match its own `stepped` flag, so a future stepped Device key fails loudly (critic LOW-1). *Open for
+  the human:* ratify `continuous` as Device's kind, or leave it to FOUNDATIONS.
+
+**Ruled by poll, 2026-10-23:** `./verify`'s fast-math guard probe compiles `engine.h` by hand, so it gained
+`-I core/third_party/foundations/include` on both of its compiler calls. Without it the probe could not compile,
+and its "did NOT fire" lines meant nothing. The change restores the gate; it does not weaken it.
+
+**Critic (Opus, fresh context): SHIP**, no HIGH. Fixed:
+- **MED-1:** the load bound was checked only against its own formula. It is now measured against the real fade at
+  four rates, with a new plant, `loadBoundShort`.
+- **MED-2:** T-013's own tail case (99.99 %, 12 s, 192 kHz) now runs first and catches the wrap plant itself. A
+  plain narrowing maps 2³² − 1 and INT64_MAX to `0xFFFFFFFF` by coincidence. The tail figure is about 3.3e11
+  samples, not 1.9e14.
+- **LOW-1** (above); **LOW-2:** the two `kInfiniteTail` names are documented where they meet; **LOW-3:** the
+  in-place contract is stated on `process()`; **LOW-5:** the stale first line is fixed.
+
+**Not acted on, reported:** LOW-4, a fleet item for horde. Echo and Scape each put a copy of
+`foundations/fx_operator.h` on horde's include path. Today the sha256s match. If the two pins ever diverge, whichever
+directory comes first wins in horde's build, and each module's own `vendor_gate` proves nothing there.
+
+Plants added: `propsNoTail`, `tailWraps32`, `paramNoClass`, `processReadsAfterWrite`, `loadBoundShort`. The core
+suite now has 56 checks guarding 80 distinct planted faults (M2's 75 plus these 5); `echo_plants` prints 87
+"plant fires" lines, because some plants are guarded by more than one check.
+
+## D-038 — T-014: the meter taps and the I/O gain standard's tests 1–7 (lead's record, 2026-10-23; for the human's review on batch 2's PR)
+
+**What T-014 built** (`engine.h`, `plants.h`, `core_tests.cpp`), to SPEC §16.1 (D-035) and B435:
+- **Two meter taps:**
+  - the input tap reads directly after Input Gain, on the repaired sample;
+  - the output tap reads directly after Output Gain, every path and the tail.
+- **Each tap** holds the last block's peak |x| over both channels and a clip latch that sets on |x| > 1.0.
+- **The latch is cleared only by `clearMeters()`,** never by `process()`, `reset()` or a load (RS-6.13).
+- **Lock-free relaxed atomics,** with a `static_assert` that they are lock-free. They are published once per
+  `process()` call, and `clearMeters()` may be called from another thread.
+- **No audio path changed** in the clean build: the render hash is unchanged (`85f103b94528512e`, checked by the
+  critic).
+- **Tests 1–7 as checks.** Test 2, already in the suite at 48 and 96 kHz, now covers both trims at 44.1, 48 and
+  96 kHz. It checks every ramp sample against the straight line, with the end landing on sample N − 1.
+
+**Critic (Opus, fresh context): FIX-THEN-SHIP**, from mutants it built by hand that the suite passed. All fixed:
+- **H1:** test 5 showed only that Input Gain is not applied at the output. Input Gain applied to the dry path only
+  passed. Test 5 now requires the +12 dB render to equal a 0 dB instance fed the pre-scaled input, bit for bit. New
+  plant: `inGainDryOnly`.
+- **H2:** the meter checks could not see channel, sign, or the output tap's placement. A signed left-only input tap
+  with a dry-only output tap passed. The checks now put the peak on the right channel and make it negative, and the
+  output tap must read a wet tail after the input stops. New plant: `outTapDryOnly`.
+- **M1:** "reads the repaired sample" had no check. One is added, with a `tapReadsRaw` plant. The first version was
+  itself vacuous (an instance at rest never reaches the taps on a repaired zero), and the plant was caught by the
+  wrong check. It now runs on a live signal and catches the plant itself.
+- **LOW:** a `resetClearsLatch` plant for test 7's reset and load half, and the `clearMeters()` threading note.
+
+**Stated limits** (the critic's LOWs, recorded rather than changed):
+- **Test 6 is mostly by construction.** `doubleGain` is a test-side plant that would fire against any module; the
+  content is that Echo declares both keys, Device class.
+- **Test 4's corner flip lands inside the first load's fade,** so it exercises the second-load branch (D-020).
+- **On an unprepared instance or n ≤ 0,** `process()` returns before publishing, so the last peak stays readable.
+
+**Open for the human (the critic's question).** §16.1 says "the block's peak", which this builds. With small horde
+blocks (down to n = 1) and a GUI polling at 30–60 Hz, the shown peak is close to one arbitrary block; the latch
+still catches every over. The alternative is a peak held since the GUI last read it, which makes the reader a
+writer: an atomic exchange to zero. That would be a spec change (§16.1, a protected path).
+
+## D-039 — T-015: the saved state, staged and adopted (lead's record, 2026-10-23; for the human's review on batch 2's PR)
+
+**What T-015 built**, to SPEC §16.2 (D-035):
+- **`core/include/echo/state.h`:** the writer and a strict, all-or-nothing parser.
+- **`Echo::saveState`:** writes every key's target, never live state.
+- **`Echo::stageState`:** parses and validates OFF the audio thread into one staging slot. A second stage is refused
+  while one is pending.
+- **`Echo::adoptStaged`:** lands the staged state ON the audio thread between `process()` calls, with no allocation.
+  - The patch keys land through `loadState`, the D-020 load: no ramp-in, and the old repeats fade under their old
+    settings.
+  - The Device keys land through `setParam`, so a restored gain ramps 20 ms mid-play and lands at rest.
+
+Sizes: defaults 460 B, the constructed worst case 616 B (the budget is 2048 B).
+
+**Numbers.** `std::from_chars(double)` is deleted in the dev Mac's libc++, so the writer tries `%.*f` and `%.*g`
+candidates. It keeps the shortest one that the parser reads back bit for bit, preferring fixed on a tie ("30", not
+"3e+01": fewest digits is not shortest text). Both directions run under a thread-local "C" numeric locale
+(`uselocale`). Every token must match a strict grammar: `-?D+(.D+)?([eE][+-]?D+)?`, and `-?D+` for the seed.
+Underflow and overflow are refused, and `-0` reads and writes as `0`.
+
+**Critic (Opus, fresh context): FIX-THEN-SHIP**, from mutant engines and probes. All fixed:
+- **H1:** an adopt was only ever tested on idle instances. A mutant that hard-cut the ringing tail on every load
+  passed. The new `stateAdoptLive` check compares an adopt mid-play bit for bit with a twin that loads and sets the
+  gains by hand; the new plant is `adoptResets`.
+- **M1:** the "locale-proof" claim was false. A two-byte decimal point (ar_SA) produced an unreadable text, and
+  `mix 30,5` loaded in de_DE but not in C. The thread-local C locale and the strict grammar fix both. The check runs
+  three locales where present and reports how many ran, never skipping silently.
+- **M2:** the parser accepted whatever `strtod` does (`+30`, a tab, a hex float, `30.`, `.30e2`, `1e-400`, a seed
+  of `1e0`). Each is now refused, and each is in the refusal check.
+- **M3:** A19's "every factory preset" cannot be checked yet. It is carried into T-021's criteria.
+- **LOW:** `-0`; the THREADING note (`stageState` runs beside `process()`); `strtod` and `printf` may malloc
+  internally (off the audio thread; the comment says so).
+
+**Stated limit.** The A18 render comparison loads two texts already shown equal, so it is a determinism check that
+cannot fail on its own. The byte comparison and the bit-equal values carry A18.
+
+**Open for the human (the critic's question).** When horde's audio is stopped, does it still call `adoptStaged`
+between blocks? If not, a staged load stays pending and every later stage (a second load, an undo) is refused until
+audio runs. The alternative is a later stage replacing a pending one, which needs a different handover (a
+generation counter) to stay safe against an adopt in flight.
+
+## D-040 — T-037: the Clear action; during a Clear the heads keep moving and the wet follows the live mix (RATIFIED by poll, 2026-10-23, two rulings; the rest the lead's record)
+
+**What T-037 built** (`engine.h`, `plants.h`, `core_tests.cpp`), to SPEC §16.7 (D-035, ruling 7):
+- **The entry:** `resolveAction("clear")` resolves the key off the audio thread. `fireAction(id, offset)` queues the
+  action for the next `process()` call in a preallocated queue of 8, kept in offset order. It refuses an unknown
+  id, a full queue, and an offset outside [0, maxBlock); nothing is relocated silently.
+- **The landing:** each action lands at its own sample, before that sample is read.
+- **Clear reuses the load's fade (D-020).** A new flag, `fadeLands_`, records whether the running fade ends by
+  adopting a patch. A Clear's fade alone ends with `clearLoop()` only: no `adoptPatch`, no `landHead`. A load that
+  joins it still lands, and neither restarts the fade.
+- **Clear at rest does nothing.**
+- **The no-action path is unchanged:** the render hash is `85f103b94528512e`.
+
+**Ruled by poll, 2026-10-23** (the critic's question; both rulings clarify SPEC §16.7, amended in place):
+- **The heads keep moving, not landed.** Built literally like a load's fade, the heads froze. A tempo move during the
+  fade then crossfaded as a repitch (the wrong mode), and a tape glide in flight came out about 950 samples off for
+  the rest of its run (critic H1). A Clear's fade now steps the heads exactly as a run without it does; a load's
+  fade still holds them until they land.
+- **The fading wet follows the live mix.** A load's fade keeps the old wet level because its new patch has already
+  landed; a Clear has no new patch, so "current settings" means live (critic M3).
+
+**Critic (Opus, fresh context): FIX-THEN-SHIP.** Fixed:
+- **H1 and M1:** the "heads stay" assertion had no moving head, so it could not fail. The new check
+  `clearMovingHeads` covers a tape glide and a tempo crossfade, with the plant `clearFreezesHeads`.
+- **M2:** the fade length was tested at 48 kHz only. `clearFade` now also runs at 44.1 kHz.
+- **M3:** the new check `clearLiveWet`, with the plant `clearFreezesWet`.
+- **L1:** out-of-range offsets are refused and tested.
+- **L3:** the queue's array is sized by `kMaxActions`.
+- **L5:** the A23 check now has two Clears in one block, the second after the first's fade.
+
+**Stated limits:**
+- `clearDryNoLand` shows the dry path bit-identical while the wet is silent. With the wet ringing, the dry path's
+  identity is covered by `clearFade` (silent input) and `clearLiveWet`, not by one check (critic L4).
+- Actions queued before `reset()`, before an unprepared `process()`, or before a call with n ≤ 0 are discarded with
+  that call. This is documented, not tested (critic L2).

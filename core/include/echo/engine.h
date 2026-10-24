@@ -1,12 +1,24 @@
-// echo/engine.h — Echo's stereo delay core (M1 + M2), behind a local stand-in for
-// FOUNDATIONS' FX-operator ABI.
+// echo/engine.h — Echo's stereo delay core (M1 + M2), conforming to FOUNDATIONS'
+// FX-operator ABI where the vendored header declares it, a local shim elsewhere.
 //
-// DEGRADED AND TEMPORARY SHIM. FOUNDATIONS has not frozen the ABI (OQ #32), so
-// this mirrors the shape horde already admits from Bulwark's shim (contract
-// §1.1): prepare(double, int), reset(), process(double* L/R, int n), setParam by
-// key or by a resolved handle, loadState(span), latency/tail/minBlock/channels.
-// process() also takes the host tempo for the block (Sluice's shape): tempo is
-// data, never a clock. The swap to the real header is a rename at the call site.
+// THE ABI (M3 T-013). Echo models FOUNDATIONS' FX-operator concepts from the
+// vendored, UNFROZEN header (core/third_party/foundations, D-036): the lifecycle
+// prepare(double, int) / reset() and the parameter entry resolve(address) ->
+// handle, setParam(handle, v), both static_assert'ed at the end of this file;
+// properties() reports an OperatorProperties that passes validate() once
+// prepared. What the header does NOT declare yet stays a DEGRADED, TEMPORARY
+// SHIM (INTEGRATIONS rule 2), in the shape horde already admits from Bulwark's
+// (contract §1.1), each a rename at the call site once FOUNDATIONS rules it:
+//   - process(inL, inR, outL, outR, int n, double bpm): the signature is open
+//     there (Echo's brief echo-002, question 1). Tempo is data, never a clock.
+//   - the state entry: saveState / stageState / adoptStaged (T-015, below) and
+//     the older loadState(span<KeyValue>) it lands through; the arguments are
+//     open there (echo-002, question 2; horde RS-6.9).
+//   - the action entry: resolveAction / fireAction (T-037, below), horde's
+//     per-block context (contract §12.6) carried by this shim until FOUNDATIONS
+//     rules an entry for it.
+//   - latency()/tail()/minBlock()/channels(): the pre-ABI declarations, kept
+//     for the tests; properties() is the ABI's view of the same values.
 //
 // SCOPE (ROADMAP M1). Built to spec/SPEC.md revision 2: the two 12 s lines with
 // 4-point Catmull-Rom reads (D-004), free and synced time with L/R offsets and
@@ -29,12 +41,24 @@
 // mod.seed), depth limited by the curve's slope and the write head, the offset
 // slew-limited to 0.25 sample/sample, 250 ms ramps, seeded switches.
 //
-// STILL NOT HERE (M3): meters with clip latches (§8, B435), the FOUNDATIONS ABI
-// swap, state stored by name. Only the non-finite count and latch exist.
+// M3 (T-014): two meter taps (§16.1, B435), directly after Input Gain and after
+// Output Gain, each the block's peak and a clip latch, published as relaxed
+// atomics once per block.
+//
+// M3 (T-015): the saved state as text by name (§16.2, echo/state.h), staged off
+// the audio thread and adopted at a block boundary (RS-6.6).
+//
+// M3 (T-037): one declared action, Clear (§16.7, RS-4.12): fired at a sample
+// offset of the next block, it fades the repeats out over 20 ms and ends them,
+// landing no value (the load's fade, D-020, with nothing to adopt).
 //
 // THREADING. One writer: every method is called from one thread at a time
-// (horde's slot serialises them, RS-6.6). Only the non-finite counters are
-// atomics, readable from another thread (RS-7.9).
+// (horde's slot serialises them, RS-6.6), with two exceptions. stageState may run
+// on another thread BESIDE process() (it touches only the staging slot, handed
+// over by an atomic flag; T-015), and clearMeters() may be called from the GUI.
+// The non-finite counters (RS-7.9) and the meter taps (§16.1) are atomics,
+// readable from any other thread: the GUI reads published values, never working
+// buffers (contract §8, RC-8). saveState stays serialised with process().
 #pragma once
 #include <algorithm>
 #include <array>
@@ -50,6 +74,8 @@
 #include "echo/ftz.h"
 #include "echo/params.h"
 #include "echo/plants.h"
+#include "echo/state.h"
+#include "foundations/fx_operator.h"
 
 // __FINITE_MATH_ONLY__ is always DEFINED by clang (as 0); test its value, or
 // this guard fires on every clean build.
@@ -75,8 +101,27 @@
 
 namespace echo {
 
-// FOUNDATIONS' TailDecl sentinel stand-in (RS-7.3): "never ends".
+// The engine's own "never ends" (RS-7.3). The engine counts its tail in 64 bits;
+// tailDecl32 below maps it onto FOUNDATIONS' 32-bit TailDecl. TWO NAMES MEET in
+// this header: echo::kInfiniteTail (int64 max, what tail() returns) and
+// foundations::kInfiniteTail (uint32 max, what properties().tail holds). Inside
+// namespace echo an unqualified kInfiniteTail is THIS one, so comparing a
+// TailDecl against it is silently always false: qualify foundations:: there.
 inline constexpr std::int64_t kInfiniteTail = std::numeric_limits<std::int64_t>::max();
+
+// SPEC §16.5 (D-035): FOUNDATIONS' TailDecl counts samples in 32 bits. A tail at
+// or past 2^32 - 1 samples (6.2 h at 192 kHz, reachable at feedback just under
+// unity) declares foundations::kInfiniteTail: saturating never under-declares,
+// and the gate still brings Echo to rest at exact zero. A plain narrowing would
+// WRAP, and a host would plan for a short tail and cut a ringing loop (the
+// planted tailWraps32). A negative count is a bug upstream; it saturates too,
+// the conservative reading. Not constexpr: the plant is a runtime flag in
+// echo_plants.
+inline std::uint32_t tailDecl32(std::int64_t t) {
+  if (plant::tailWraps32) return static_cast<std::uint32_t>(t);
+  if (t < 0 || t >= static_cast<std::int64_t>(foundations::kInfiniteTail)) return foundations::kInfiniteTail;
+  return static_cast<std::uint32_t>(t);
+}
 
 struct KeyValue {
   std::string_view key;
@@ -152,6 +197,8 @@ class Echo {
     if (!plant::resetKeepsLine) clearLoop();
     bpm_ = bpmPrev_ = 120.0;
     loadLeft_ = 0;
+    fadeLands_ = false;
+    actionsN_ = 0;
     n_ = 0;
     paramMoved_ = false;
     fadeCount_[0] = fadeCount_[1] = 0;
@@ -168,6 +215,7 @@ class Echo {
     silentRun_ = quietRun_ = tailClock_ = 0;
     nonFinite_.store(0, std::memory_order_relaxed);
     nonFiniteLatch_.store(false, std::memory_order_relaxed);
+    if (plant::resetClearsLatch) clearMeters();  // the meter latches are NEVER reset's (RS-6.13; critic T-014 LOW)
   }
 
   // ---- parameters -----------------------------------------------------------
@@ -215,6 +263,7 @@ class Echo {
       restDirty_ = true;  // the resting instance lands everything, Device ramps too
       return ok;
     }
+    fadeLands_ = true;  // this fade ends by adopting the patch (a Clear's fade alone lands nothing)
     if (plant::loadClearsInstantly) {  // no fade: the old audio is cut at the boundary
       adoptPatch();
       clearLoop();
@@ -241,22 +290,41 @@ class Echo {
   // ---- process --------------------------------------------------------------
   // bpm: the host tempo for THIS block; <= 1 falls back to 120. Within the block
   // it is interpolated per sample from the previous block's value (§3.3).
+  // IN PLACE is allowed: inL == outL and inR == outR (tested, T-013). Any other
+  // overlap (partial, or crossed: inL == outR) is not.
   void process(const double* inL, const double* inR, double* outL, double* outR, int n, double bpm) {
     if (!prepared_ || n <= 0) {
       for (int i = 0; i < n; ++i) outL[i] = outR[i] = 0.0;
+      actionsN_ = actionsDone_ = 0;
       return;
     }
     const FtzScope ftz;
+    // The planted in-place hazard (T-013): outputs cleared at the top of the
+    // block, before the input is read. Out of place it changes nothing; in place
+    // (inL == outL) it silences the input. The real loop reads sample i's input
+    // before it writes sample i's output, and never reads input after that.
+    if (plant::processReadsAfterWrite)
+      for (int i = 0; i < n; ++i) outL[i] = outR[i] = 0.0;
     if (plant::allocInProcess) {
       std::vector<double> scratch(8, inL[0]);  // the planted audio-thread allocation
       outL[0] = scratch[0] * 0.0;
     }
+    // The meters (§16.1): this block's peaks and overs, published once after the
+    // loop. The latches are only ever SET here; clearMeters() is their one clear.
+    if (plant::latchClears) { tapIn_.clip.store(false, std::memory_order_relaxed); tapOut_.clip.store(false, std::memory_order_relaxed); }
+    double pkIn = 0.0, pkOut = 0.0;
     const double bpmEnd = (std::isfinite(bpm) && bpm > 1.0) ? bpm : 120.0;
     if (idle_ && !plant::tempoGlidesAtRest) bpmPrev_ = bpmEnd;  // at rest the tempo lands, never glides (§3.3)
     double bpmStart = bpmPrev_;  // re-landed if the instance rests and wakes inside this block
     const bool sync = p_[kSync] >= 0.5;
 
     for (int i = 0; i < n; ++i) {
+      // Actions fired for this block land at their own sample (RS-4.12, A23),
+      // before that sample is read. Offsets past the block land on its last
+      // sample. The planted shim applies them all at the block's start.
+      while (actionsDone_ < actionsN_ &&
+             (plant::actionAtBlockStart || std::min(actions_[actionsDone_].offset, n - 1) <= i))
+        applyAction(actions_[actionsDone_++].id);
       // Input guard (RS-7.9): non-finite input becomes 0, each repair counted.
       double xL = inL[i], xR = inR[i];
       if (!std::isfinite(xL)) { xL = 0.0; countRepair(); }
@@ -280,8 +348,14 @@ class Echo {
       tickFilters();
       tickRoute();
 
-      xL *= gIn;
-      xR *= gIn;
+      // Input Gain before every path (B435: the dry path, the loop and every
+      // detector), then the input tap directly after it.
+      const double rawPk = plant::tapReadsRaw ? std::max(std::fabs(inL[i]), std::fabs(inR[i])) : std::max(std::fabs(xL), std::fabs(xR));
+      if (!plant::inGainAfterLoop) {
+        xL *= gIn;
+        xR *= gIn;
+      }
+      pkIn = std::max(pkIn, (plant::tapBeforeGain || plant::tapReadsRaw) ? rawPk : std::max(std::fabs(xL), std::fabs(xR)));
       const bool silentIn = xL == 0.0 && xR == 0.0;
       silentRun_ = silentIn ? silentRun_ + 1 : 0;
       // The tail clock (D-019): counts silent samples since the input stopped,
@@ -296,6 +370,8 @@ class Echo {
       // Encode into the lines (§4), then the input filter on what enters them.
       double u[2];
       for (int k = 0; k < 2; ++k) u[k] = enc_[k][0] * xL + enc_[k][1] * xR;
+      if (plant::inGainDryOnly)  // the planted misplacement (critic T-014 H1): Input Gain reaches the dry path only
+        for (int k = 0; k < 2; ++k) u[k] /= gIn;
       for (int k = 0; k < 2; ++k) u[k] = filterSample(fIn_, k, u[k]);
 
       // Time targets: the tempo moves per sample within the block (D-008).
@@ -318,7 +394,12 @@ class Echo {
       // Read each line (a crossfade sounds both heads, equal-gain), then the
       // loop filter: the wet already carries it once (§2).
       double y[2];
-      if (!loading)
+      // A load's fade holds the heads (they land on the new times at its end,
+      // D-020). A Clear's fade lands nothing, so its heads keep moving exactly as
+      // without it: a glide continues, a move keeps its mode (ruled by poll
+      // 2026-10-23, D-040; freezing them broke "a moving time does what its mode
+      // says": critic T-037 H1).
+      if (!loading || (!fadeLands_ && !plant::clearFreezesHeads))
         for (int k = 0; k < 2; ++k) stepHead(k, cls);
       if (plant::blockSteppedD && i == 0)  // the plant: the read holds its position for the call, then steps
         for (int k = 0; k < 2; ++k) heldD_[k] = head_[k].D;
@@ -371,11 +452,16 @@ class Echo {
       quietRun_ = loud ? 0 : quietRun_ + 1;
       const double dg = (mix >= 1.0 && !plant::mixLeak) ? 0.0 : std::cos(mix * k::kPi / 2);
       // While a load fades, the old wet keeps the OLD mix's wet level (D-020).
-      const double wg = loading ? fadeWg_ : (mix <= 0.0 ? 0.0 : std::sin(mix * k::kPi / 2));
+      // A Clear's fading wet follows the LIVE mix ("under the current settings",
+      // ruled by poll 2026-10-23, D-040); only a load's fade keeps the old wet
+      // level, because its new patch has already landed (D-020).
+      const bool frozenWet = loading && (fadeLands_ || plant::clearFreezesWet);
+      const double wg = frozenWet ? fadeWg_ : (mix <= 0.0 ? 0.0 : std::sin(mix * k::kPi / 2));
       const double dL = plant::dryLimiter ? std::tanh(xL) : xL;
       const double dR = plant::dryLimiter ? std::tanh(xR) : xR;
-      double oL = (dg * dL + wg * wo[0]) * gOut;
-      double oR = (dg * dR + wg * wo[1]) * gOut;
+      const double gLate = plant::inGainAfterLoop ? gIn : 1.0;  // the planted misplaced Input Gain
+      double oL = (dg * dL + wg * wo[0]) * gOut * gLate;
+      double oR = (dg * dR + wg * wo[1]) * gOut * gLate;
       if (!plant::noOutputGuard && (!std::isfinite(oL) || !std::isfinite(oR))) {
         oL = oR = 0.0;
         clearLoop();
@@ -383,10 +469,19 @@ class Echo {
       }
       outL[i] = oL;
       outR[i] = oR;
+      // The output tap: after Output Gain, every path and the tail. (The planted
+      // outTapDryOnly reads the dry term alone, blind to the wet and the tail.)
+      pkOut = std::max(pkOut, plant::outTapDryOnly ? std::max(std::fabs(dg * dL * gOut), std::fabs(dg * dR * gOut))
+                                                   : std::max(std::fabs(oL), std::fabs(oR)));
       if (loadEnds) {
-        adoptPatch();  // the old audio has faded: the new patch takes the wet too
-        if (!plant::loadKeepsLine) clearLoop();
-        for (int k = 0; k < 2; ++k) landHead(k);
+        if (fadeLands_ || plant::clearLandsValues) {
+          adoptPatch();  // the old audio has faded: the new patch takes the wet too
+          if (!plant::loadKeepsLine) clearLoop();
+          for (int k = 0; k < 2; ++k) landHead(k);
+        } else {
+          clearLoop();  // a Clear's fade (§16.7): the repeats end, nothing lands, the heads stay
+        }
+        fadeLands_ = false;
       }
 
       // The tail gate (§10, D-018, D-019): input silent and every write AND the
@@ -403,6 +498,9 @@ class Echo {
       }
     }
     bpmPrev_ = bpmEnd;
+    actionsN_ = actionsDone_ = 0;  // the block's actions are spent
+    publishTap(tapIn_, pkIn);
+    publishTap(tapOut_, pkOut);
   }
 
   // ---- declarations (SPEC §10) ----------------------------------------------
@@ -413,6 +511,24 @@ class Echo {
   // Samples until the instance is at rest once the input stops (§10, §12.1's
   // reading): (n+2)·T_max + 0.25 s for g < 1, kInfiniteTail for g >= 1.
   std::int64_t tail() const { return tailN_; }
+
+  // FOUNDATIONS' view of the declarations for THIS prepared configuration
+  // (fx_operator.h; horde row A1). Before prepare() every field is left
+  // undeclared, so validate() refuses it: a forgotten declaration must be an
+  // absence, never a confident 0 (FOUNDATIONS #129). Latency 0, exact (nothing
+  // is buffered ahead, §10); the tail mapped by tailDecl32, may_change (it
+  // follows feedback, time and depth); min_block 1 (bit-identical down to one
+  // sample, §10); the load bound is the 20 ms fade-out at this rate (D-020),
+  // the same count the engine fades over.
+  foundations::OperatorProperties properties() const {
+    foundations::OperatorProperties p;
+    if (!prepared_) return p;
+    p.latency = foundations::LatencyDecl{0, 0.0, foundations::ResidualSign::kNone};
+    if (!plant::propsNoTail) p.tail = foundations::TailDecl{tailDecl32(tailN_), true};
+    p.min_block = 1u;
+    p.load = foundations::LoadDecl{static_cast<std::uint32_t>(plant::loadBoundShort ? rampN_ / 2 : rampN_)};
+    return p;
+  }
 
   // ---- reads for the slot, the screen and the tests -------------------------
   bool atRest() const { return idle_; }
@@ -425,6 +541,103 @@ class Echo {
   std::uint64_t nonFiniteCount() const { return nonFinite_.load(std::memory_order_relaxed); }
   bool nonFiniteLatched() const { return nonFiniteLatch_.load(std::memory_order_relaxed); }
   void clearLatches() { nonFiniteLatch_.store(false, std::memory_order_relaxed); }
+
+  // ---- saved state (SPEC §16.2, RS-6.6, RS-6.10 – 6.13; T-015) --------------
+  // saveState: any thread that is not running process() concurrently (horde's
+  // main thread). It writes every key's TARGET (never a value mid-ramp) and no
+  // live state (meters, lines, phases: A20), into the caller's buffer, without
+  // allocating. Returns the length, or 0 if cap is too small (state::kMaxBytes
+  // always suffices).
+  std::size_t saveState(char* out, std::size_t cap) const {
+    state::Values v{};
+    for (int i = 0; i < kNumParams; ++i) v[static_cast<std::size_t>(i)] = p_[i];
+    const bool latch = tapIn_.clip.load(std::memory_order_relaxed) || tapOut_.clip.load(std::memory_order_relaxed);
+    return state::write(v, out, cap, latch);
+  }
+  // The load in two steps (RS-6.6). stageState parses and validates OFF the
+  // audio thread (all or nothing; a text over 2 KiB refused first) into one
+  // staging slot; adoptStaged lands it ON the audio thread, between process()
+  // calls, with no allocation. One slot, handed over by an atomic flag: a second
+  // stage while one is pending is refused rather than racing the adopt.
+  bool stageState(std::string_view text, const char** why = nullptr) {
+    if (stagedReady_.load(std::memory_order_acquire)) {
+      if (why) *why = "a staged state is pending";
+      return false;
+    }
+    state::Values v{};
+    if (!state::parse(text, v, why)) return false;
+    staged_ = v;
+    stagedReady_.store(true, std::memory_order_release);
+    return true;
+  }
+  // The patch keys land as a load (D-016, D-020: no ramp-in, the old repeats fade
+  // under their old settings; at rest, straight on). The Device keys are the
+  // INSTANCE's (RS-4.5): restored here, but through setParam, so a gain restored
+  // mid-play ramps its 20 ms like any gain move (B435) and lands at rest.
+  bool adoptStaged() {
+    if (!stagedReady_.load(std::memory_order_acquire)) return false;
+    std::array<KeyValue, kNumParams> kv{};
+    std::size_t n = 0;
+    for (int i = 0; i < kNumParams; ++i)
+      if (kParams[static_cast<std::size_t>(i)].morph != Morph::Device) kv[n++] = {kParams[static_cast<std::size_t>(i)].key, staged_[static_cast<std::size_t>(i)]};
+    if (plant::adoptResets) reset();  // the planted hard cut: the ringing repeats end at the load (critic T-015 H1)
+    loadState(std::span<const KeyValue>(kv.data(), n));
+    for (int i = 0; i < kNumParams; ++i)
+      if (kParams[static_cast<std::size_t>(i)].morph == Morph::Device) setParam(i, staged_[static_cast<std::size_t>(i)]);
+    stagedReady_.store(false, std::memory_order_release);
+    return true;
+  }
+
+  // ---- actions (SPEC §16.7, contract §12.6 RS-4.12, row A23; T-037) ---------
+  // One action: Clear. The key resolves OFF the audio thread (no string on the
+  // audio thread, FOUNDATIONS #131's rule for parameters); fireAction queues it
+  // for the NEXT process() call at a sample offset within that block, in the
+  // per-block context horde builds before process. Up to kMaxActions per block,
+  // preallocated; a further one is refused, never dropped silently. Same events
+  // at the same offsets give the same output; no event, no change (A23). An
+  // action is not a parameter: not automated, not saved, no history (ADR-267 A1).
+  static constexpr int kActionClear = 0;
+  static constexpr int kMaxActions = 8;
+  static std::optional<int> resolveAction(std::string_view key) {
+    if (key == "clear") return kActionClear;
+    return std::nullopt;
+  }
+  // Refused: an unknown id, a full queue, or an offset outside [0, maxBlock)
+  // (critic T-037 L1: never relocated silently). An offset at or past the
+  // NEXT block's n (when that block is shorter than maxBlock) lands on its last
+  // sample. Actions queued before reset(), an unprepared process() or n <= 0 are
+  // discarded with that call.
+  bool fireAction(int id, int offset) {
+    if (id != kActionClear || actionsN_ >= kMaxActions || offset < 0 || offset >= maxBlock_) return false;
+    int j = actionsN_++;  // insertion keeps offset order; equal offsets keep firing order
+    while (j > 0 && actions_[j - 1].offset > offset) { actions_[j] = actions_[j - 1]; --j; }
+    actions_[j] = {id, offset};
+    return true;
+  }
+
+  // ---- meters (SPEC §16.1, B435, contract RS-4.7; T-014) ---------------------
+  // Two taps: directly after Input Gain (before every path and detector) and
+  // directly after Output Gain (after every path and the tail). Each holds the
+  // last block's peak |x| over both channels, and a clip latch that sets on a
+  // sample with |x| > 1.0 (over 0 dBFS; exactly 1.0 is full scale, not a clip)
+  // and holds until clearMeters(): never cleared by process(), reset() or a load
+  // (B225; RS-6.13's table: a meter latch is live state, never saved).
+  // Readable from any thread; relaxed is enough, as each value stands alone.
+  // M4's T-033 adds its status word and ceiling count beside these (D-030).
+  struct Meter {
+    double peak;
+    bool clip;
+  };
+  Meter inputMeter() const { return readTap(tapIn_); }
+  Meter outputMeter() const { return readTap(tapOut_); }
+  // clearMeters() is the one call meant for ANOTHER thread too (horde's mixer
+  // clears from the GUI): two atomic stores. A block in flight publishes at its
+  // end, so an over earlier in that block can re-set a latch just after a clear;
+  // it was a real over, and the next clear removes it.
+  void clearMeters() {
+    tapIn_.clip.store(false, std::memory_order_relaxed);
+    tapOut_.clip.store(false, std::memory_order_relaxed);
+  }
   // How many time crossfades line k has started (test read: the retrigger queue).
   std::uint64_t fadeCount(int k) const { return fadeCount_[k]; }
   // The sounding head's delay in samples when no fade runs (test read).
@@ -454,6 +667,44 @@ class Echo {
   int maxBlock() const { return maxBlock_; }
 
  private:
+  // ---- actions (§16.7) ------------------------------------------------------
+  struct ActionEvent {
+    int id = 0;
+    int offset = 0;
+  };
+  // Clear: the repeats fade out over 20 ms under the current settings and end,
+  // through the load's own fade (§10, D-020) with nothing to adopt. At rest
+  // nothing rings: it does nothing. During a fade (a load's or a Clear's) it
+  // never restarts it, as a second load never does (D-020).
+  void applyAction(int id) {
+    if (id != kActionClear || idle_) return;
+    if (plant::clearWritesState) { p_[kFb] = 0.0; applied(kFb); }  // the planted Clear that edits the patch
+    if (plant::clearCuts) { clearLoop(); return; }                   // the planted hard cut, no fade
+    if (loadLeft_ > 0) {
+      if (plant::clearRestartsFade) loadLeft_ = rampN_;
+      return;
+    }
+    fadeWg_ = rMix_.cur <= 0.0 ? 0.0 : std::sin(rMix_.cur * k::kPi / 2);  // the current wet level, frozen for the fade
+    loadLeft_ = rampN_;
+    fadeLands_ = false;
+  }
+
+  // ---- meter taps (§16.1) ---------------------------------------------------
+  struct Tap {
+    std::atomic<double> peak{0.0};
+    std::atomic<bool> clip{false};
+  };
+  // A tap that could lock would put a lock on the audio thread (charter §Domain).
+  static_assert(std::atomic<double>::is_always_lock_free && std::atomic<bool>::is_always_lock_free,
+                "the meter taps must be lock-free atomics");
+  static void publishTap(Tap& t, double pk) {
+    t.peak.store(pk, std::memory_order_relaxed);
+    if (pk > 1.0) t.clip.store(true, std::memory_order_relaxed);
+  }
+  static Meter readTap(const Tap& t) {
+    return {t.peak.load(std::memory_order_relaxed), t.clip.load(std::memory_order_relaxed)};
+  }
+
   // ---- smoothing ------------------------------------------------------------
   // A linear ramp of a fixed length: per-sample, so block-size independent.
   struct Ramp {
@@ -1305,8 +1556,18 @@ class Echo {
   // RS-4.5, critic H4).
   void snapAll(bool device) {
     if (device || plant::loadSnapsDevice) {
-      rIn_.target = gainTarget(kInGain); rIn_.snap();
-      rOut_.target = gainTarget(kOutGain); rOut_.snap();
+      if (plant::prepareRampsIn) {
+        // B435 test 3's fault: the gains never OPEN at their value; every landing
+        // (prepare -> reset, and rest) ramps them in from unity instead. Planted
+        // here, not in prepare(): a fresh instance is at rest, and the rest
+        // landing on its first sample would mask a ramp-in set up only there.
+        rIn_.cur = rOut_.cur = 1.0;
+        rIn_.to(gainTarget(kInGain), rampN_);
+        rOut_.to(gainTarget(kOutGain), rampN_);
+      } else {
+        rIn_.target = gainTarget(kInGain); rIn_.snap();
+        rOut_.target = gainTarget(kOutGain); rOut_.snap();
+      }
     }
     rMix_.target = p_[kMix] / 100.0; rMix_.snap();
     rFb_.target = fbTarget(); rFb_.snap();
@@ -1416,6 +1677,9 @@ class Echo {
   double bpm_ = 120.0, bpmPrev_ = 120.0;
   int loadLeft_ = 0;
   double fadeWg_ = 0.0;          // the old wet level, frozen while a load fades (D-020)
+  bool fadeLands_ = false;       // the running fade ends by adopting a patch (a load); false for a Clear alone
+  std::array<ActionEvent, kMaxActions> actions_{};  // the next block's actions, in offset order
+  int actionsN_ = 0, actionsDone_ = 0;
   bool idle_ = true;
   bool restDirty_ = true;        // a change arrived while resting: land it once
   std::int64_t silentRun_ = 0, quietRun_ = 0;
@@ -1443,7 +1707,15 @@ class Echo {
   double mods_[2] = {0.0, 0.0};
   std::atomic<std::uint64_t> nonFinite_{0};
   std::atomic<bool> nonFiniteLatch_{false};
+  Tap tapIn_, tapOut_;
+  state::Values staged_{};
+  std::atomic<bool> stagedReady_{false};
 };
+
+// The ABI's checkable half (T-013): a build that drifts from the vendored
+// header's concepts fails here, in every includer, not in a test.
+static_assert(foundations::FxOperatorLifecycle<Echo>, "echo::Echo must model FOUNDATIONS' FxOperatorLifecycle");
+static_assert(foundations::FxOperatorParams<Echo>, "echo::Echo must model FOUNDATIONS' FxOperatorParams");
 
 }  // namespace echo
 

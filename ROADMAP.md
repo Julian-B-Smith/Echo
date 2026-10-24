@@ -18,7 +18,8 @@ with HIGH findings the author's own suite had passed.
   (PR #10 merged, 4c68da4; T-009; D-023–D-026): both repitch laws, the tempo modes and
   modulation; 52 checks, 75 planted faults caught. **M3 (rack admission, the 1.0 bar,
   due 2026-12-11) is under way** (D-028; T-010 – T-027, T-037): batch 1 (T-010 – T-012,
-  T-002) done on PR #19 (D-034 – D-036); batch 2 next. **M4 (the IR display and Echo's screen) is under way
+  T-002) done on PR #19 (D-034 – D-036); batch 2's T-013 – T-015 and T-037 done on PR #20
+  (D-037 – D-040), T-016 next. **M4 (the IR display and Echo's screen) is under way
   beside it** (D-027, D-030): T-030 – T-032 done (PR #15, PR #16); T-033 blocked on
   M3's T-014; T-036 (gate 4's flicker) open.
 - **Oracle:** `./verify fast` = kit integrity, leak gate, private-name gate,
@@ -359,8 +360,9 @@ commercial delay or borrow its mode names, presets or UI text.
 - **Scope:** `core/`, `tools/check_manifest.py`.
 - **Items:** a check that cutoff glides take 10 ms (an instant glide survives the
   suite); `check_manifest.py` to compare `rate` and `smoothing` too (the C++ table
-  has neither yet); the ABI shim's 4-pointer `process` vs the shims' in-place L/R
-  (a call-site change, not a rename, at M3); why GCC's pragma-less probe render
+  has neither yet); ~~the ABI shim's 4-pointer `process` vs the shims' in-place L/R~~
+  (**settled 2026-10-23 by T-013, D-037:** in place is proven bit-identical, so the swap is a
+  rename); why GCC's pragma-less probe render
   stays bit-identical despite 153 fused ops in `process` (D-022).
 - **Acceptance criteria:** each item lands with a planted control, or is ruled out
   in DECISIONS.
@@ -456,7 +458,9 @@ filings need the human's go-ahead each time.
 - **Out of scope:** waiting for the answer: B2 proceeds on the draft (rule 2).
 
 ### T-013 — M3: ABI conformance and the declarations (row A1)
-- **Status:** open (needs T-012's header and T-011's ruling on the tail mapping).
+- **Status:** done 2026-10-23 (D-037; critic SHIP, its MED and LOW findings fixed but one fleet
+  item reported; trace `traces/2026-10-23-t013-abi.md`). Settles T-007's signature item.
+  Open for the human: Device's OQ #33 kind (`continuous`, the lead's reading).
 - **Scope:** `core/include/echo/engine.h`, `plants.h`, `core/tests/core_tests.cpp`.
 - **Acceptance criteria:** `static_assert` that `echo::Echo` models FOUNDATIONS'
   `FxOperatorLifecycle` and `FxOperatorParams`; `properties()` returns an `OperatorProperties`
@@ -471,7 +475,9 @@ filings need the human's go-ahead each time.
 - **Out of scope:** the state format (T-015); meters (T-014).
 
 ### T-014 — M3: Meter taps, clip latches and the I/O gain tests 1–7 (row A6)
-- **Status:** open (needs T-011's meter ruling).
+- **Status:** done 2026-10-23 (D-038; critic FIX-THEN-SHIP, H1, H2, M1 and LOWs fixed; trace
+  `traces/2026-10-23-t014-meters.md`). Open for the human: the peak per block vs since the last
+  read (D-038).
 - **Scope:** `engine.h`, `plants.h`, `core_tests.cpp`.
 - **Acceptance criteria:** two taps, directly after Input Gain and directly after Output
   Gain, each a peak and a clip latch, published as atomics readable from another thread,
@@ -490,7 +496,10 @@ filings need the human's go-ahead each time.
 - **Out of scope:** horde's mixer page and its feed gating.
 
 ### T-015 — M3: State by name, exact restore, and undo (rows A17–A20; bar row 17)
-- **Status:** open (needs T-011's format ruling).
+- **Status:** done 2026-10-23 (D-039; critic FIX-THEN-SHIP, H1, M1 – M3 and LOWs fixed; trace
+  `traces/2026-10-23-t015-state.md`). A19's "every factory preset" is carried by T-021 (it
+  has no presets to check yet). Open for the human: whether a load can be pending while
+  audio is stopped (D-039).
 - **Scope:** `engine.h` (or a new `core/include/echo/state.h`), `plants.h`, `core_tests.cpp`.
 - **Acceptance criteria:** `saveState` writes the T-011 format; `stageState` parses and
   validates it off the audio thread; `adoptStaged` adopts it at a block boundary without
@@ -599,7 +608,8 @@ filings need the human's go-ahead each time.
   chosen to show the range: a slap, a synced dotted ping-pong, a dark dub loop near
   unity, a modulated chorus-like line, a mid/side wide, a tape-repitch throw, a past-unity
   edge patch. Each passes T-017's validator and T-015's size check and carries up to 8
-  labelled macros. The human picks the final set by listening (T-023).
+  labelled macros. **A19 (carried from T-015, D-039):** a suite check saves every factory
+  preset's state and requires each to be at most 2 KiB, with a planted oversized preset. The human picks the final set by listening (T-023).
 - **Out of scope:** horde's presets lab and its library size (B395/B409).
 
 ### T-022 — M3: The face and expanded view (bar row 16)
@@ -836,7 +846,8 @@ filings need the human's go-ahead each time.
 - **Out of scope:** the render service's behaviour; CI (which only reports the timing).
 
 ### T-037 — M3: the Clear action (RS-4.12, row A23; B2)
-- **Status:** open (ruled by poll 2026-10-23, D-035; after T-015, in sequence on `engine.h`).
+- **Status:** done 2026-10-23 (D-040; critic FIX-THEN-SHIP: H1 and M3 settled by two polls,
+  which clarified SPEC §16.7; the rest fixed; trace `traces/2026-10-23-t037-clear.md`).
 - **Scope:** `core/include/echo/engine.h` (the local shim's per-block action entry, beside
   `process`), `plants.h`, `core/tests/core_tests.cpp`.
 - **Acceptance criteria (SPEC §16.7):**

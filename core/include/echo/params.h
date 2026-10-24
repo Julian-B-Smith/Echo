@@ -8,13 +8,46 @@
 #pragma once
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <span>
 #include <string_view>
 
+#include "echo/plants.h"
+
 namespace echo {
 
 enum class Morph { Continuous, Jump, Device };
+
+// RS-2.2 (horde row A1): Echo's local class maps one to one onto OQ #33's two
+// per-parameter fields (SPEC §9). FOUNDATIONS' engine_manifest.h is NOT vendored
+// (Echo's brief echo-002 asks whether it should be), so its two enums are
+// mirrored here by name and order, kUndeclared included, in a namespace of their
+// own. When the header is vendored this becomes a using-declaration.
+namespace oq33 {
+enum class MorphKind : std::uint8_t { kUndeclared, kContinuous, kStepped, kGate };
+enum class MorphParticipation : std::uint8_t { kUndeclared, kMorphs, kExcluded };
+struct Class {
+  MorphKind kind;
+  MorphParticipation participation;
+};
+}  // namespace oq33
+
+// continuous -> continuous + morphs; jump (a flip) -> stepped + morphs; device ->
+// continuous + excluded (the I/O gains are continuous dB that never morph,
+// RS-4.5). Not constexpr: the paramNoClass plant is a runtime flag in echo_plants.
+inline oq33::Class oq33Class(Morph m) {
+  using K = oq33::MorphKind;
+  using M = oq33::MorphParticipation;
+  switch (m) {
+    case Morph::Continuous: return {K::kContinuous, M::kMorphs};
+    case Morph::Jump: return {K::kStepped, M::kMorphs};
+    case Morph::Device:
+      if (plant::paramNoClass) return {K::kUndeclared, M::kUndeclared};
+      return {K::kContinuous, M::kExcluded};
+  }
+  return {K::kUndeclared, M::kUndeclared};
+}
 
 struct ParamDef {
   std::string_view key;

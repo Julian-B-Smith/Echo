@@ -256,13 +256,13 @@ core_gate() {
     fi
   else echo "fp-contract: OK — pragma holds ($href); without it the render differs ($hnop)"; fi
   local cxx probe; cxx="$(command -v c++ || command -v g++ || command -v clang++)"
-  "$cxx" -std=c++20 -fsyntax-only -I core/include core/tests/guard_probe.cpp >/dev/null 2>&1 \
+  "$cxx" -std=c++20 -fsyntax-only -I core/include -I core/third_party/foundations/include core/tests/guard_probe.cpp >/dev/null 2>&1 \
     || { echo "verify: core — the guard probe does not compile clean" >&2; ok=1; }
   # Capture, THEN match: under `set -o pipefail` a `c++ … | grep -q` pipeline
   # takes the compiler's (expected) failure as its status, so the guard read
   # as silent even when it fired.
   for f in -ffast-math -ffinite-math-only; do
-    probe="$("$cxx" -std=c++20 -fsyntax-only "$f" -I core/include core/tests/guard_probe.cpp 2>&1)"
+    probe="$("$cxx" -std=c++20 -fsyntax-only "$f" -I core/include -I core/third_party/foundations/include core/tests/guard_probe.cpp 2>&1)"
     case "$probe" in
       *forbidden*) ;;
       *) echo "verify: core — the fast-math guard did NOT fire under $f" >&2; ok=1 ;;

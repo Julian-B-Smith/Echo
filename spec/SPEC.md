@@ -7,7 +7,7 @@ review of revision 1 (folded in here), and measurements on the lab (`lab/echo-la
 defaults of the two keys added by the rulings were ratified with it (D-017). **Amended 2026-10-20 by D-018, D-019 and D-020**
 (§10: rest waits for the wet to fall below −120 dBFS; the tail clock restarts at a hold or a tail change; a load fades
 the old repeats under their old settings), and **2026-10-21 by D-025 and D-026** (§10: the tail clock also restarts
-while a head moves; §7, §10: a seed reseeds only when it changes, and a load restarts the modulation from its seed).
+while a head moves; §7, §10: a seed reseeds only when it changes, and a load restarts the modulation from its seed); **2026-10-23 by D-040** (§16.7: during a Clear the heads keep moving and the wet follows the live mix).
 **Revision 3, RATIFIED 2026-10-23 by poll (D-035):** what rack admission (M3) adds — the meter taps, the saved
 state, module presets and macros, the fixed row, the tail declaration's mapping, the entries not declared, and one
 action, Clear (§16). The 29 keys' ranges, defaults and classes are unchanged.
@@ -582,7 +582,10 @@ Echo declares **one action** (also `params.json` → `actions`):
 - **Fired at its sample offset** in the per-block context, before `process`. From that sample the old repeats **fade
   out over 20 ms under the current settings and end**: the lines and loop state are cleared, exactly as a load ends
   them (§10, D-020), but **no value lands** and the heads stay where they are. The dry path is untouched; input that
-  arrives during the fade is lost from the line.
+  arrives during the fade is lost from the line. **Clarified 2026-10-23 by poll (D-040):** "the heads stay where they
+  are" means they are not landed: they **keep moving exactly as without the Clear** (a glide continues, a move keeps
+  its mode), never frozen for the fade as a load's are. "Under the current settings" means the **live** mix: the
+  fading wet follows a mix ramp, where a load's fade keeps the old wet level.
 - **A performance event:** not a host parameter, never automated, no history node; the saved state and the patch are
   unchanged (ADR-267 A1). Only runtime state changes.
 - A second Clear, or a load, during the fade lands nothing new on the fade: it never restarts it (as D-020). A Clear

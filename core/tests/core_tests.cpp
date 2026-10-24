@@ -1,4 +1,4 @@
-// core_tests.cpp — Echo's invariant suite, M1 + M2 (ROADMAP M1, M2; SPEC revision 2).
+// core_tests.cpp — Echo's invariant suite, M1 + M2 + M3 (ROADMAP M1 – M3; SPEC revision 3).
 //
 // ONE SOURCE, TWO BINARIES (core/CMakeLists.txt):
 //   echo_tests   built WITHOUT ECHO_PLANTS: every plant is constexpr false, so
@@ -19,6 +19,10 @@
 #include <cstdint>
 #include <cstdio>
 #include <functional>
+#include <string_view>
+#include <cstring>
+#include <clocale>
+#include <limits>
 #include <memory>
 #include <string>
 #include <utility>
@@ -649,17 +653,27 @@ bool noAlloc(Detail& d) {
 // The I/O gain law (B435): unity exactly at 0 dB, a 20 ms ramp linear in
 // amplitude, exact at its end.
 bool ioGainLaw(Detail& d) {
-  for (double sr : {48000.0, 96000.0}) {
-    auto e = mk({{"mix", 0}}, sr);
-    const long n = S(0.2, sr), at = S(0.1, sr), N = S(0.02, sr);
-    const Vec in(n, 0.25);
-    const auto o = run(*e, in, in, {set(at, "io.outGain", 6)});
-    const double G = std::pow(10.0, 6.0 / 20.0);
-    REQUIRE(o.L[at - 1] == 0.25, "unity at 0 dB: %.17g", o.L[at - 1]);
-    const double mid = o.L[at + N / 2 - 1] / 0.25;
-    REQUIRE(std::fabs(mid - (1 + G) / 2) < 1e-9, "at %.0f Hz the gain 10 ms in is %.6f, linear-in-amplitude over 20 ms expects %.6f", sr, mid, (1 + G) / 2);
-    REQUIRE(o.L[at + N] == 0.25 * G, "after 20 ms the gain is %.17g, expected %.17g", o.L[at + N] / 0.25, G);
-  }
+  // B435 test 2: a step from 0 to +6 dB is a linear AMPLITUDE ramp over 20 ms
+  // (+/- one sample), on both trims, at 44.1, 48 and 96 kHz. Every ramp sample
+  // is checked against the straight line, and the end lands exactly on sample
+  // N - 1 (N = 20 ms at the rate), not before.
+  const double G = std::pow(10.0, 6.0 / 20.0);
+  for (const char* key : {"io.inGain", "io.outGain"})
+    for (double sr : {44100.0, 48000.0, 96000.0}) {
+      auto e = mk({{"mix", 0}}, sr);
+      const long n = S(0.2, sr), at = S(0.1, sr), N = S(0.02, sr);
+      const Vec in(n, 0.25);
+      const auto o = run(*e, in, in, {set(at, key, 6)});
+      REQUIRE(o.L[at - 1] == 0.25, "%s: unity at 0 dB: %.17g", key, o.L[at - 1]);
+      for (long k = 0; k < N; ++k) {
+        const double want = 1.0 + (G - 1.0) * static_cast<double>(k + 1) / static_cast<double>(N);
+        REQUIRE(std::fabs(o.L[at + k] / 0.25 - want) < 1e-12, "%s at %.0f Hz: ramp sample %ld reads %.9f, the linear-in-amplitude 20 ms ramp %.9f",
+                key, sr, k, o.L[at + k] / 0.25, want);
+      }
+      REQUIRE(o.L[at + N - 2] != 0.25 * G, "%s at %.0f Hz: the ramp ended early", key, sr);
+      REQUIRE(o.L[at + N - 1] == 0.25 * G && o.L[at + N] == 0.25 * G, "%s at %.0f Hz: after 20 ms the gain is %.17g, expected %.17g", key, sr,
+              o.L[at + N] / 0.25, G);
+    }
   return true;
 }
 
@@ -1493,6 +1507,821 @@ bool clickSweep(Detail& d) {
 
 // ---- the registry ---------------------------------------------------------------
 
+// ---- M3 B2, T-013: FOUNDATIONS' FX-operator ABI and the declarations (row A1) ----
+
+// properties() passes the vendored header's validate() once prepared, at every
+// rate horde runs, and is refused before prepare(): a forgotten declaration is
+// an absence (FOUNDATIONS #129). The values are the spec's (§10, §16.5).
+bool abiProperties(Detail& d) {
+  {
+    Echo fresh;
+    REQUIRE(!fresh.properties().validate(), "an unprepared instance's properties() validated");
+  }
+  for (double sr : {44100.0, 48000.0, 96000.0, 192000.0}) {
+    auto e = mk({{"time.sync", 0}, {"time.ms", 250}, {"fb.amount", 50}}, sr);
+    const auto p = e->properties();
+    const auto v = p.validate();
+    REQUIRE(static_cast<bool>(v), "validate() refused at %.0f Hz (violation %d)", sr, static_cast<int>(v.violation));
+    REQUIRE(p.latency->samples == 0 && p.latency->residual == 0.0 && p.latency->sign == foundations::ResidualSign::kNone,
+            "latency at %.0f Hz is not an exact 0", sr);
+    REQUIRE(p.tail->may_change, "tail.may_change is false at %.0f Hz (the tail follows feedback, time and depth)", sr);
+    REQUIRE(static_cast<std::int64_t>(p.tail->samples) == e->tail(), "tail %u != the engine's %lld at %.0f Hz", p.tail->samples,
+            static_cast<long long>(e->tail()), sr);
+    REQUIRE(p.min_block && *p.min_block == 1u, "min_block is not 1 at %.0f Hz", sr);
+    // The bound against the REAL fade (critic T-013 MED-1): the formula above
+    // cannot catch a fade that outlasts it. Ringing repeats, a load, then exact
+    // zero from the declared bound on, and sound just before it.
+    REQUIRE(p.load, "no load bound declared at %.0f Hz", sr);
+    auto r = mk({{"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 80}, {"mix", 100}}, sr);
+    const long n = S(1.0, sr), at = S(0.5, sr), b = static_cast<long>(p.load->transition_samples);
+    const std::array<echo::KeyValue, 1> patch{{{"fb.amount", 30}}};
+    const auto o = run(*r, impulse(n), zeros(n), {{at, [&patch](Echo& x) { x.loadState(patch); }}});
+    REQUIRE(maxAbs(o.L, at + b) == 0.0, "at %.0f Hz the load's old audio still sounds %.3g after the declared %ld samples", sr,
+            maxAbs(o.L, at + b), b);
+    REQUIRE(maxAbs(o.L, at + b - S(0.002, sr), at + b) > 0.0, "at %.0f Hz the load ended well before its declared bound", sr);
+    const auto fade = static_cast<std::uint32_t>(std::lround(0.020 * sr));
+    REQUIRE(p.load && p.load->transition_samples == fade, "load bound %u, expected the 20 ms fade = %u at %.0f Hz",
+            p.load ? p.load->transition_samples : 0u, fade, sr);
+  }
+  auto held = mk({{"fb.amount", 100}});
+  REQUIRE(held->properties().tail->samples == foundations::kInfiniteTail, "a held loop (feedback 100 %%) does not declare kInfiniteTail");
+  return true;
+}
+
+// SPEC §16.5: the 64-bit tail maps onto TailDecl's 32 bits by saturating. T-013's
+// own case FIRST (critic T-013 MED-2): 99.99 % feedback, 12 s, 192 kHz, where the
+// engine's tail is ~3.3e11 samples (n = 145 099 passes of ~12 s) and a narrowing
+// would wrap to a short tail. Then the boundary and past it. (A plain narrowing
+// maps 2^32 - 1 and INT64_MAX to 0xFFFFFFFF by coincidence, so those two cannot
+// see the plant; the engine case and 2^32 + 5 can.)
+bool abiTail32(Detail& d) {
+  using foundations::kInfiniteTail;
+  constexpr std::int64_t kMax32 = 0xFFFFFFFFLL;
+  {
+    auto e = mk({{"time.sync", 0}, {"time.ms", 12000}, {"fb.amount", 99.99}}, 192000.0);
+    REQUIRE(e->tail() > kMax32, "the case is vacuous: the engine tail %lld fits 32 bits", static_cast<long long>(e->tail()));
+    const auto p = e->properties();
+    REQUIRE(p.tail && p.tail->samples == kInfiniteTail, "99.99 %%, 12 s, 192 kHz declares %u samples, not kInfiniteTail",
+            p.tail ? p.tail->samples : 0u);
+  }
+  REQUIRE(echo::tailDecl32(0) == 0u && echo::tailDecl32(48000) == 48000u, "small tails are not passed through");
+  REQUIRE(echo::tailDecl32(kMax32 - 1) == 0xFFFFFFFEu, "2^32 - 2 is not passed through");
+  REQUIRE(echo::tailDecl32(kMax32) == kInfiniteTail, "2^32 - 1 does not declare kInfiniteTail");
+  REQUIRE(echo::tailDecl32(kMax32 + 6) == kInfiniteTail, "2^32 + 5 maps to %u, not kInfiniteTail", echo::tailDecl32(kMax32 + 6));
+  REQUIRE(echo::tailDecl32(echo::kInfiniteTail) == kInfiniteTail, "the engine's own infinity is not kInfiniteTail");
+  return true;
+}
+
+// RS-2.2: every parameter has an OQ #33 class (both fields declared), and the
+// local enum maps one to one: distinct local classes never share a pair.
+bool abiParamClasses(Detail& d) {
+  using K = echo::oq33::MorphKind;
+  using M = echo::oq33::MorphParticipation;
+  for (const auto& p : echo::kParams) {
+    const auto c = echo::oq33Class(p.morph);
+    REQUIRE(c.kind != K::kUndeclared && c.participation != M::kUndeclared, "%.*s has no OQ #33 class",
+            static_cast<int>(p.key.size()), p.key.data());
+    REQUIRE((c.participation == M::kExcluded) == (p.morph == echo::Morph::Device), "%.*s: excluded iff Device is broken",
+            static_cast<int>(p.key.size()), p.key.data());
+    // The mapped kind must match the key's own shape (critic T-013 LOW-1): Device
+    // maps to kContinuous by the lead's reading (SPEC §9 rules only "excluded"),
+    // which is right only while every Device key is a scalar.
+    REQUIRE((c.kind == K::kStepped) == p.stepped, "%.*s: kind %s but the key is %s", static_cast<int>(p.key.size()), p.key.data(),
+            c.kind == K::kStepped ? "stepped" : "continuous", p.stepped ? "stepped" : "a scalar");
+  }
+  const echo::Morph all[] = {echo::Morph::Continuous, echo::Morph::Jump, echo::Morph::Device};
+  for (auto a : all)
+    for (auto b : all) {
+      const auto ca = echo::oq33Class(a), cb = echo::oq33Class(b);
+      REQUIRE(a == b || ca.kind != cb.kind || ca.participation != cb.participation, "two local classes share one OQ #33 pair");
+    }
+  return true;
+}
+
+// process() is safe in place (inL == outL, inR == outR): bit-identical to the
+// same render out of place, in every routing, at block sizes 1, 64 and 4096,
+// through a wake from rest. Settles T-007's signature item.
+bool abiInPlace(Detail& d) {
+  for (int route = 0; route < 3; ++route)
+    for (int block : {1, 64, 4096}) {
+      g_rng = 7;
+      const long n = S(0.5);
+      Vec inL = zeros(n), inR = zeros(n);
+      for (long i = S(0.05); i < S(0.3); ++i) { inL[i] = 0.5 * noise(); inR[i] = 0.5 * noise(); }
+      auto a = mk({{"route.mode", static_cast<double>(route)}, {"time.sync", 0}, {"time.ms", 40}, {"fb.amount", 60}, {"mix", 50}});
+      auto b = mk({{"route.mode", static_cast<double>(route)}, {"time.sync", 0}, {"time.ms", 40}, {"fb.amount", 60}, {"mix", 50}});
+      const Out ref = run(*a, inL, inR, {}, 120.0, [block](long) { return block; });
+      Vec L = inL, R = inR;
+      for (long pos = 0; pos < n; pos += block) {
+        const int len = static_cast<int>(std::min<long>(block, n - pos));
+        b->process(L.data() + pos, R.data() + pos, L.data() + pos, R.data() + pos, len, 120.0);
+      }
+      REQUIRE(maxAbs(ref.L) > 0.01, "the case is vacuous: no output (route %d, block %d)", route, block);
+      for (long i = 0; i < n; ++i)
+        REQUIRE(L[i] == ref.L[i] && R[i] == ref.R[i], "in place differs at sample %ld (route %d, block %d): %.17g vs %.17g", i, route,
+                block, L[i], ref.L[i]);
+    }
+  return true;
+}
+
+// ---- M3 B2, T-014: the meter taps and the I/O gain standard's tests 1-7 (row A6, B435) ----
+
+// One block straight through process(), so a meter read after it is that block's.
+void block(Echo& e, const Vec& L, const Vec& R) {
+  Vec oL(L.size()), oR(R.size());
+  e.process(L.data(), R.data(), oL.data(), oR.data(), static_cast<int>(L.size()), 120.0);
+}
+
+// Test 1: at 0 dB both trims are bit-identical to an unprocessed pass.
+bool ioTest1Unity(Detail& d) {
+  g_rng = 11;
+  const long n = S(0.2);
+  Vec L(n), R(n);
+  for (long i = 0; i < n; ++i) { L[i] = 0.9 * noise(); R[i] = 1e-30 * noise(); }
+  auto e = mk({{"mix", 0}});
+  const auto o = run(*e, L, R);
+  for (long i = 0; i < n; ++i)
+    REQUIRE(o.L[i] == L[i] && o.R[i] == R[i], "at 0 dB sample %ld is %.17g / %.17g, not the input %.17g / %.17g", i, o.L[i], o.R[i], L[i], R[i]);
+  return true;
+}
+
+// Test 3: after prepare at a saved +6 dB (set before prepare, as a host restores
+// an instance), the very first sample is already at +6 dB: no ramp in.
+bool ioTest3Opens(Detail& d) {
+  for (double sr : {48000.0, 96000.0}) {
+    Echo e;
+    e.setParam("io.inGain", 6);
+    e.setParam("io.outGain", 6);
+    e.setParam("mix", 0);
+    e.prepare(sr, 4096);
+    const double G = std::pow(10.0, 6.0 / 20.0);
+    double x = 0.25, y = 0;
+    e.process(&x, &x, &y, &y, 1, 120.0);
+    REQUIRE(y == 0.25 * G * G, "at %.0f Hz the first sample after prepare is %.17g, expected %.17g (+6 dB in and out)", sr, y, 0.25 * G * G);
+  }
+  return true;
+}
+
+// Test 4: a patch load and a corner flip (a second load, another corner's patch)
+// leave both gains alone, a ramp in flight included. Bit-identical to the same
+// run without the loads (mix 0 in every patch, so only the gains shape the output).
+bool ioTest4Kept(Detail& d) {
+  const long n = S(0.3), t = S(0.1);
+  const Vec in(n, 0.25);
+  const std::array<echo::KeyValue, 3> a{{{"mix", 0}, {"fb.amount", 30}, {"io.inGain", -12}}};
+  const std::array<echo::KeyValue, 3> b{{{"mix", 0}, {"fb.amount", 70}, {"io.outGain", 12}}};
+  auto ref = mk({{"mix", 0}, {"io.inGain", 6}, {"io.outGain", -6}});
+  auto e = mk({{"mix", 0}, {"io.inGain", 6}, {"io.outGain", -6}});
+  const auto r = run(*ref, in, in, {set(t, "io.outGain", 3)});
+  // The first load starts before the gain ramp and its 20 ms fade ENDS mid-ramp
+  // (where a load lands its patch); the corner flip lands inside the ramp too.
+  const auto o = run(*e, in, in, {set(t, "io.outGain", 3), {t - 500, [&a](Echo& x) { x.loadState(a); }},
+                                  {t + 200, [&b](Echo& x) { x.loadState(b); }}});
+  for (long i = 0; i < n; ++i)
+    REQUIRE(o.L[i] == r.L[i], "a load or corner flip moved the gains: sample %ld is %.17g, without the loads %.17g", i, o.L[i], r.L[i]);
+  REQUIRE(e->getParam(echo::kInGain) == 6.0 && e->getParam(echo::kOutGain) == 3.0, "the Device keys changed across the loads");
+  return true;
+}
+
+// Test 5: Input Gain sits before the loop, so +12 dB drives the returning term
+// into the ceiling and changes the output's SHAPE; Output Gain at +12 dB scales
+// the level only, exactly.
+bool ioTest5Placement(Detail& d) {
+  const long n = S(1.0);
+  Vec in = zeros(n);
+  for (long i = 0; i < n; i += S(0.1)) in[i] = 0.3;  // at +12 dB, 1.19: past the 0.9 knee
+  const char* fb = "fb.amount";
+  // The loop filter off, so the pulses return at full height: 0.9 x 1.19 = 1.07,
+  // past the ceiling's 0.9 knee at +12 dB, while 0.9 x 0.3 stays linear at 0 dB.
+  auto base = mk({{fb, 90}, {"mix", 50}, {"time.sync", 0}, {"time.ms", 50}, {"filt.loop.on", 0}});
+  auto inG = mk({{fb, 90}, {"mix", 50}, {"time.sync", 0}, {"time.ms", 50}, {"filt.loop.on", 0}});
+  auto outG = mk({{fb, 90}, {"mix", 50}, {"time.sync", 0}, {"time.ms", 50}, {"filt.loop.on", 0}});
+  inG->setParam("io.inGain", 12);
+  outG->setParam("io.outGain", 12);
+  // Land the 20 ms ramps before the first pulse (they started at setParam).
+  Vec pre = zeros(S(0.05)), sink = zeros(S(0.05));
+  for (auto* x : {base.get(), inG.get(), outG.get()}) x->process(pre.data(), pre.data(), sink.data(), sink.data(), static_cast<int>(pre.size()), 120.0);
+  const auto r0 = run(*base, in, in), ri = run(*inG, in, in), ro = run(*outG, in, in);
+  const double G = std::pow(10.0, 12.0 / 20.0);
+  for (long i = 0; i < n; ++i) REQUIRE(ro.L[i] == r0.L[i] * G, "Output Gain +12 dB is not a pure level change at sample %ld", i);
+  double dev = 0, pk = 0;
+  for (long i = 0; i < n; ++i) { dev = std::max(dev, std::fabs(ri.L[i] - r0.L[i] * G)); pk = std::max(pk, std::fabs(r0.L[i] * G)); }
+  REQUIRE(pk > 0.1 && dev > 1e-3 * pk, "Input Gain +12 dB only scaled the level (shape change %.3g of peak %.3g): it does not drive the loop",
+          dev, pk);
+  // Input Gain is a TRUE trim before everything (critic T-014 H1): the render at
+  // +12 dB equals a 0 dB instance fed the input pre-scaled by G, bit for bit
+  // (x*G then *1.0 is the same product), so it reaches the loop, not only the dry.
+  auto pre12 = mk({{fb, 90}, {"mix", 50}, {"time.sync", 0}, {"time.ms", 50}, {"filt.loop.on", 0}});
+  pre12->process(pre.data(), pre.data(), sink.data(), sink.data(), static_cast<int>(pre.size()), 120.0);
+  Vec inG12 = in;
+  for (auto& v : inG12) v *= std::pow(10.0, 12.0 / 20.0);
+  const auto rp = run(*pre12, inG12, inG12);
+  for (long i = 0; i < n; ++i)
+    REQUIRE(ri.L[i] == rp.L[i], "Input Gain +12 dB differs from a pre-scaled input at sample %ld (%.17g vs %.17g): not a trim before the loop",
+            i, ri.L[i], rp.L[i]);
+  return true;
+}
+
+// Test 6: Echo declares both keys, so horde's slot adds no gain of its own; a
+// slot that adds a second pair is the planted double gain. The slot is simulated
+// here by B435's rule: supply a gain only where the module declares none.
+bool ioTest6Slot(Detail& d) {
+  const auto in = echo::paramIndex("io.inGain"), out = echo::paramIndex("io.outGain");
+  REQUIRE(in && out, "Echo does not declare both io.inGain and io.outGain");
+  REQUIRE(echo::kParams[*in].morph == echo::Morph::Device && echo::kParams[*out].morph == echo::Morph::Device, "the I/O gains are not Device class");
+  const bool slotIn = !in || echo::plant::doubleGain, slotOut = !out || echo::plant::doubleGain;
+  const double dB = 6.0, G = std::pow(10.0, dB / 20.0);
+  auto e = mk({{"mix", 0}, {"io.inGain", dB}, {"io.outGain", dB}});
+  const long n = S(0.1);
+  Vec x(n, 0.1);
+  if (slotIn) for (auto& v : x) v *= G;  // the slot's own Input Gain, at the same mixer value
+  auto o = run(*e, x, x);
+  if (slotOut) for (auto& v : o.L) v *= G;
+  const double got = o.L[n - 1], want = 0.1 * G * G;
+  REQUIRE(std::fabs(got - want) < 1e-12, "through the slot +6 dB in and out reads %.6f, expected exactly one pair: %.6f", got, want);
+  return true;
+}
+
+// The two taps (§16.1, RS-4.7): the input tap after Input Gain, the output tap
+// after Output Gain, each the last block's peak. +6 dB in and -12 dB out make
+// the two points distinguishable: an over at the input tap that the output
+// tap does not see.
+bool metersTaps(Detail& d) {
+  // First (so its plant is caught HERE): the input tap reads the REPAIRED sample (§16.1, M1): +inf in is a counted
+  // repair to 0, never a peak of inf or a latched over.
+  // The +inf sits inside a live 0.1 signal: alone at rest it would be repaired to
+  // 0 and never wake the instance, so no tap would see it either way (vacuous).
+  auto r = mk({{"mix", 0}});
+  Vec bad(64, 0.1);
+  bad[10] = std::numeric_limits<double>::infinity();
+  block(*r, bad, Vec(64, 0.1));
+  REQUIRE(r->inputMeter().peak == 0.1 && !r->inputMeter().clip, "a +inf input reads peak %g, latch %d at the input tap (the raw sample)",
+          r->inputMeter().peak, r->inputMeter().clip);
+  auto e = mk({{"mix", 0}, {"io.inGain", 6}, {"io.outGain", -12}});
+  const Vec z = zeros(S(0.05));
+  block(*e, z, z);  // land the gain ramps
+  const double Gi = std::pow(10.0, 6.0 / 20.0), Go = std::pow(10.0, -12.0 / 20.0);
+  // The peak is on the RIGHT channel and NEGATIVE (critic T-014 H2): a tap that
+  // read one channel, or a signed max, misses it.
+  const Vec x(256, 0.3), xr(256, -0.6);
+  block(*e, x, xr);
+  const auto mi = e->inputMeter(), mo = e->outputMeter();
+  REQUIRE(mi.peak == 0.6 * Gi, "input tap peak %.17g, expected 0.6 x Input Gain = %.17g (after the gain)", mi.peak, 0.6 * Gi);
+  REQUIRE(mi.clip, "0.6 at +6 dB (%.3f) is over 0 dBFS at the input tap but did not latch", 0.6 * Gi);
+  REQUIRE(std::fabs(mo.peak - 0.6 * Gi * Go) < 1e-15, "output tap peak %.17g, expected %.17g (after Output Gain)", mo.peak, 0.6 * Gi * Go);
+  REQUIRE(!mo.clip, "the output tap latched at %.3f", mo.peak);
+  block(*e, z, z);
+  REQUIRE(e->inputMeter().peak == 0.0 && e->outputMeter().peak == 0.0, "a silent block left a peak: the peak is not per block");
+  // The output tap is after EVERY path and the tail (H2): input stopped, the
+  // repeats still sound, so the input tap reads 0 and the output tap does not.
+  auto w = mk({{"mix", 100}, {"time.sync", 0}, {"time.ms", 10}, {"fb.amount", 50}});
+  block(*w, impulse(256, 0, 0.5), zeros(256));
+  block(*w, zeros(2048), zeros(2048));
+  REQUIRE(w->inputMeter().peak == 0.0 && w->outputMeter().peak > 0.05, "after the input stops the output tap reads %.3g: blind to the wet tail",
+          w->outputMeter().peak);
+  return true;
+}
+
+// Test 7: both latches set on an over (|x| > 1.0; exactly 1.0 is full scale) and
+// hold through silence, reset() and a load, until clearMeters() (B225, RS-6.13).
+bool ioTest7Latches(Detail& d) {
+  auto e = mk({{"mix", 0}});
+  const Vec z(256, 0.0), one(256, 1.0);
+  block(*e, one, one);
+  REQUIRE(!e->inputMeter().clip && !e->outputMeter().clip, "a sample at exactly 1.0 latched a clip");
+  Vec over = z;
+  over[100] = 1.01;
+  block(*e, over, z);
+  REQUIRE(e->inputMeter().clip && e->outputMeter().clip, "an over of 1.01 did not latch both taps (in %d, out %d)", e->inputMeter().clip,
+          e->outputMeter().clip);
+  for (int k = 0; k < 40; ++k) block(*e, z, z);
+  REQUIRE(e->inputMeter().clip && e->outputMeter().clip, "a latch cleared itself over 40 silent blocks");
+  e->reset();
+  const std::array<echo::KeyValue, 1> patch{{{"mix", 0}}};
+  e->loadState(patch);
+  block(*e, z, z);
+  REQUIRE(e->inputMeter().clip && e->outputMeter().clip, "reset() or a load cleared a latch");
+  e->clearMeters();
+  REQUIRE(!e->inputMeter().clip && !e->outputMeter().clip, "clearMeters() did not clear");
+  block(*e, z, z);
+  REQUIRE(!e->inputMeter().clip && !e->outputMeter().clip, "a latch came back without an over");
+  return true;
+}
+
+// ---- M3 B2, T-015: the saved state (SPEC §16.2; rows A17 - A20; echo/state.h) ----
+
+std::string saveText(const Echo& e) {
+  char b[echo::state::kMaxBytes];
+  const std::size_t n = e.saveState(b, sizeof b);
+  return std::string(b, n);
+}
+bool restore(Echo& e, std::string_view t, const char** why = nullptr) { return e.stageState(t, why) && e.adoptStaged(); }
+std::string replace_once(std::string t, const std::string& from, const std::string& to) {
+  const auto at = t.find(from);
+  return at == std::string::npos ? std::string("<anchor lost>") : t.replace(at, from.size(), to);
+}
+bool g_reportedLocales = false;
+
+// A patch that exercises every awkward value: thirds, a 0.1 sum, the extremes,
+// the longest labels and a value a few ulps off a round number.
+void awkward(Echo& e) {
+  e.setParam("time.ms", 1000.0 / 3.0);
+  e.setParam("mix", 100.0 / 3.0);
+  e.setParam("fb.amount", 0.1 * 7.0);
+  e.setParam("filt.loop.lpHz", std::nextafter(9000.0, 1e9));
+  e.setParam("mod.rateHz", 0.05);
+  e.setParam("time.glide", 0.01);
+  e.setParam("time.offL", -50);
+  e.setParam("time.offR", 49.999999999999993);
+  e.setParam("mod.seed", 65535);
+  e.setParam("time.div", 19);  // 3/128, the longest label
+  e.setParam("route.mode", 2);
+  e.setParam("time.tempoMode", 2);
+  e.setParam("io.inGain", -24);
+  e.setParam("io.outGain", 7.123456789012345);
+}
+// A random in-range patch from the test's own seeded stream.
+void randomPatch(Echo& e) {
+  for (int i = 0; i < echo::kNumParams; ++i) {
+    const auto& p = echo::kParams[static_cast<std::size_t>(i)];
+    const double u = 0.5 + 0.5 * noise();
+    double v = p.min + (p.max - p.min) * u;
+    if (p.stepped) v = std::floor(std::min(v, p.max));
+    e.setParam(i, v);
+  }
+}
+
+// The format (SPEC §16.2): version line, every patch key once in manifest order
+// by name, then the [device] block.
+bool stateFormat(Detail& d) {
+  auto e = mk({});
+  const std::string t = saveText(*e);
+  REQUIRE(t.rfind("echo-state 1\n", 0) == 0, "the state does not open with its version line");
+  for (const char* want : {"\ntime.sync sync\n", "\ntime.div 1/4\n", "\nroute.mode stereo\n", "\ntime.ms 375\n", "\nmix 30\n", "\nmod.seed 1\n",
+                           "\nfilt.loop.on on\n"})
+    REQUIRE(t.find(want) != std::string::npos, "the default state lacks the line `%.*s`", static_cast<int>(std::strlen(want)) - 2, want + 1);
+  const std::string_view dev = "\n[device]\nio.inGain 0\nio.outGain 0\n";
+  REQUIRE(t.size() > dev.size() && t.compare(t.size() - dev.size(), dev.size(), dev) == 0, "the [device] block is not last");
+  std::size_t pos = t.find('\n') + 1;
+  for (const auto& p : echo::kParams) {
+    if (p.morph == echo::Morph::Device) continue;
+    const std::size_t sp = t.find(' ', pos);
+    REQUIRE(sp != std::string::npos && t.compare(pos, sp - pos, p.key) == 0, "key %.*s is not next in manifest order",
+            static_cast<int>(p.key.size()), p.key.data());
+    pos = t.find('\n', pos) + 1;
+  }
+  return true;
+}
+
+// A18: save -> load -> save is byte-identical, every value bit-equal, and the
+// renders after each load are bit-identical; also in a comma locale.
+bool stateExact(Detail& d) {
+  g_rng = 99;
+  for (int c = 0; c < 22; ++c) {
+    auto a = mk({});
+    if (c == 1) awkward(*a);
+    if (c >= 2) randomPatch(*a);
+    const std::string t1 = saveText(*a);
+    auto b = mk({});
+    const char* why = "";
+    REQUIRE(restore(*b, t1, &why), "case %d: its own state was refused (%s)", c, why);
+    const std::string t2 = saveText(*b);
+    REQUIRE(t1 == t2, "case %d: save -> load -> save differs", c);
+    for (int i = 0; i < echo::kNumParams; ++i)
+      REQUIRE(a->getParam(i) == b->getParam(i), "case %d: %.*s read back %.17g, saved %.17g", c,
+              static_cast<int>(echo::kParams[static_cast<std::size_t>(i)].key.size()), echo::kParams[static_cast<std::size_t>(i)].key.data(),
+              b->getParam(i), a->getParam(i));
+    if (c < 3) {
+      auto x = mk({}), y = mk({});
+      restore(*x, t1);
+      restore(*y, t2);
+      const Vec in = impulse(S(0.5));
+      const auto ox = run(*x, in, in), oy = run(*y, in, in);
+      for (long i = 0; i < S(0.5); ++i) REQUIRE(ox.L[i] == oy.L[i] && ox.R[i] == oy.R[i], "case %d: the renders after the two loads differ at %ld", c, i);
+    }
+    if (c == 1) {  // hosts in other locales: a comma, and a two-byte decimal point (critic T-015 M1)
+      int ran = 0;
+      for (const char* loc : {"de_DE.UTF-8", "ar_SA.UTF-8", "fa_IR.UTF-8"}) {
+        if (!std::setlocale(LC_NUMERIC, loc)) continue;
+        ++ran;
+        const std::string tl = saveText(*a);
+        auto z = mk({});
+        const bool ok = restore(*z, tl);
+        const std::string tz = saveText(*z);
+        const bool comma = z->stageState(replace_once(t1, "\nmix ", "\nmix 3,5\nmix_ "));
+        std::setlocale(LC_NUMERIC, "C");
+        REQUIRE(tl == t1, "in %s the state text changed", loc);
+        REQUIRE(ok && tz == t1, "in %s the state did not read back", loc);
+        REQUIRE(!comma, "in %s a decimal comma was accepted", loc);
+      }
+      if (!g_reportedLocales) {
+        std::printf("  REPORT state locales: %d of 3 test locales present here (the C-locale guard is still exercised by every save)\n", ran);
+        g_reportedLocales = true;
+      }
+    }
+    if (c == 2) {  // -0 is written as 0: one patch, one text (critic T-015 L1)
+      auto m = mk({});
+      m->setParam("mix", -0.0);
+      REQUIRE(saveText(*m).find("\nmix 0\n") != std::string::npos, "-0 was not written as 0");
+    }
+  }
+  return true;
+}
+
+// A17: a state saved mid-session, loaded into a fresh instance, renders
+// bit-identically to the original after its reset(): nothing outside the saved
+// state and reset() shapes the sound.
+bool stateComplete(Detail& d) {
+  g_rng = 5;
+  auto a = mk({{"time.sync", 0}, {"time.ms", 80}, {"fb.amount", 70}, {"mod.depthMs", 2}, {"mod.shape", 1}, {"mod.seed", 77}});
+  const long n = S(0.6);
+  Vec in(n);
+  for (auto& v : in) v = 0.3 * noise();
+  run(*a, in, in, {set(S(0.1), "time.ms", 120), set(S(0.2), "fb.amount", 55), set(S(0.3), "io.outGain", -3), set(S(0.4), "route.mode", 1),
+                   set(S(0.45), "filt.out.on", 1), set(S(0.5), "mod.seed", 4242)});
+  const std::string t = saveText(*a);
+  a->reset();
+  auto b = mk({});
+  const char* why = "";
+  REQUIRE(restore(*b, t, &why), "the mid-session state was refused (%s)", why);
+  const auto oa = run(*a, in, in), ob = run(*b, in, in);
+  for (long i = 0; i < n; ++i) REQUIRE(oa.L[i] == ob.L[i] && oa.R[i] == ob.R[i], "the restored instance differs from the reset original at %ld", i);
+  return true;
+}
+
+// A19: the worst case fits 2 KiB; a text of 2 KiB + 1 is refused FIRST, with no
+// allocation; staging a valid state allocates nothing either.
+bool stateSize(Detail& d) {
+  auto w = mk({});
+  for (int i = 0; i < echo::kNumParams; ++i) {  // the longest text per key: a negative value with 17 digits, or the longest label
+    const auto& p = echo::kParams[static_cast<std::size_t>(i)];
+    if (!p.stepped) w->setParam(i, p.min < 0 ? p.min + (p.max - p.min) * (1.0 / 3.0) * 1e-6 : p.min + (p.max - p.min) / 3.0);
+  }
+  w->setParam("time.div", 19);
+  w->setParam("mod.seed", 65535);
+  const std::string worst = saveText(*w);
+  REQUIRE(!worst.empty() && worst.size() <= echo::state::kMaxBytes, "the worst-case state is %zu bytes (budget 2048)", worst.size());
+  std::printf("  REPORT state size: defaults %zu B, worst case %zu B (budget 2048)\n", saveText(*mk({})).size(), worst.size());
+  // No VALID state reaches 2 KiB (the worst case above is far under it), so the
+  // boundary is shown on texts padded with leading zeros on time.ms (a 1.5 KiB
+  // token, which the parser refuses on its own): at exactly 2048 bytes the text
+  // must be refused for something OTHER than its size (the test is >, not >=);
+  // at 2049 it must be refused for its size, FIRST, before any parsing.
+  const std::string base = saveText(*mk({}));
+  const std::size_t at = base.find("\ntime.ms ") + 9;
+  auto padded = [&](std::size_t total) { return base.substr(0, at) + std::string(total - base.size(), '0') + base.substr(at); };
+  auto e = mk({});
+  const std::string at2048 = padded(2048), over = padded(2049);
+  const char *why2048 = "", *whyOver = "", *whyOk = "";
+  alloc_probe::arm();
+  const bool okStaged = e->stageState(base, &whyOk);
+  e->adoptStaged();
+  const bool s2048 = e->stageState(at2048, &why2048);
+  const bool sOver = e->stageState(over, &whyOver);
+  alloc_probe::disarm();
+  REQUIRE(at2048.size() == 2048 && over.size() == 2049, "the padding is wrong (%zu, %zu)", at2048.size(), over.size());
+  REQUIRE(okStaged, "the default state was refused (%s)", whyOk);
+  REQUIRE(!s2048 && std::string_view(why2048) != "over 2 KiB", "a 2048-byte text was refused as oversized: the budget is not inclusive");
+  REQUIRE(!sOver && std::string_view(whyOver) == "over 2 KiB", "the 2049-byte text was refused for `%s`, not its size first", whyOver);
+  REQUIRE(alloc_probe::g_allocs.load() == 0, "staging allocated %ld times", alloc_probe::g_allocs.load());
+  return true;
+}
+
+// A20: a state saved during a ringing tail, ramps in flight and a set latch
+// equals one saved at rest with the same parameters.
+bool stateLiveExcluded(Detail& d) {
+  auto x = mk({{"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 80}, {"mix", 50}});
+  run(*x, impulse(S(0.3), 0, 1.5), zeros(S(0.3)));  // ringing, and an over at the input tap
+  x->setParam("io.outGain", 6);
+  x->setParam("mix", 60);
+  block(*x, zeros(100), zeros(100));  // both 20 ms ramps mid-flight
+  REQUIRE(x->inputMeter().clip && !x->atRest(), "the case is vacuous: no latch, or already at rest");
+  auto y = mk({{"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 80}, {"mix", 60}, {"io.outGain", 6}});
+  REQUIRE(saveText(*x) == saveText(*y), "the state saved while live differs from one saved at rest");
+  return true;
+}
+
+// Undo (RS-6.14 via horde's history): for every one of the 29 keys, restoring a
+// snapshot taken before the key moved gives the byte-identical state and a
+// render bit-identical to a twin that only loaded the snapshot.
+bool stateUndo(Detail& d) {
+  for (int i = 0; i < echo::kNumParams; ++i) {
+    const auto& p = echo::kParams[static_cast<std::size_t>(i)];
+    auto a = mk({{"time.sync", 0}, {"time.ms", 90}, {"fb.amount", 60}, {"mod.depthMs", 1}});
+    const std::string s0 = saveText(*a);
+    const double cur = a->getParam(i);
+    double v = p.stepped ? (cur + 1 > p.max ? p.min : cur + 1) : p.min + (p.max - p.min) * 0.37;
+    if (v == cur) v = p.max;
+    a->setParam(i, v);
+    REQUIRE(saveText(*a) != s0, "%.*s: the move left the state unchanged (vacuous)", static_cast<int>(p.key.size()), p.key.data());
+    const char* why = "";
+    REQUIRE(restore(*a, s0, &why), "%.*s: the snapshot was refused (%s)", static_cast<int>(p.key.size()), p.key.data(), why);
+    REQUIRE(saveText(*a) == s0, "%.*s: undo does not give back the snapshot's bytes", static_cast<int>(p.key.size()), p.key.data());
+    auto twin = mk({});
+    restore(*twin, s0);
+    const Vec in = impulse(S(0.3), 10, 0.5);
+    const auto oa = run(*a, in, in), ot = run(*twin, in, in);
+    for (long k = 0; k < S(0.3); ++k)
+      REQUIRE(oa.L[k] == ot.L[k] && oa.R[k] == ot.R[k], "%.*s: the undone instance renders differently at %ld", static_cast<int>(p.key.size()),
+              p.key.data(), k);
+  }
+  return true;
+}
+
+// All or nothing, and the alias rule: each malformed text is refused and leaves
+// the instance and the staging slot untouched; an alias reads and is written
+// back as the canonical name.
+// A load DURING PLAY (critic T-015 H1): stage + adopt on a ringing instance is
+// exactly a load (D-020: the old repeats fade under their old settings) plus the
+// Device keys through setParam (they ramp), bit for bit, against a twin that
+// does those two things by hand at the same block boundary.
+bool stateAdoptLive(Detail& d) {
+  g_rng = 31;
+  const long n = S(0.8), at = S(0.3);
+  Vec in(n);
+  for (long i = 0; i < S(0.25); ++i) in[static_cast<std::size_t>(i)] = 0.4 * noise();
+  auto a = mk({{"time.sync", 0}, {"time.ms", 90}, {"fb.amount", 75}, {"mix", 50}});
+  auto b = mk({{"time.sync", 0}, {"time.ms", 90}, {"fb.amount", 75}, {"mix", 50}});
+  auto target = mk({{"time.sync", 0}, {"time.ms", 200}, {"fb.amount", 30}, {"mix", 70}, {"io.outGain", -6}});
+  const std::string t = saveText(*target);
+  std::array<echo::KeyValue, echo::kNumParams> kv{};
+  std::size_t nk = 0;
+  for (int i = 0; i < echo::kNumParams; ++i)
+    if (echo::kParams[static_cast<std::size_t>(i)].morph != echo::Morph::Device) kv[nk++] = {echo::kParams[static_cast<std::size_t>(i)].key, target->getParam(i)};
+  const auto oa = run(*a, in, in, {{at, [&t](Echo& x) { x.stageState(t); x.adoptStaged(); }}});
+  const auto ob = run(*b, in, in, {{at, [&](Echo& x) {
+                                     x.loadState(std::span<const echo::KeyValue>(kv.data(), nk));
+                                     x.setParam("io.inGain", target->getParam(echo::kInGain));
+                                     x.setParam("io.outGain", target->getParam(echo::kOutGain));
+                                   }}});
+  REQUIRE(maxAbs(ob.L, at, at + S(0.01)) > 1e-3, "the case is vacuous: the twin has nothing ringing at the load");
+  for (long i = 0; i < n; ++i)
+    REQUIRE(oa.L[i] == ob.L[i] && oa.R[i] == ob.R[i], "an adopt mid-play differs from a load at sample %ld (%.17g vs %.17g)", i, oa.L[i], ob.L[i]);
+  return true;
+}
+
+bool stateRefusals(Detail& d) {
+  auto e = mk({{"fb.amount", 44}});
+  const std::string s = saveText(*e);
+  auto replace = [&](const std::string& from, const std::string& to) {
+    std::string t = s;
+    const auto at = t.find(from);
+    return at == std::string::npos ? std::string("<anchor lost>") : t.replace(at, from.size(), to);
+  };
+  const std::string devIn = "io.inGain 0\n";
+  std::string devUp = replace(devIn, "");
+  devUp.insert(devUp.find('\n') + 1, devIn);
+  const struct { const char* what; std::string text; } bad[] = {
+      {"an unknown key", replace("mix 30\n", "mix 30\nwidth 50\n")},
+      {"a duplicated key", replace("mix 30\n", "mix 30\nmix 30\n")},
+      {"a missing key", replace("mix 30\n", "")},
+      {"out of range", replace("time.ms 375\n", "time.ms 13000\n")},
+      {"a bad label", replace("route.mode stereo\n", "route.mode sideways\n")},
+      {"a division by index", replace("time.div 1/4\n", "time.div 9\n")},
+      {"a fractional seed", replace("mod.seed 1\n", "mod.seed 1.5\n")},
+      {"non-finite", replace("mix 30\n", "mix nan\n")},
+      {"another version", replace("echo-state 1\n", "echo-state 2\n")},
+      {"a Device key in the patch block", devUp},
+      {"a patch key in the device block", replace("mix 30\n", "") + "mix 30\n"},
+      {"no final newline", s.substr(0, s.size() - 1)},
+      {"CRLF", replace("mix 30\n", "mix 30\r\n")},
+      // What a libc's strtod tolerates but the writer never emits (critic T-015 M2):
+      {"a leading +", replace("mix 30\n", "mix +30\n")},
+      {"a tab before the value", replace("mix 30\n", "mix \t30\n")},
+      {"a hex float", replace("mix 30\n", "mix 0x1Ep0\n")},
+      {"a trailing point", replace("mix 30\n", "mix 30.\n")},
+      {"a leading point", replace("mix 30\n", "mix .30e2\n")},
+      {"an underflow", replace("mix 30\n", "mix 1e-400\n")},
+      {"a decimal comma", replace("mix 30\n", "mix 30,5\n")},
+      {"a seed with an exponent", replace("mod.seed 1\n", "mod.seed 1e0\n")},
+      {"a seed with a +", replace("mod.seed 1\n", "mod.seed +1\n")},
+      {"a hex seed", replace("mod.seed 1\n", "mod.seed 0x1\n")},
+  };
+  for (const auto& b : bad) {
+    const char* why = "";
+    REQUIRE(!e->stageState(b.text, &why), "%s was accepted", b.what);
+    REQUIRE(!e->adoptStaged() && saveText(*e) == s, "%s changed the instance or staged something", b.what);
+  }
+  const char* why = "";
+  REQUIRE(restore(*e, replace("time.div 1/4\n", "time.div 1/8D\n"), &why), "the alias 1/8D was refused (%s)", why);
+  REQUIRE(saveText(*e).find("\ntime.div 3/16\n") != std::string::npos, "the alias was not written back as its name 3/16");
+  REQUIRE(e->stageState(s) && !e->stageState(s, &why), "a second stage while one is pending was accepted");
+  e->adoptStaged();
+  return true;
+}
+
+// ---- M3 B2, T-037: the Clear action (SPEC §16.7; RS-4.12; row A23) ----
+
+// Blocks of a fixed size, with actions fired at their TRUE offset inside the
+// block (run() cuts a block at every event, which would put every action at
+// offset 0 and hide A23's must-fail shim). Parameter sets land at the start of
+// the block that contains them; the callers align them to the block size.
+struct Fire {
+  long at;
+  int id;
+};
+struct SetAt {
+  long at;
+  const char* key;
+  double v;
+};
+// Into a preallocated Out, so an allocation probe around it sees only the engine.
+void runActionsInto(Echo& e, const Vec& L, const Vec& R, const std::vector<Fire>& fires, int bs, Out& o, const std::vector<SetAt>& sets = {}) {
+  const long n = static_cast<long>(L.size());
+  for (long pos = 0; pos < n; pos += bs) {
+    const long len = std::min<long>(bs, n - pos);
+    for (const auto& st : sets)
+      if (st.at >= pos && st.at < pos + len) e.setParam(st.key, st.v);
+    for (const auto& f : fires)
+      if (f.at >= pos && f.at < pos + len) e.fireAction(f.id, static_cast<int>(f.at - pos));
+    const auto u = static_cast<std::size_t>(pos);
+    e.process(L.data() + u, R.data() + u, o.L.data() + u, o.R.data() + u, static_cast<int>(len), 120.0);
+  }
+}
+Out runActions(Echo& e, const Vec& L, const Vec& R, const std::vector<Fire>& fires, int bs, const std::vector<SetAt>& sets = {}) {
+  Out o{zeros(static_cast<long>(L.size())), zeros(static_cast<long>(L.size()))};
+  runActionsInto(e, L, R, fires, bs, o, sets);
+  return o;
+}
+constexpr int kClear = echo::Echo::kActionClear;
+
+// Criterion 1: before the Clear, nothing changes; from its sample the repeats
+// fade over 20 ms under the current settings (the read scaled by the load's own
+// ramp) and end; the heads stay.
+bool clearFade(Detail& d) {
+  for (double sr : {48000.0, 44100.0}) {  // "20 ms at the rate" (critic T-037 M2)
+  g_rng = 41;
+  const long n = S(0.6, sr), T = S(0.35, sr) + 37, N = S(0.02, sr);
+  Vec in = zeros(n);
+  for (long i = 0; i < S(0.25, sr); ++i) in[static_cast<std::size_t>(i)] = 0.3 * noise();
+  auto a = mk({{"time.sync", 0}, {"time.ms", 90}, {"fb.amount", 75}, {"mix", 50}}, sr);
+  auto b = mk({{"time.sync", 0}, {"time.ms", 90}, {"fb.amount", 75}, {"mix", 50}}, sr);
+  const auto oa = runActions(*a, in, in, {{T, kClear}}, 512), ob = runActions(*b, in, in, {}, 512);
+  for (long i = 0; i < T; ++i) REQUIRE(oa.L[i] == ob.L[i] && oa.R[i] == ob.R[i], "the Clear changed sample %ld, before its offset %ld", i, T);
+  REQUIRE(maxAbs(ob.L, T, T + N) > 1e-3, "the case is vacuous: nothing rings at the Clear");
+  for (long j = 0; j < N; ++j) {
+    const double g = static_cast<double>(N - 1 - j) / static_cast<double>(N);
+    REQUIRE(std::fabs(oa.L[T + j] - ob.L[T + j] * g) <= 1e-12, "at %.0f Hz, %ld after the Clear the output is %.9g, the 20 ms fade expects %.9g",
+            sr, j, oa.L[T + j], ob.L[T + j] * g);
+  }
+  REQUIRE(maxAbs(oa.L, T + N) == 0.0 && maxAbs(oa.R, T + N) == 0.0, "at %.0f Hz the repeats still sound %.3g after the 20 ms fade", sr,
+          maxAbs(oa.L, T + N));
+  }
+  return true;
+}
+
+// Criterion 1, "the heads stay" (ruled 2026-10-23, D-040: they keep moving, not
+// landed; critic T-037 H1, M1): a Clear during a tape glide, and during a tempo
+// move in crossfade mode, leaves every head exactly where a run without the
+// Clear has it, sample for sample, and each move in its own mode.
+bool clearMovingHeads(Detail& d) {
+  {  // a key move gliding by the tape law
+    auto a = mk({{"time.sync", 0}, {"time.ms", 20}, {"time.change", 0}, {"time.law", 0}, {"time.glide", 1}, {"fb.amount", 60}});
+    auto b = mk({{"time.sync", 0}, {"time.ms", 20}, {"time.change", 0}, {"time.law", 0}, {"time.glide", 1}, {"fb.amount", 60}});
+    const Vec in(S(0.8), 0.05);
+    const std::vector<SetAt> sets{{64 * 300, "time.ms", 200}};
+    Out oa{zeros(S(0.8)), zeros(S(0.8))}, ob{zeros(S(0.8)), zeros(S(0.8))};
+    runActionsInto(*a, in, in, {{64 * 310 + 5, kClear}}, 64, oa, sets);
+    runActionsInto(*b, in, in, {}, 64, ob, sets);
+    REQUIRE(b->headDelay(0) != 200.0 * 48.0 && b->headDelay(0) > 20.0 * 48.0, "the case is vacuous: the glide is not in flight at the end");
+    REQUIRE(a->headDelay(0) == b->headDelay(0) && a->headDelay(1) == b->headDelay(1),
+            "a Clear moved a gliding head: %.6f vs %.6f samples without it", a->headDelay(0), b->headDelay(0));
+  }
+  {  // a tempo move in tempoMode crossfade, while time.change is repitch
+    auto mkS = [] { return mk({{"time.sync", 1}, {"time.div", 9}, {"time.change", 0}, {"time.tempoMode", 0}, {"fb.amount", 60}}); };
+    auto a = mkS(), b = mkS();
+    double x[64], y[64], z[64];
+    for (double& v : x) v = 0.05;
+    for (int blk = 0; blk < 900; ++blk) {
+      const double bpm = blk < 400 ? 120.0 : 130.0;  // the tempo moves inside the Clear's fade
+      if (blk == 395) a->fireAction(kClear, 3);
+      a->process(x, x, y, z, 64, bpm);
+      b->process(x, x, y, z, 64, bpm);
+      REQUIRE(a->headDelay(0) == b->headDelay(0), "block %d: a Clear changed a tempo move's head (%.4f vs %.4f): wrong mode", blk,
+              a->headDelay(0), b->headDelay(0));
+    }
+    REQUIRE(b->fadeCount(0) >= 1, "the case is vacuous: the tempo move did not crossfade");
+  }
+  return true;
+}
+
+// "Under the current settings" (ruled 2026-10-23, D-040): with a mix ramp
+// running through the fade, the fading wet follows the LIVE mix, so the output
+// is the no-Clear output scaled by the fade, sample for sample.
+bool clearLiveWet(Detail& d) {
+  g_rng = 59;
+  const long n = S(0.5), T0 = 64 * 260, T = T0 + 5, N = S(0.02);
+  Vec in = zeros(n);
+  for (long i = 0; i < S(0.25); ++i) in[static_cast<std::size_t>(i)] = 0.3 * noise();
+  const std::vector<SetAt> sets{{T0, "mix", 90}};  // the 20 ms mix ramp starts 5 samples before the Clear
+  auto a = mk({{"time.sync", 0}, {"time.ms", 90}, {"fb.amount", 75}, {"mix", 30}});
+  auto b = mk({{"time.sync", 0}, {"time.ms", 90}, {"fb.amount", 75}, {"mix", 30}});
+  const auto oa = runActions(*a, in, in, {{T, kClear}}, 64, sets), ob = runActions(*b, in, in, {}, 64, sets);
+  REQUIRE(maxAbs(ob.L, T, T + N) > 1e-3, "the case is vacuous: nothing rings at the Clear");
+  for (long j = 0; j < N; ++j) {
+    const double g = static_cast<double>(N - 1 - j) / static_cast<double>(N);
+    REQUIRE(std::fabs(oa.L[T + j] - ob.L[T + j] * g) <= 1e-12, "%ld into the fade the wet is %.9g, the live mix expects %.9g", j, oa.L[T + j],
+            ob.L[T + j] * g);
+  }
+  return true;
+}
+
+// Criterion 1, the dry path and "no value lands": with live input and a mix ramp
+// running through the fade's end, the output (all dry here: the first repeat is
+// 2 s away) is bit-identical to a run without the Clear.
+bool clearDryNoLand(Detail& d) {
+  g_rng = 43;
+  const long n = S(0.5), T = 64 * 300 + 17;
+  Vec L(n), R(n);
+  for (long i = 0; i < n; ++i) { L[i] = 0.4 * noise(); R[i] = 0.4 * noise(); }
+  const std::vector<SetAt> sets{{64 * 302, "mix", 80}};  // a 20 ms mix ramp, still running when the Clear's fade ends
+  auto a = mk({{"time.sync", 0}, {"time.ms", 2000}, {"fb.amount", 50}, {"mix", 40}});
+  auto b = mk({{"time.sync", 0}, {"time.ms", 2000}, {"fb.amount", 50}, {"mix", 40}});
+  const auto oa = runActions(*a, L, R, {{T, kClear}}, 64, sets), ob = runActions(*b, L, R, {}, 64, sets);
+  for (long i = 0; i < n; ++i)
+    REQUIRE(oa.L[i] == ob.L[i] && oa.R[i] == ob.R[i], "the dry path differs at sample %ld (%.17g vs %.17g): a Clear touched it", i, oa.L[i], ob.L[i]);
+  return true;
+}
+
+// Criterion 2: a second Clear, or a load, during the fade never restarts it; a
+// Clear at rest changes nothing.
+bool clearNoRestart(Detail& d) {
+  g_rng = 47;
+  const long n = S(0.6), T = S(0.35) + 11, N = S(0.02);
+  Vec in = zeros(n);
+  for (long i = 0; i < S(0.25); ++i) in[static_cast<std::size_t>(i)] = 0.3 * noise();
+  auto mkRing = [] { return mk({{"time.sync", 0}, {"time.ms", 90}, {"fb.amount", 75}, {"mix", 50}}); };
+  auto one = mkRing(), two = mkRing();
+  const auto o1 = runActions(*one, in, in, {{T, kClear}}, 64), o2 = runActions(*two, in, in, {{T, kClear}, {T + 300, kClear}}, 64);
+  for (long i = 0; i < n; ++i) REQUIRE(o1.L[i] == o2.L[i], "a second Clear mid-fade changed sample %ld: it restarted the fade", i);
+  auto ld = mkRing();
+  const std::array<echo::KeyValue, 2> patch{{{"fb.amount", 30}, {"time.ms", 200}}};
+  Out ol{zeros(n), zeros(n)};
+  for (long pos = 0; pos < n; pos += 64) {
+    if (pos == (T / 64) * 64) ld->fireAction(kClear, static_cast<int>(T - pos));
+    if (pos == ((T + 300) / 64) * 64) ld->loadState(patch);
+    const auto u = static_cast<std::size_t>(pos);
+    ld->process(in.data() + u, in.data() + u, ol.L.data() + u, ol.R.data() + u, 64, 120.0);
+  }
+  REQUIRE(maxAbs(ol.L, T + N) == 0.0, "a load mid-Clear restarted the fade: sound %.3g after the Clear's 20 ms", maxAbs(ol.L, T + N));
+  REQUIRE(ld->getParam(echo::kFb) == 30.0 && ld->headDelay(0) == 0.2 * kSr, "the load that joined the Clear's fade did not land its patch");
+  auto rest = mk({{"time.sync", 0}, {"time.ms", 90}, {"fb.amount", 75}}), twin = mk({{"time.sync", 0}, {"time.ms", 90}, {"fb.amount", 75}});
+  const Vec pulse = impulse(S(0.3), 100, 0.5);
+  const auto orest = runActions(*rest, pulse, pulse, {{0, kClear}}, 64), otwin = runActions(*twin, pulse, pulse, {}, 64);
+  for (long i = 0; i < S(0.3); ++i) REQUIRE(orest.L[i] == otwin.L[i], "a Clear at rest changed sample %ld", i);
+  return true;
+}
+
+// Criterion 3: a performance event: the saved state is byte-identical before
+// and after a Clear (ADR-267 A1).
+bool clearState(Detail& d) {
+  auto e = mk({{"time.sync", 0}, {"time.ms", 90}, {"fb.amount", 75}, {"mix", 50}});
+  run(*e, impulse(S(0.2), 0, 0.5), zeros(S(0.2)));
+  const std::string before = saveText(*e);
+  runActions(*e, zeros(S(0.1)), zeros(S(0.1)), {{5, kClear}}, 256);
+  REQUIRE(saveText(*e) == before, "a Clear changed the saved state");
+  return true;
+}
+
+// Criterion 4 (A23) and 5: the same actions at the same offsets give bit-identical
+// output on every run and at block sizes 1, 64 and 4096; firing allocates
+// nothing; an unknown action is refused and changes nothing; the queue's cap
+// refuses rather than drops.
+bool clearA23(Detail& d) {
+  g_rng = 53;
+  const long n = S(0.5);
+  Vec L(n), R(n);
+  for (long i = 0; i < S(0.4); ++i) { L[i] = 0.3 * noise(); R[i] = 0.3 * noise(); }
+  // Two Clears in one 4096 block, the second after the first's fade has ended
+  // (critic T-037 L5), and one on a block's last sample.
+  const std::vector<Fire> fires{{3001, kClear}, {9000, kClear}, {10200, kClear}, {15000 + 4095, kClear}};
+  auto mkE = [] { return mk({{"time.sync", 0}, {"time.ms", 45}, {"fb.amount", 70}, {"mix", 50}}); };
+  REQUIRE(echo::Echo::resolveAction("clear") == kClear && !echo::Echo::resolveAction("freeze"), "the action keys resolve wrongly");
+  auto ref = mkE();
+  const auto oref = runActions(*ref, L, R, fires, 1);
+  for (int bs : {64, 4096, 1}) {
+    auto e = mkE();
+    Out o{zeros(n), zeros(n)};
+    alloc_probe::arm();
+    runActionsInto(*e, L, R, fires, bs, o);
+    alloc_probe::disarm();
+    REQUIRE(alloc_probe::g_allocs.load() == 0, "firing and processing actions allocated %ld times (block %d)", alloc_probe::g_allocs.load(), bs);
+    for (long i = 0; i < n; ++i)
+      REQUIRE(o.L[i] == oref.L[i] && o.R[i] == oref.R[i], "block %d differs from block 1 at sample %ld: an action is not at its offset", bs, i);
+  }
+  auto plain = mkE(), unk = mkE();
+  const auto op = runActions(*plain, L, R, {}, 64);
+  REQUIRE(!unk->fireAction(7, 10), "an unknown action id was accepted");
+  const auto ou = runActions(*unk, L, R, {}, 64);
+  for (long i = 0; i < n; ++i) REQUIRE(op.L[i] == ou.L[i], "a refused action changed sample %ld", i);
+  auto cap = mkE();
+  for (int k = 0; k < echo::Echo::kMaxActions; ++k) REQUIRE(cap->fireAction(kClear, k), "action %d of the cap was refused", k);
+  REQUIRE(!cap->fireAction(kClear, 9), "an action past the cap of %d was accepted", echo::Echo::kMaxActions);
+  auto off = mkE();
+  REQUIRE(!off->fireAction(kClear, -1) && !off->fireAction(kClear, off->maxBlock()), "an offset outside [0, maxBlock) was accepted");
+  return true;
+}
+
 struct Check {
   const char* name;
   bool (*fn)(Detail&);
@@ -1523,7 +2352,8 @@ const std::vector<Check> kChecks = {
     {"loop repair: a non-finite write clears all loop state; the wet recovers", loopRepair, {"loopRepairPartial"}},
     {"FTZ: the host's FP control word is restored", ftzRestored, {"ftzNotRestored"}},
     {"real time: no allocation in process / setParam / reset / loadState", noAlloc, {"allocInProcess"}},
-    {"I/O gain: unity at 0 dB; a 20 ms ramp linear in amplitude, at 48 and 96 kHz (B435)", ioGainLaw, {"dbRamp", "rampFixedSamples"}},
+    {"I/O gain test 2: unity at 0 dB; a 20 ms ramp linear in amplitude on both trims, at 44.1, 48 and 96 kHz (B435)", ioGainLaw,
+     {"dbRamp", "rampFixedSamples"}},
     {"switches: routing and filter switches are click-free (20 ms equal-gain)", switchesClickFree, {"instantSwitch"}},
     {"crossfade: equal-gain; correlated heads never exceed the signal (D-007)", crossfadeEqualGain, {"equalPower"}},
     {"jump: a 3 ms crossfade, never a bare jump (D-016)", jumpIsShortFade, {"bareJump"}},
@@ -1564,6 +2394,45 @@ const std::vector<Check> kChecks = {
      {"tempoModeIgnored", "followNoCap"}},
     {"click metric (M2 gate, s fixed at 2.25): sweeps, tempo sweeps and single moves under 2.5 and inside the speed invariants; a planted click over",
      clickSweep, {"integerRead", "blockSteppedD", "bareJump", "noLawCap"}},
+    // ---- M3 B2, T-013 ----
+    {"ABI: properties() validates after prepare at 44.1/48/96/192 kHz (latency 0, tail, min_block 1, load 20 ms) and is refused before",
+     abiProperties, {"propsNoTail", "loadBoundShort"}},
+    {"ABI: the tail saturates onto TailDecl's 32 bits (kInfiniteTail at 2^32 - 1 and past; 99.99 %, 12 s, 192 kHz)", abiTail32, {"tailWraps32"}},
+    {"ABI: every parameter maps one to one onto OQ #33's MorphKind + MorphParticipation (RS-2.2)", abiParamClasses, {"paramNoClass"}},
+    {"ABI: process() in place is bit-identical to out of place (3 routings, blocks 1/64/4096)", abiInPlace, {"processReadsAfterWrite"}},
+    // ---- M3 B2, T-014 ----
+    {"I/O gain test 1: at 0 dB both trims are bit-identical to an unprocessed pass", ioTest1Unity, {"dryLimiter"}},
+    {"I/O gain test 3: after prepare at a saved +6 dB the first sample is already +6 dB (48, 96 kHz)", ioTest3Opens, {"prepareRampsIn"}},
+    {"I/O gain test 4: a load and a corner flip leave both gains and a ramp in flight alone (bit-identical)", ioTest4Kept,
+     {"loadWritesDevice", "loadSnapsDevice"}},
+    {"I/O gain test 5: Input +12 dB is a trim before the loop (= pre-scaled input) and drives the ceiling; Output +12 dB is level only",
+     ioTest5Placement, {"inGainAfterLoop", "inGainDryOnly"}},
+    {"I/O gain test 6: Echo declares both keys; the slot adds no second pair", ioTest6Slot, {"doubleGain"}},
+    {"meters: input tap after Input Gain (repaired, both channels, |x|), output tap after Output Gain and the tail; per-block peaks",
+     metersTaps, {"tapBeforeGain", "outTapDryOnly", "tapReadsRaw"}},
+    {"I/O gain test 7: both latches set on an over (> 1.0, not at 1.0) and hold through silence, reset and a load until cleared",
+     ioTest7Latches, {"latchClears", "resetClearsLatch"}},
+    // ---- M3 B2, T-015 ----
+    {"state: version line, every patch key once in manifest order by name, then the [device] block (SPEC §16.2)", stateFormat,
+     {"stateDivByIndex", "stateKeyMissing"}},
+    {"state A18: save -> load -> save byte-identical, values bit-equal, renders identical; also in a comma locale", stateExact, {"stateFloat6g"}},
+    {"state A17: a mid-session state in a fresh instance renders as the original after reset()", stateComplete, {"stateKeyMissing"}},
+    {"state A19: the worst case fits 2 KiB; 2 KiB + 1 refused first; staging allocates nothing", stateSize, {"stateOversizedAccepted"}},
+    {"state A20: saved while ringing, mid-ramp and latched equals saved at rest", stateLiveExcluded, {"stateLatchSerialised"}},
+    {"state undo: for each of the 29 keys, the snapshot restores byte- and bit-identically", stateUndo, {"stateKeyMissing"}},
+    {"state: every malformed text refused whole (strict number grammar), nothing staged; an alias reads and is written back by name",
+     stateRefusals, {"stateAcceptsUnknown"}},
+    {"state: an adopt mid-play is a D-020 load plus the Device keys ramping, bit for bit", stateAdoptLive, {"adoptResets"}},
+    // ---- M3 B2, T-037 ----
+    {"Clear: nothing changes before its sample; from it the repeats fade over 20 ms (48, 44.1 kHz) and end", clearFade, {"clearCuts"}},
+    {"Clear: the heads keep moving as without it (a tape glide; a tempo move keeps its crossfade mode)", clearMovingHeads, {"clearFreezesHeads"}},
+    {"Clear: the fading wet follows the live mix (a mix ramp through the fade)", clearLiveWet, {"clearFreezesWet"}},
+    {"Clear: the dry path is bit-identical to no Clear, and no value lands (a mix ramp runs on through the fade's end)", clearDryNoLand,
+     {"clearLandsValues"}},
+    {"Clear: a second Clear or a load mid-fade never restarts it; a Clear at rest changes nothing", clearNoRestart, {"clearRestartsFade"}},
+    {"Clear: a performance event, the saved state byte-identical before and after", clearState, {"clearWritesState"}},
+    {"Clear A23: same actions, same offsets, bit-identical at blocks 1/64/4096; no allocation; unknown refused; the cap refuses", clearA23,
+     {"actionAtBlockStart"}},
 };
 
 #ifdef ECHO_PLANTS
@@ -1596,6 +2465,18 @@ bool* plantFlag(std::string_view n) {
       {"tempoStealsKeyMove", &tempoStealsKeyMove}, {"followNoTrackInFade", &followNoTrackInFade}, {"followKeepsResidual", &followKeepsResidual},
       {"modNoFloorBound", &modNoFloorBound}, {"wakeOffsetFromZero", &wakeOffsetFromZero}, {"tapeLinearHistory", &tapeLinearHistory},
       {"glideFixedRate", &glideFixedRate},
+      {"propsNoTail", &propsNoTail}, {"tailWraps32", &tailWraps32}, {"paramNoClass", &paramNoClass},
+      {"processReadsAfterWrite", &processReadsAfterWrite}, {"loadBoundShort", &loadBoundShort},
+      {"latchClears", &latchClears}, {"tapBeforeGain", &tapBeforeGain}, {"prepareRampsIn", &prepareRampsIn},
+      {"inGainAfterLoop", &inGainAfterLoop}, {"doubleGain", &doubleGain},
+      {"inGainDryOnly", &inGainDryOnly}, {"outTapDryOnly", &outTapDryOnly}, {"tapReadsRaw", &tapReadsRaw}, {"resetClearsLatch", &resetClearsLatch},
+
+      {"stateFloat6g", &stateFloat6g}, {"stateKeyMissing", &stateKeyMissing}, {"stateLatchSerialised", &stateLatchSerialised},
+      {"stateOversizedAccepted", &stateOversizedAccepted}, {"stateDivByIndex", &stateDivByIndex}, {"stateAcceptsUnknown", &stateAcceptsUnknown},
+      {"adoptResets", &adoptResets},
+      {"actionAtBlockStart", &actionAtBlockStart}, {"clearCuts", &clearCuts}, {"clearLandsValues", &clearLandsValues},
+      {"clearWritesState", &clearWritesState}, {"clearRestartsFade", &clearRestartsFade},
+      {"clearFreezesHeads", &clearFreezesHeads}, {"clearFreezesWet", &clearFreezesWet},
   };
   for (const auto& p : table)
     if (n == p.n) return p.f;
@@ -1658,7 +2539,14 @@ int main(int argc, char** argv) {
                         "shapeInstant", "modDepthUnlimited", "noLawCap", "noFallback", "tapeNoHistory", "expLawLinear",
                         "tempoModeIgnored", "followNoCap", "integerRead", "blockSteppedD", "tailClockIgnoresMotion",
                         "seedResendRestarts", "loadKeepsModState", "tempoStealsKeyMove", "followNoTrackInFade",
-                        "followKeepsResidual", "modNoFloorBound", "wakeOffsetFromZero", "tapeLinearHistory", "glideFixedRate"}) {
+                        "followKeepsResidual", "modNoFloorBound", "wakeOffsetFromZero", "tapeLinearHistory", "glideFixedRate",
+                        "propsNoTail", "tailWraps32", "paramNoClass", "processReadsAfterWrite", "loadBoundShort",
+                        "latchClears", "tapBeforeGain", "prepareRampsIn", "inGainAfterLoop", "doubleGain",
+                        "inGainDryOnly", "outTapDryOnly", "tapReadsRaw", "resetClearsLatch",
+                        "stateFloat6g", "stateKeyMissing", "stateLatchSerialised", "stateOversizedAccepted", "stateDivByIndex",
+                        "stateAcceptsUnknown", "adoptResets",
+                        "actionAtBlockStart", "clearCuts", "clearLandsValues", "clearWritesState", "clearRestartsFade",
+                        "clearFreezesHeads", "clearFreezesWet"}) {
     bool guarded = false;
     for (const auto& c : kChecks)
       for (const char* p : c.plants) guarded = guarded || std::string_view(p) == n;
