@@ -4,6 +4,11 @@ Single source of truth. Only the lead session (or the human) edits this file.
 State lives here; conversations are ephemeral. The *why* behind ratified choices
 lives in `DECISIONS.md`; horde's shipping bar is `intake/module-1.0-bar.md`.
 
+**Standing rule (graduated from REFLECTIONS by poll, 2026-10-22):** every milestone PR
+gets an independent critic review (Opus, fresh context, sourced separately from the
+author) before it opens. Both milestone reviews so far (M1, M2) returned FIX-THEN-SHIP
+with HIGH findings the author's own suite had passed.
+
 ## Status
 
 - **Phase:** Phase 0 CLOSED 2026-10-20 (D-013). Phase A CLOSED 2026-10-20 (PR #4;
@@ -12,19 +17,24 @@ lives in `DECISIONS.md`; horde's shipping bar is `intake/module-1.0-bar.md`.
   green on Mac/clang and Linux/GCC, ASan + UBSan clean in CI. **M2 CLOSED 2026-10-21**
   (PR #10 merged, 4c68da4; T-009; D-023–D-026): both repitch laws, the tempo modes and
   modulation; 52 checks, 75 planted faults caught. **M3 (rack admission, the 1.0 bar,
-  due 2026-12-11) is next.**
+  due 2026-12-11) is under way** (D-028; T-010 – T-027, T-037): batch 1 (T-010 – T-012,
+  T-002) done on PR #19 (D-034 – D-036); batch 2's T-013 – T-015 and T-037 done on PR #20
+  (D-037 – D-040), T-016 next. **M4 (the IR display and Echo's screen) is under way
+  beside it** (D-027, D-030): T-030 – T-032 done (PR #15, PR #16); T-033 blocked on
+  M3's T-014; T-036 (gate 4's flicker) open.
 - **Oracle:** `./verify fast` = kit integrity, leak gate, private-name gate,
   structure, manifest, intake pin, legal gate, **lab smoke** (`tools/lab_smoke.mjs`,
-  ~7 s), and the **core gate**: a warning-free Release build of `core/`, the M1
-  invariant suite on the clean build (`echo_tests`), the same suite under each of
-  its 32 planted faults (`echo_plants`, each must be caught), the C++ table
-  against `spec/params.json`, and the fast-math guard probe (~10 s warm, ~70 s
-  from a cold build). `full` = `fast` for now (goldens and sweeps arrive with M3).
+  ~7 s), the **core gate** and the **plan-map smoke**. The core gate: a `-Werror`
+  Release build of `core/`; the core suite clean (`echo_tests`, 52 checks) and under
+  each of its 75 planted faults (`echo_plants`, each must be caught); the IR suite
+  clean and under its M4 plants (`echo_ir_tests`, `echo_ir_plants`); the C++ table
+  against `spec/params.json`; the fp-contract probe; the fast-math guard (~20 s warm,
+  ~90 s from a cold build). `full` = `fast` for now (goldens and sweeps arrive with M3).
 - **Hard date:** horde's module cutoff **2026-12-11**. Every MUST row of the 1.0
   bar met by then, or Echo ships after 1.0.
-- **Last human ratification:** 2026-10-20 — the M1 rulings by poll: rest waits for
-  the wet (D-018), the tail clock (D-019), a load fades the old repeats under their
-  old settings (D-020); before them, the spec, revision 2 (D-017).
+- **Last human ratification:** 2026-10-22 — the reflection prune by poll (the standing
+  critic rule above; T-036). Before it, 2026-10-21: frame 1 is 96 000 samples (D-033),
+  the M4 plan (D-030), the M3 plan (D-028), M4's gate (D-027).
 
 ## Phases (each gate is a checkable condition)
 
@@ -696,8 +706,9 @@ filings need the human's go-ahead each time.
 - **Out of scope:** threads, the display, `engine.h`.
 
 ### T-031 — M4: the render service (B4-2)
-- **Status:** in progress (built on branch `m4-service`, B4-2's PR; trace
-  `traces/2026-10-21-b4-2-service-view.md`).
+- **Status:** done 2026-10-22 (PR #16 merged, 369edb1; trace
+  `traces/2026-10-21-b4-2-service-view.md`; critic FIX-THEN-SHIP, all fixed). Gate 4's
+  wall-clock check flickers under load: T-036.
 - **Amended 2026-10-21 by poll (D-033):** frame 1 covers the first **96 000 samples** (2 s at
   48 kHz, 0.5 s at 192 kHz). The render costs per sample, and once built, a 2 s head at
   192 kHz measured 90–196 ms worst of 20. Every chunk is cancellable, the head's included,
@@ -727,7 +738,7 @@ filings need the human's go-ahead each time.
 - **Out of scope:** drawing; `engine.h`.
 
 ### T-032 — M4: the display model (B4-2)
-- **Status:** in progress (built on branch `m4-service`, B4-2's PR).
+- **Status:** done 2026-10-22 (PR #16 merged, 369edb1; same trace as T-031).
 - **Amended 2026-10-21 by the lead (D-032, for the human's review):**
   - Criterion 1: the model draws **columns**. Each column is the render's own sample of
     greatest magnitude in its range. A screen has hundreds of columns and a render millions
@@ -816,6 +827,23 @@ filings need the human's go-ahead each time.
   2. An independent Opus critic review with no open HIGH findings.
   3. M4's gate rows 1–6, each evidenced in the trace.
 - **Out of scope:** any edit inside horde's tree beyond that one path.
+
+### T-036 — M4: make gate 4's clock check stop flickering (T-031)
+- **Status:** open (graduated from REFLECTIONS by poll, 2026-10-22).
+- **Why:** T-031's gate 4 (frame 1 within 100 ms, worst of 20, wall clock, enforced
+  locally) turned `./verify fast` red twice in a row at the 2026-10-22 close, then green
+  four runs straight with nothing changed. A stop gate that flickers teaches re-running
+  until green.
+- **Scope:** `core/tests/ir_tests.cpp` (gate 4) and, if the human picks it, `./verify`'s
+  wiring (a human gate).
+- **Acceptance criteria:**
+  1. The human rules the option by poll, recorded in DECISIONS: time on CPU rather than
+     the wall; a percentile with a bounded retry; or the clock check moves to
+     `./verify full`. The 100 ms threshold is not relaxed without that ruling.
+  2. The plant `irWholeTailFirst` still fails the check as changed.
+  3. `./verify fast` green 10 runs in a row on the dev Mac under the load that turned it
+     red (another build running), each run recorded.
+- **Out of scope:** the render service's behaviour; CI (which only reports the timing).
 
 ### T-037 — M3: the Clear action (RS-4.12, row A23; B2)
 - **Status:** done 2026-10-23 (D-040; critic FIX-THEN-SHIP: H1 and M3 settled by two polls,
