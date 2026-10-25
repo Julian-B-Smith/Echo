@@ -19,7 +19,7 @@ with HIGH findings the author's own suite had passed.
   modulation; 52 checks, 75 planted faults caught. **M3 (rack admission, the 1.0 bar,
   due 2026-12-11) is under way** (D-028; T-010 – T-027, T-037): batch 1 (T-010 – T-012,
   T-002) done on PR #19 (D-034 – D-036); batch 2's T-013 – T-015 and T-037 done on PR #20
-  (D-037 – D-040), T-016 next. **M4 (the IR display and Echo's screen) is under way
+  (D-037 – D-040), T-016 on its own PR (D-041): **batch 2 done**. Batch 3 (T-017 – T-020) next. **M4 (the IR display and Echo's screen) is under way
   beside it** (D-027, D-030): T-030 – T-032 done (PR #15, PR #16); T-033 blocked on
   M3's T-014; T-036 (gate 4's flicker) open.
 - **Oracle:** `./verify fast` = kit integrity, leak gate, private-name gate,
@@ -306,6 +306,9 @@ commercial delay or borrow its mode names, presets or UI text.
 ### Phase N (pre-ship) — Prior-art re-scan + name clearance
 - Re-run the prior-art swarm; the legal and IP checks and horde's B433 screen
   for the user-visible name run privately (`local/legal/`, gitignored, D-014).
+- Before the first release (D-041): the human rules whether ranges are frozen too
+  (a narrowed range clamps old presets); the released `core/manifest.lock.json` is
+  pinned and the gate diffs against it, so B428's "append-only" is enforced.
 - **Gate:** dated technical re-scan appended to `docs/prior-art.md`; legal/IP
   findings in `local/legal/` only, surfaced to the human with a go/no-go; name
   cleared before any public release.
@@ -359,8 +362,8 @@ commercial delay or borrow its mode names, presets or UI text.
 - **Status:** open.
 - **Scope:** `core/`, `tools/check_manifest.py`.
 - **Items:** a check that cutoff glides take 10 ms (an instant glide survives the
-  suite); `check_manifest.py` to compare `rate` and `smoothing` too (the C++ table
-  has neither yet); ~~the ABI shim's 4-pointer `process` vs the shims' in-place L/R~~
+  suite); ~~`check_manifest.py` to compare `rate` and `smoothing` too~~ (**done
+  2026-10-24 by T-016, D-041**); ~~the ABI shim's 4-pointer `process` vs the shims' in-place L/R~~
   (**settled 2026-10-23 by T-013, D-037:** in place is proven bit-identical, so the swap is a
   rename); why GCC's pragma-less probe render
   stays bit-identical despite 153 fused ops in `process` (D-022).
@@ -517,7 +520,9 @@ filings need the human's go-ahead each time.
 - **Out of scope:** horde's history tree and gesture brackets (RS-6.14 is the face's).
 
 ### T-016 — M3: Manifest lock and scope freeze (bar rows 1–2)
-- **Status:** open (human gate: a `./verify` edit).
+- **Status:** done 2026-10-24 (D-041, four rulings by poll; critic FIX-THEN-SHIP, all fixed
+  bar a recorded pre-release item, Phase N; trace `traces/2026-10-24-t016-lock.md`). Closes
+  T-007's rate/smoothing item. `module_version` 7aff18557d63592e.
 - **Scope:** a lock file beside the manifest (or under `core/`, as the human prefers, since
   `spec/` is protected), `./verify`, `tools/check_manifest.py`.
 - **Acceptance criteria:** a lock lists every key with its unit, class and stepped labels; a

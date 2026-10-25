@@ -126,7 +126,9 @@ tracked files (D-014), enforced by `legal_gate`.
 **Protected paths** (human gate to modify): `./verify` and `.kit/`;
 `project.manifest.json`; `intake/` (horde's record, sha256-pinned by
 `intake_gate` — annotate in docs/, never edit); `spec/` and `lab/` once the
-human ratifies them; goldens once cut.
+human ratifies them; goldens once cut; `core/manifest.lock.json` and the
+`core/include/echo/module_version.h` it generates (D-041: only `tools/manifest_lock.py
+write --decision D-NNN` after the human's ruling).
 
 **Verify targets.** `fast` (~20 s warm, ~90 s from a cold build): kit integrity,
 leak, private-name, structure, manifest, intake pin, legal gate, the lab smoke,

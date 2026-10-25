@@ -58,6 +58,11 @@ struct ParamDef {
   Morph morph;
   std::string_view law;
   std::span<const std::string_view> labels;
+  // FOUNDATIONS' ReadCadence and the smoothing family (SPEC §9), compared with
+  // params.json by check_manifest.py (T-016 closes T-007's item: before, the C++
+  // table carried neither, so a drift in either was invisible).
+  std::string_view rate;
+  std::string_view smoothing;
 };
 
 // Handles, in table order.
@@ -104,36 +109,41 @@ inline constexpr std::array<std::string_view, 2> kShape{"sine", "drift"};
 }  // namespace labels
 
 inline constexpr std::array<ParamDef, kNumParams> kParams{{
-    {"io.inGain", "Input Gain", "dB", false, -24, 24, 0, Morph::Device, "io", {}},
-    {"io.outGain", "Output Gain", "dB", false, -24, 24, 0, Morph::Device, "io", {}},
-    {"mix", "Mix", "%", false, 0, 100, 30, Morph::Continuous, "lin", {}},
-    {"time.sync", "Sync", "", true, 0, 1, 1, Morph::Jump, "step", labels::kSync},
-    {"time.ms", "Time", "ms", false, 1, 12000, 375, Morph::Continuous, "log", {}},
-    {"time.div", "Division", "", true, 0, 21, 9, Morph::Jump, "step", labels::kDiv},
-    {"time.offL", "Left Offset", "%", false, -50, 50, 0, Morph::Continuous, "lin", {}},
-    {"time.offR", "Right Offset", "%", false, -50, 50, 0, Morph::Continuous, "lin", {}},
-    {"time.change", "Time Change", "", true, 0, 2, 0, Morph::Jump, "step", labels::kChange},
-    {"time.law", "Repitch Law", "", true, 0, 1, 0, Morph::Jump, "step", labels::kLaw},
-    {"time.tempoMode", "Tempo Follow", "", true, 0, 2, 1, Morph::Jump, "step", labels::kTempoMode},
-    {"time.glide", "Glide", "s", false, 0.01, 5, 0.3, Morph::Continuous, "log", {}},
-    {"time.xfadeMs", "Crossfade", "ms", false, 2, 500, 60, Morph::Continuous, "log", {}},
-    {"fb.amount", "Feedback", "%", false, 0, 120, 35, Morph::Continuous, "lin", {}},
-    {"route.mode", "Routing", "", true, 0, 2, 0, Morph::Jump, "step", labels::kRoute},
-    {"filt.in.on", "Input Filter", "", true, 0, 1, 0, Morph::Jump, "step", labels::kOnOff},
-    {"filt.in.hpHz", "Input Low Cut", "Hz", false, 20, 2000, 20, Morph::Continuous, "log", {}},
-    {"filt.in.lpHz", "Input High Cut", "Hz", false, 500, 20000, 20000, Morph::Continuous, "log", {}},
-    {"filt.loop.on", "Loop Filter", "", true, 0, 1, 1, Morph::Jump, "step", labels::kOnOff},
-    {"filt.loop.hpHz", "Loop Low Cut", "Hz", false, 20, 2000, 60, Morph::Continuous, "log", {}},
-    {"filt.loop.lpHz", "Loop High Cut", "Hz", false, 500, 20000, 9000, Morph::Continuous, "log", {}},
-    {"filt.out.on", "Output Filter", "", true, 0, 1, 0, Morph::Jump, "step", labels::kOnOff},
-    {"filt.out.hpHz", "Output Low Cut", "Hz", false, 20, 2000, 20, Morph::Continuous, "log", {}},
-    {"filt.out.lpHz", "Output High Cut", "Hz", false, 500, 20000, 20000, Morph::Continuous, "log", {}},
-    {"mod.depthMs", "Mod Depth", "ms", false, 0, 20, 0, Morph::Continuous, "lin", {}},
-    {"mod.rateHz", "Mod Rate", "Hz", false, 0.05, 10, 0.6, Morph::Continuous, "log", {}},
-    {"mod.shape", "Mod Shape", "", true, 0, 1, 0, Morph::Jump, "step", labels::kShape},
-    {"mod.spread", "Mod Spread", "%", false, 0, 100, 0, Morph::Continuous, "lin", {}},
-    {"mod.seed", "Mod Seed", "", true, 0, 65535, 1, Morph::Jump, "step", {}},
+    {"io.inGain", "Input Gain", "dB", false, -24, 24, 0, Morph::Device, "io", {}, "continuous", "gain"},
+    {"io.outGain", "Output Gain", "dB", false, -24, 24, 0, Morph::Device, "io", {}, "continuous", "gain"},
+    {"mix", "Mix", "%", false, 0, 100, 30, Morph::Continuous, "lin", {}, "continuous", "gain"},
+    {"time.sync", "Sync", "", true, 0, 1, 1, Morph::Jump, "step", labels::kSync, "continuous", "time"},
+    {"time.ms", "Time", "ms", false, 1, 12000, 375, Morph::Continuous, "log", {}, "continuous", "time"},
+    {"time.div", "Division", "", true, 0, 21, 9, Morph::Jump, "step", labels::kDiv, "continuous", "time"},
+    {"time.offL", "Left Offset", "%", false, -50, 50, 0, Morph::Continuous, "lin", {}, "continuous", "time"},
+    {"time.offR", "Right Offset", "%", false, -50, 50, 0, Morph::Continuous, "lin", {}, "continuous", "time"},
+    {"time.change", "Time Change", "", true, 0, 2, 0, Morph::Jump, "step", labels::kChange, "continuous", "deferred"},
+    {"time.law", "Repitch Law", "", true, 0, 1, 0, Morph::Jump, "step", labels::kLaw, "continuous", "deferred"},
+    {"time.tempoMode", "Tempo Follow", "", true, 0, 2, 1, Morph::Jump, "step", labels::kTempoMode, "continuous", "deferred"},
+    {"time.glide", "Glide", "s", false, 0.01, 5, 0.3, Morph::Continuous, "log", {}, "continuous", "law"},
+    {"time.xfadeMs", "Crossfade", "ms", false, 2, 500, 60, Morph::Continuous, "log", {}, "continuous", "law"},
+    {"fb.amount", "Feedback", "%", false, 0, 120, 35, Morph::Continuous, "lin", {}, "continuous", "gain"},
+    {"route.mode", "Routing", "", true, 0, 2, 0, Morph::Jump, "step", labels::kRoute, "continuous", "crossfade"},
+    {"filt.in.on", "Input Filter", "", true, 0, 1, 0, Morph::Jump, "step", labels::kOnOff, "continuous", "crossfade"},
+    {"filt.in.hpHz", "Input Low Cut", "Hz", false, 20, 2000, 20, Morph::Continuous, "log", {}, "continuous", "filter"},
+    {"filt.in.lpHz", "Input High Cut", "Hz", false, 500, 20000, 20000, Morph::Continuous, "log", {}, "continuous", "filter"},
+    {"filt.loop.on", "Loop Filter", "", true, 0, 1, 1, Morph::Jump, "step", labels::kOnOff, "continuous", "crossfade"},
+    {"filt.loop.hpHz", "Loop Low Cut", "Hz", false, 20, 2000, 60, Morph::Continuous, "log", {}, "continuous", "filter"},
+    {"filt.loop.lpHz", "Loop High Cut", "Hz", false, 500, 20000, 9000, Morph::Continuous, "log", {}, "continuous", "filter"},
+    {"filt.out.on", "Output Filter", "", true, 0, 1, 0, Morph::Jump, "step", labels::kOnOff, "continuous", "crossfade"},
+    {"filt.out.hpHz", "Output Low Cut", "Hz", false, 20, 2000, 20, Morph::Continuous, "log", {}, "continuous", "filter"},
+    {"filt.out.lpHz", "Output High Cut", "Hz", false, 500, 20000, 20000, Morph::Continuous, "log", {}, "continuous", "filter"},
+    {"mod.depthMs", "Mod Depth", "ms", false, 0, 20, 0, Morph::Continuous, "lin", {}, "continuous", "mod"},
+    {"mod.rateHz", "Mod Rate", "Hz", false, 0.05, 10, 0.6, Morph::Continuous, "log", {}, "continuous", "mod"},
+    {"mod.shape", "Mod Shape", "", true, 0, 1, 0, Morph::Jump, "step", labels::kShape, "continuous", "mod"},
+    {"mod.spread", "Mod Spread", "%", false, 0, 100, 0, Morph::Continuous, "lin", {}, "continuous", "mod"},
+    {"mod.seed", "Mod Seed", "", true, 0, 65535, 1, Morph::Jump, "step", {}, "continuous", "mod"},
 }};
+
+// The declared actions (SPEC §16.7, params.json `actions`), by index = action id.
+// Engine::resolveAction reads THIS table; check_manifest.py holds it to
+// params.json, so a C++ rename of an action cannot drift silently (critic T-016 L2).
+inline constexpr std::array<std::string_view, 1> kActionKeys{"clear"};
 
 constexpr std::optional<int> paramIndex(std::string_view key) {
   for (std::size_t i = 0; i < kParams.size(); ++i)
