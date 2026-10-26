@@ -36,6 +36,30 @@ def diff(spec, cpp):
     return out
 
 
+# A11's structural rule (contract §12.1, §12.2; T-018): every flip-class key declares how it
+# switches. Each clause of its declaration (a mode-dependent key lists one per mode, separated by
+# ';') must be an equal-gain crossfade with a stated length (ms, or the time.xfadeMs key), a gate,
+# a seeded jump, or a deferral. A bare jump of signal-path state is not admitted.
+import re
+# FULL match per clause (critic T-018 M4: a search would admit "instant, no gate" or "not a seeded jump"):
+# an optional "mode = " prefix, then exactly one admitted form, each STARTING the clause.
+SWITCH_OK = re.compile(r"(\w+ = )?(equal-gain crossfade, (\d+(\.\d+)? ms|time\.xfadeMs)|seeded jump( .*| ?\(.*)?|deferred: .+|gate( .*)?)")
+
+
+def switch_problems(params):
+    out = []
+    for x in params:
+        if x.get("morph") != "jump":
+            continue
+        decl = x.get("switch", "")
+        body = decl.split(":", 1)[1] if decl.startswith("moves the read head:") else decl
+        clauses = [c.strip() for c in body.split(";")] if decl.startswith("moves the read head:") else [decl.strip()]
+        for c in clauses:
+            if not SWITCH_OK.fullmatch(c):
+                out.append(f"{x['key']}: switch clause {c!r} declares no crossfade length, gate, seeded jump or deferral")
+    return out
+
+
 def main():
     root = pathlib.Path(__file__).resolve().parent.parent
     spec = json.loads((root / "spec" / "params.json").read_text())["params"]
@@ -62,14 +86,28 @@ def main():
         print("check_manifest: the detector did NOT see a renamed action (vacuous)", file=sys.stderr)
         return 1
 
-    problems = diff(spec, cpp)
+    # A11's switch declarations, proven first on a planted bare switch (its crossfade removed).
+    full_spec = json.loads((root / "spec" / "params.json").read_text())["params"]
+    for what, text in (("a bare switch", "instant"), ("a crossfade with its length removed", "equal-gain crossfade"),
+                       ("a negated form", "not a seeded jump")):
+        planted = copy.deepcopy(full_spec)
+        for x in planted:
+            if x["key"] == "route.mode":
+                x["switch"] = text
+        if not switch_problems(planted):
+            print(f"check_manifest: the switch check did NOT see {what} (vacuous)", file=sys.stderr)
+            return 1
+
+    problems = diff(spec, cpp) + switch_problems(full_spec)
     if spec_actions != cpp_actions:
         problems.append(f"actions: spec={spec_actions!r} c++={cpp_actions!r}")
     for line in problems:
         print(f"check_manifest: {line}", file=sys.stderr)
     if problems:
         return 1
-    print(f"check_manifest: OK — {len(cpp)} keys and {len(cpp_actions)} action(s) equal spec/params.json; {len(plants)} planted drifts seen")
+    nflip = sum(1 for x in full_spec if x.get("morph") == "jump")
+    print(f"check_manifest: OK — {len(cpp)} keys and {len(cpp_actions)} action(s) equal spec/params.json; {len(plants)} planted drifts seen; "
+          f"all {nflip} flip keys declare an admitted switch (A11; 3 planted switch faults seen)")
     return 0
 
 

@@ -161,6 +161,12 @@ ECHO_PLANT(presetReordersSlots)  // reading a bank swaps the first and last slot
 ECHO_PLANT(presetDeviceAccepted) // a Device key is accepted in a preset (RS-4.5)
 ECHO_PLANT(presetLogAccepted)    // a log curve on a zero or mixed-sign endpoint is accepted (A3)
 ECHO_PLANT(presetLogModifyAccepted) // a log curve under macroLaw modify is accepted (ADR-251; critic T-017 H1)
+// ---- M3, B3 (T-018: the admission self-test; contract rows A1 - A23) ----
+ECHO_PLANT(resetKeepsModPhase)   // A2: reset() leaves the modulation phase where it was (rest holds it; D-043)
+ECHO_PLANT(dryLate)              // A4: the dry path runs one sample late (an undeclared latency)
+ECHO_PLANT(monoSum)              // A8: the output is summed to mono (the image collapses)
+ECHO_PLANT(selfStart)            // A14: at rest the output is a 1e-24 speck, not zero: in a cycle it starts itself
+ECHO_PLANT(b265HoodHalved)       // TEST-SIDE: the click metric's +-16 neighbourhood halved (the port must match horde exactly)
 ECHO_PLANT(presetEndpointInexact) // curves lose their exact-endpoint special case (A3: lo + (hi - lo)*1 may miss hi)
 ECHO_PLANT(presetHzLinear)       // modify adds Hz offsets linearly instead of in octaves (ADR-251)
 ECHO_PLANT(presetResolveMutates) // resolve() writes back into the preset: a corner flip changes the next resolve (A13)
