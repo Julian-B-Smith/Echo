@@ -57,6 +57,12 @@ add_executable(echo_manifest tools/manifest.cpp)
 target_link_libraries(echo_manifest PRIVATE echocore)
 target_compile_options(echo_manifest PRIVATE ${ECHO_WARN})
 
+# echo_presets: prints the factory bank (echo/presets.h, the one source, D-042)
+# as JSON; ./verify compares it with the committed presets/echo-factory.json.
+add_executable(echo_presets tools/presets.cpp)
+target_link_libraries(echo_presets PRIVATE echocore)
+target_compile_options(echo_presets PRIVATE ${ECHO_WARN})
+
 # The fp-contract probe (critic M7; see tools/render_hash.cpp). Clang's default
 # contracting mode honours the pragma ("on"; "fast" would override it by
 # design); GCC's ISO default is already "off", so it is probed with "fast".
@@ -73,6 +79,16 @@ set(ECHO_FPC_ISA "")
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
   set(ECHO_FPC_ISA -mfma)
 endif()
+# The same probe for echo/presets.h (critic T-017 M1): built with contraction
+# allowed, with and without the header's pragma; ./verify counts fused ops in
+# echo::presets symbols (0 with the pragma, > 0 without, where the ISA fuses).
+add_executable(echo_presets_fpc tools/presets.cpp)
+target_link_libraries(echo_presets_fpc PRIVATE echocore)
+target_compile_options(echo_presets_fpc PRIVATE ${ECHO_WARN} ${ECHO_FPC_ISA} ${ECHO_FPC_PROBE})
+add_executable(echo_presets_nopragma tools/presets.cpp)
+target_link_libraries(echo_presets_nopragma PRIVATE echocore)
+target_compile_definitions(echo_presets_nopragma PRIVATE ECHO_FP_PRAGMA_OFF=1)
+target_compile_options(echo_presets_nopragma PRIVATE ${ECHO_WARN} ${ECHO_FPC_ISA} ${ECHO_FPC_PROBE})
 add_executable(echo_hash_ref tools/render_hash.cpp)
 target_link_libraries(echo_hash_ref PRIVATE echocore)
 target_compile_options(echo_hash_ref PRIVATE ${ECHO_WARN} ${ECHO_FPC_ISA} -ffp-contract=off)

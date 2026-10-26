@@ -536,7 +536,8 @@ filings need the human's go-ahead each time.
   frozen on it).
 
 ### T-017 — M3: Module presets and macros (rows A12, A13; bar rows 5–6)
-- **Status:** open (needs T-011 and T-015).
+- **Status:** done 2026-10-26 (D-042, two rulings by poll; critic FIX-THEN-SHIP, all fixed;
+  trace `traces/2026-10-26-t017-presets.md`). Ships the init preset; T-021 adds the seven.
 - **Scope:** `presets/` (the bank file), a validator and reference resolver in `tools/` or
   `core/tools/`, `core_tests.cpp`.
 - **Acceptance criteria:** the validator refuses: more than 8 slots, slots out of order, an

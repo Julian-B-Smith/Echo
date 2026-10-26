@@ -219,6 +219,17 @@ core_gate() {
   "$b/echo_ir_plants" | grep -v "^  PASS" || ok=1
   [ "${PIPESTATUS[0]}" -eq 0 ] || ok=1
   python3 tools/check_manifest.py "$b/echo_manifest" || ok=1
+  # The factory bank (T-017, D-042): C++ (echo/presets.h) is the one source, so the
+  # committed presets/echo-factory.json must equal `echo_presets --json`, byte for
+  # byte. Proven first on a copy with one byte changed, which must differ.
+  # cmp, not $(...) =: command substitution drops trailing newlines, which is not byte for byte.
+  if "$b/echo_presets" --json | sed '1s/^{/[/' | cmp -s - presets/echo-factory.json; then
+    echo "verify: core — the bank-file check did not see a planted one-byte change (vacuous)" >&2; ok=1
+  elif ! "$b/echo_presets" --json | cmp -s - presets/echo-factory.json; then
+    echo "verify: core — presets/echo-factory.json drifted from echo/presets.h (or echo_presets failed): regenerate it with echo_presets --json" >&2; ok=1
+  else
+    echo "presets: presets/echo-factory.json equals echo_presets --json, byte for byte; planted change seen"
+  fi
   local href hfpc hnop
   href="$("$b/echo_hash_ref")"; hfpc="$("$b/echo_hash")"; hnop="$("$b/echo_hash_nopragma")"
   if [ "$hfpc" != "$href" ]; then echo "verify: core — fp-contract: a contracting build renders differently ($hfpc vs $href): the header's pragma does not hold" >&2; ok=1
@@ -237,7 +248,8 @@ core_gate() {
       printf '%s\n' "$dis" | awk -v want="$2" '
         /^[0-9a-f]+ <.*>:$/ || /^[_A-Za-z].*:$/ {fn=$0}
         tolower($0) ~ /vfmadd|vfmsub|vfnmadd|fmadd|fmsub|fmla/ {
-          eng = (fn ~ /4echo/); if ((want=="engine" && eng) || (want=="caller" && !eng)) n++ }
+          eng = (fn ~ /4echo/); pre = (fn ~ /7presets/)
+          if ((want=="engine" && eng) || (want=="caller" && !eng) || (want=="presets" && pre)) n++ }
         END {print n+0}'
     }
     if ! command -v objdump >/dev/null 2>&1 && ! command -v otool >/dev/null 2>&1; then
@@ -260,6 +272,28 @@ core_gate() {
       fi
     fi
   else echo "fp-contract: OK — pragma holds ($href); without it the render differs ($hnop)"; fi
+  # echo/presets.h's own pragma (T-017, D-042; critic M1): fused ops inside
+  # echo::presets must be 0 with it and > 0 without, where the ISA fuses at all.
+  if command -v objdump >/dev/null 2>&1 || command -v otool >/dev/null 2>&1; then
+    local pp pn
+    fused_in() {
+      if command -v objdump >/dev/null 2>&1; then dis="$(objdump -d "$1" 2>/dev/null)"; else dis="$(otool -tv "$1" 2>/dev/null)"; fi
+      printf '%s\n' "$dis" | awk -v want="$2" '
+        /^[0-9a-f]+ <.*>:$/ || /^[_A-Za-z].*:$/ {fn=$0}
+        tolower($0) ~ /vfmadd|vfmsub|vfnmadd|fmadd|fmsub|fmla/ {
+          eng = (fn ~ /4echo/); pre = (fn ~ /7presets/)
+          if ((want=="engine" && eng) || (want=="caller" && !eng) || (want=="presets" && pre)) n++ }
+        END {print n+0}'
+    }
+    pp="$(fused_in "$b/echo_presets_fpc" presets)"; pn="$(fused_in "$b/echo_presets_nopragma" presets)"
+    if [ "$pp" -gt 0 ]; then
+      echo "verify: core — fp-contract: echo::presets holds $pp fused op(s) with its pragma: the pragma does not hold" >&2; ok=1
+    elif [ "$pn" -gt 0 ]; then
+      echo "fp-contract (presets.h): OK — echo::presets holds 0 fused ops with the pragma, $pn without"
+    else
+      echo "fp-contract (presets.h): NOT SEEN here — no fused op in echo::presets even without the pragma (this ISA/compiler did not contract it)"
+    fi
+  fi
   local cxx probe; cxx="$(command -v c++ || command -v g++ || command -v clang++)"
   "$cxx" -std=c++20 -fsyntax-only -I core/include -I core/third_party/foundations/include core/tests/guard_probe.cpp >/dev/null 2>&1 \
     || { echo "verify: core — the guard probe does not compile clean" >&2; ok=1; }
