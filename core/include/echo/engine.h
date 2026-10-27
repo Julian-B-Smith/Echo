@@ -879,15 +879,16 @@ class Echo {
   Routing routingFor(int mode) const {
     switch (mode) {
       case 1:  // ping-pong: mono sum into line 0, crossed feedback
-        return {{{{0.5, 0.5}, {0.0, 0.0}}},
+        return {{{{0.5, 0.5}, plant::pingpongBothLines ? std::array<double, 2>{0.5, 0.5} : std::array<double, 2>{0.0, 0.0}}},
                 plant::pingpongNoCross ? M2{{{1.0, 0.0}, {0.0, 1.0}}} : M2{{{0.0, 1.0}, {1.0, 0.0}}},
-                {{{1.0, 0.0}, {0.0, 1.0}}}};
+                {{{1.0, 0.0}, plant::pingpongInvertsR ? std::array<double, 2>{0.0, -1.0} : std::array<double, 2>{0.0, 1.0}}}};
       case 2:  // mid/side: M = (L+R)/2, S = (L-R)/2; out L = M + S, R = M - S
         return {{{{0.5, 0.5}, plant::msSideGain2 ? std::array<double, 2>{1.0, -1.0} : std::array<double, 2>{0.5, -0.5}}},
                 {{{1.0, 0.0}, {0.0, 1.0}}},
                 {{{1.0, 1.0}, plant::msSign ? std::array<double, 2>{1.0, 1.0} : std::array<double, 2>{1.0, -1.0}}}};
       default:  // stereo
-        return {{{{1.0, 0.0}, {0.0, 1.0}}}, {{{1.0, 0.0}, {0.0, 1.0}}}, {{{1.0, 0.0}, {0.0, 1.0}}}};
+        return {{{{1.0, 0.0}, {0.0, 1.0}}}, {{{1.0, 0.0}, {0.0, 1.0}}},
+                {{{1.0, 0.0}, plant::stereoInvertsR ? std::array<double, 2>{0.0, -1.0} : std::array<double, 2>{0.0, 1.0}}}};
     }
   }
   void setRoutingNow(int mode) {

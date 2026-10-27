@@ -578,7 +578,10 @@ filings need the human's go-ahead each time.
 - **Out of scope:** horde's own admission harness (unbuilt; horde judges its rows at hosting).
 
 ### T-019 — M3: The B408 stereo report (D-010; bar row 12)
-- **Status:** open.
+- **Status:** done 2026-10-27 (D-044, six rulings by poll in two rounds; critic FIX-THEN-SHIP,
+  all fixed or recorded; `docs/stereo-report.md`; trace `traces/2026-10-27-t019-stereo.md`).
+  Open for T-026: offset patches reported, not gated; GCC byte identity proven by CI's first
+  run; the fold law at 48 kHz only.
 - **Scope:** a report tool in `core/tools/`, `docs/stereo-report.md` (generated), checks in
   `core_tests.cpp`. The report measures through the one offline IR renderer,
   `core/include/echo/ir_render.h`, which M4 built (T-030, PR #15, on main 2026-10-21;
@@ -588,7 +591,14 @@ filings need the human's go-ahead each time.
   mono impulse, seeded decorrelated noise, and the S-only impulse (labelled *by
   construction*, Q-A4). Layer-0: ρ_out ≥ ρ_in per generation on the mono and noise inputs in
   every mode; the colouring-zone flag raised exactly when the two times differ by less than
-  ~40 ms and are not equal. The renderer's output equals a plain offline `Echo` render of the same impulse, bit for
+  ~40 ms and are not equal. **Amended 2026-10-27 by poll (D-044):** the gate runs on
+  equal-time patches, on exact inputs only (mono, left and right impulses; noise reported,
+  not judged: re-ruled after the critic found the 3/(2√N) margin broken by 15 of 80 clean
+  seeds); stereo and mid/side keep ρ_out ≥ ρ_in; ping-pong reads ρ = ½ with no cross term
+  (it hard-pans by design) and its overlapping repeats fold to the closed form; P3 and P5
+  are restated in ρ's scale; the flag is stereo mode only, 0 < |tL − tR| < 40 ms, stated
+  as a convention; `./verify` regenerates `docs/stereo-report.md` and compares it byte for
+  byte. The renderer's output equals a plain offline `Echo` render of the same impulse, bit for
   bit, on the mono, S-only and seeded-noise inputs too (M4's plant `irSkipsOutputFilter`, or
   this item's own if it builds the file). Plants: D-010's P1–P5 (prior-art §5.3).
 - **Out of scope:** a stereo width control (post-1.0).
@@ -841,7 +851,9 @@ filings need the human's go-ahead each time.
 - **Why:** T-031's gate 4 (frame 1 within 100 ms, worst of 20, wall clock, enforced
   locally) turned `./verify fast` red twice in a row at the 2026-10-22 close, then green
   four runs straight with nothing changed. A stop gate that flickers teaches re-running
-  until green.
+  until green. **Seen again 2026-10-27** during T-019 (load averages 20 – 114): 48 kHz frame 1
+  took 101.2 ms cold (in flight 65.5 ms), red in `echo_ir_plants`' clean pass only; every
+  other gate green. Held red, not re-run into green; T-019's PR waits for a run at low load.
 - **Scope:** `core/tests/ir_tests.cpp` (gate 4) and, if the human picks it, `./verify`'s
   wiring (a human gate).
 - **Acceptance criteria:**

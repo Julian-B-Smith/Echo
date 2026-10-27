@@ -196,6 +196,7 @@ lab_smoke_gate() { need_node && node tools/lab_smoke.mjs; }
 #                a check does not catch makes that check vacuous, and red
 #   echo_ir_tests / echo_ir_plants  the same, for M4's offline IR renderer
 #   check_manifest.py  the C++ parameter table equals spec/params.json
+#   stereo report  docs/stereo-report.md equals echo_stereo_report's output (B408, T-019)
 #   fp-contract  the header's pragma holds: a contracting build hashes equal to
 #                the reference and the pragma-less control DIFFERS; where the
 #                render cannot show it (GCC), by fused-op counts in echo:: code
@@ -243,6 +244,20 @@ core_gate() {
     echo "verify: core — presets/echo-factory.json drifted from echo/presets.h (or echo_presets failed): regenerate it with echo_presets --json" >&2; ok=1
   else
     echo "presets: presets/echo-factory.json equals echo_presets --json, byte for byte; planted change seen"
+  fi
+  # The B408 stereo report (T-019, D-044): the committed docs/stereo-report.md must
+  # equal this build's echo_stereo_report output, byte for byte, so it always states
+  # this engine's readings. Proven first on a copy with one byte changed. The tool
+  # also exits non-zero if a gated row breaks the law (echo_tests' b408Gate judges it).
+  rm -f "$HARNESS_DIR/stereo-report.md"  # a crash before the write must not leave the last run's report to compare
+  "$b/echo_stereo_report" > "$HARNESS_DIR/stereo-report.md" \
+    || { echo "verify: core — echo_stereo_report failed (a gated row breaks the B408 law?)" >&2; ok=1; }
+  if sed '1s/^#/%/' "$HARNESS_DIR/stereo-report.md" | cmp -s - docs/stereo-report.md; then
+    echo "verify: core — the stereo-report check did not see a planted one-byte change (vacuous)" >&2; ok=1
+  elif ! cmp -s "$HARNESS_DIR/stereo-report.md" docs/stereo-report.md; then
+    echo "verify: core — docs/stereo-report.md is stale: regenerate with echo_stereo_report > docs/stereo-report.md" >&2; ok=1
+  else
+    echo "stereo report: docs/stereo-report.md equals echo_stereo_report's output (B408, D-044); planted change seen"
   fi
   local href hfpc hnop
   href="$("$b/echo_hash_ref")"; hfpc="$("$b/echo_hash")"; hnop="$("$b/echo_hash_nopragma")"
