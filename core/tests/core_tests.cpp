@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "echo/engine.h"
+#include "echo/presets.h"
 
 using echo::Echo;
 using Vec = std::vector<double>;
@@ -2322,6 +2323,239 @@ bool clearA23(Detail& d) {
   return true;
 }
 
+// ---- M3 B3, T-017: module presets and macros (SPEC §16.3; rows A12, A13; echo/presets.h) ----
+
+namespace P = echo::presets;
+P::Binding bnd(const char* key, double lo, double hi, P::Curve c = P::Curve::Lin) { return {*echo::paramIndex(key), lo, hi, c}; }
+
+// Fixtures exercising the whole model (T-021 adds the factory seven): a full
+// 8-slot modify preset with exp curves, two slots on one key (contributions add)
+// and Hz keys (octaves); and a set-law preset with a log curve and a falling range.
+P::ModulePreset richModify() {
+  P::ModulePreset p = P::initPreset();
+  p.id = "fx-rich";
+  p.label = "Rich";
+  p.description = "a test fixture: 8 slots under modify";
+  p.defaults[echo::kFb] = 40;  // the fixed row (SPEC §16.4) all off their defaults, so A12 shows its values exact
+  p.defaults[echo::kLoopLp] = 6000;
+  p.defaults[echo::kModDepth] = 1.5;
+  p.defaults[echo::kMix] = 45;
+  p.slots = {{"Time", {bnd("time.ms", 0, 250)}, 0.0},
+             {"Feedback", {bnd("fb.amount", 0, 40, P::Curve::Exp)}, 0.25},
+             {"Tone", {bnd("filt.loop.lpHz", -2, 1), bnd("filt.loop.hpHz", 0, 2)}, 0.5},
+             {"Wobble", {bnd("mod.depthMs", 0, 6), bnd("mod.rateHz", -1, 1)}, 0.0},
+             {"Width", {bnd("time.offR", -20, 20)}, 0.5},
+             {"Wet", {bnd("mix", -20, 30)}, 0.5},
+             {"Push", {bnd("fb.amount", 0, 20)}, 0.0},  // a second slot on fb.amount: contributions add
+             {"Glide", {bnd("time.glide", 0, 1, P::Curve::Exp)}, 0.75}};
+  return p;
+}
+P::ModulePreset setLog() {
+  P::ModulePreset p = P::initPreset();
+  p.id = "fx-set";
+  p.label = "Set";
+  p.description = "a test fixture: set law, log and falling ranges";
+  p.law = P::Law::Set;
+  p.slots = {{"Dark", {bnd("filt.loop.lpHz", 12000, 1500, P::Curve::Log)}, 0.3}, {"Regen", {bnd("fb.amount", 90, 10)}, 1.0}};
+  return p;
+}
+
+// Validation (T-017): each refusal on its own, and the valid fixtures pass.
+bool presetValidate(Detail& d) {
+  std::string why;
+  for (const auto& p : {P::initPreset(), richModify(), setLog()}) REQUIRE(P::validate(p, &why), "the valid %s was refused: %s", p.id.c_str(), why.c_str());
+  auto refused = [&](const P::ModulePreset& p) {
+    why.clear();
+    return !P::validate(p, &why);
+  };
+  P::ModulePreset nine = richModify();
+  nine.slots.push_back({"Ninth", {bnd("time.offL", 0, 5)}, 0.0});
+  REQUIRE(refused(nine), "nine slots were accepted");
+  P::ModulePreset dev = richModify();
+  dev.slots[0].bind.push_back(bnd("io.outGain", 0, 6));
+  REQUIRE(refused(dev), "a binding on the Device key io.outGain was accepted");
+  P::ModulePreset step = richModify();
+  step.slots[0].bind.push_back(bnd("route.mode", 0, 2));
+  REQUIRE(refused(step), "a binding on the stepped key route.mode was accepted");
+  P::ModulePreset zero = setLog();  // on a key whose range holds 0, so only the log rule can refuse it
+  zero.slots[0].bind[0] = bnd("time.offL", 0, 10, P::Curve::Log);
+  REQUIRE(refused(zero) && why.find("log") != std::string::npos, "a log curve on a zero endpoint was accepted (or refused for `%s`)", why.c_str());
+  P::ModulePreset mixed = setLog();
+  mixed.slots[0].bind[0] = bnd("time.offL", -10, 10, P::Curve::Log);
+  REQUIRE(refused(mixed) && why.find("log") != std::string::npos, "a log curve on mixed-sign endpoints was accepted (or refused for `%s`)", why.c_str());
+  P::ModulePreset logMod = richModify();  // same-sign, in range: ONLY the modify rule can refuse it (critic T-017 H1)
+  logMod.slots[2].bind[0] = bnd("filt.loop.lpHz", 0.5, 1, P::Curve::Log);
+  REQUIRE(refused(logMod) && why.find("modify") != std::string::npos, "a log curve under modify was accepted (or refused for `%s`)", why.c_str());
+  P::ModulePreset ctl = richModify();
+  ctl.slots[0].label = "Ti\nme";
+  REQUIRE(refused(ctl), "a control character in a slot label was accepted");
+  for (double h : {-0.01, 1.01}) {
+    P::ModulePreset home = richModify();
+    home.slots[1].home = h;
+    REQUIRE(refused(home), "a home of %g was accepted", h);
+  }
+  P::ModulePreset far = setLog();
+  far.slots[1].bind[0].hi = 130;
+  REQUIRE(refused(far), "a set-law endpoint outside fb.amount's range was accepted");
+  P::ModulePreset twice = richModify();
+  twice.slots[0].bind.push_back(bnd("time.ms", 0, 10));
+  REQUIRE(refused(twice), "a key bound twice in one slot was accepted");
+  // File-level refusals: an unknown key, a Device key in internal_defaults, slots out of order.
+  const std::string good = P::writeBank({richModify()});
+  std::vector<P::ModulePreset> got;
+  REQUIRE(P::readBank(good, got, &why), "the rich fixture's own file was refused: %s", why.c_str());
+  auto bad = [&](const std::string& from, const std::string& to) {
+    std::string t = good;
+    const auto at = t.find(from);
+    if (at == std::string::npos) return std::string("<anchor lost>");
+    return t.replace(at, from.size(), to);
+  };
+  for (const auto& [what, text] : std::vector<std::pair<const char*, std::string>>{
+           {"an unknown key", bad("\"mix\": 30", "\"mix\": 30, \"width\": 50")},
+           {"a Device key in internal_defaults", bad("\"mix\": 30", "\"mix\": 30, \"io.inGain\": 0")},
+           {"slots out of order", bad("{\"slot\": 2,", "{\"slot\": 3,")},
+           {"another module_version", bad(std::string(echo::kModuleVersion), "0000000000000000")},
+           // What the writer never produces (critic T-017 M4):
+           {"another module", bad("\"module\": \"echo\"", "\"module\": \"scape\"")},
+           {"a home as a string", bad("\"home\": 0.25", "\"home\": \"0.25\"")},
+           {"a description as a number", bad("\"description\": \"a test fixture: 8 slots under modify\"", "\"description\": 5")},
+           {"an unknown preset field", bad("\"macroLaw\"", "\"colour\": \"red\", \"macroLaw\"")},
+           {"an unknown slot field", bad("{\"slot\": 2,", "{\"slot\": 2, \"x\": 1,")},
+           {"a slot number written 2.0", bad("{\"slot\": 2,", "{\"slot\": 2.0,")},
+           {"a binding of strings", bad("\"time.ms\": [0, 250]", "\"time.ms\": [\"a\", 250]")}})
+    REQUIRE(!P::readBank(text, got, &why), "%s was accepted in a bank file", what);
+  return true;
+}
+
+// A3's curves: lo and hi EXACT at v = 0 and 1 for lin, exp and log, the closed
+// form to 1e-12 at the quarters, on rising and falling ranges.
+bool presetCurves(Detail& d) {
+  struct C { P::Curve c; double lo, hi; };
+  // [0.1, 1.7] log: the bare formula lands on 1.7000000000000002, so only the
+  // special case makes v = 1 exact for log (critic T-017 M3). v = 0 is exact for
+  // every curve by construction (lo*(hi/lo)^0, lo + 0): checked, not discriminating.
+  for (const C& c : {C{P::Curve::Lin, 0.1, 0.3}, C{P::Curve::Exp, 0.1, 0.3}, C{P::Curve::Log, 0.1, 1.7}, C{P::Curve::Log, 0.1, 0.3}, C{P::Curve::Lin, 0.7, 0.1},
+                     C{P::Curve::Exp, 0.7, 0.1}, C{P::Curve::Log, 12000, 1500}, C{P::Curve::Lin, 1.0 / 3.0, 2.0 / 3.0}}) {
+    REQUIRE(P::shape(c.c, c.lo, c.hi, 0.0) == c.lo && P::shape(c.c, c.lo, c.hi, 1.0) == c.hi, "%s [%g, %g] misses an endpoint: %.17g / %.17g",
+            P::curveName(c.c), c.lo, c.hi, P::shape(c.c, c.lo, c.hi, 0.0), P::shape(c.c, c.lo, c.hi, 1.0));
+    for (double v : {0.25, 0.5, 0.75}) {
+      const double want = c.c == P::Curve::Lin ? c.lo + (c.hi - c.lo) * v
+                         : c.c == P::Curve::Exp ? c.lo + (c.hi - c.lo) * v * v
+                                                : c.lo * std::pow(c.hi / c.lo, v);
+      REQUIRE(std::fabs(P::shape(c.c, c.lo, c.hi, v) - want) <= 1e-12 * std::max(1.0, std::fabs(want)), "%s at %g is off its closed form",
+              P::curveName(c.c), v);
+    }
+  }
+  // An invalid log met by the resolver (outside validation) resolves as lin, never NaN (critic T-017 M2).
+  const double inv = P::shape(P::Curve::Log, 0, 10, 0.5), mix2 = P::shape(P::Curve::Log, -2, 2, 0.25);
+  REQUIRE(inv == 5.0 && mix2 == -1.0, "an invalid log is not resolved as lin (%.17g, %.17g)", inv, mix2);
+  return true;
+}
+
+// The two laws (§5, ADR-251): set sets; modify offsets from internal_defaults,
+// contributions from several slots add, a key in Hz moves in octaves, the result
+// clamps to the key's range, and at v = 0 with lo = 0 the preset sounds as itself.
+bool presetLaws(Detail& d) {
+  auto p = richModify();  // not const: the presetResolveMutates plant writes through it (no UB, critic T-017 L1)
+  const auto at0 = P::resolve(p, std::vector<double>(8, 0.0));
+  for (int k = 0; k < echo::kNumParams; ++k)
+    if (k != echo::kLoopLp && k != echo::kModRate && k != echo::kOffR && k != echo::kMix)  // keys whose lo != 0 move at v = 0
+      REQUIRE(at0[static_cast<std::size_t>(k)] == p.defaults[static_cast<std::size_t>(k)], "at v = 0 key %d is not the preset's own value", k);
+  std::vector<double> v(8, 0.0);
+  v[2] = 1.0;  // Tone at 1: filt.loop.lpHz +1 octave, filt.loop.hpHz +2 octaves
+  auto r = P::resolve(p, v);
+  REQUIRE(r[echo::kLoopLp] == 12000.0, "filt.loop.lpHz at +1 octave from 6000 is %.6f, not 12000", r[echo::kLoopLp]);
+  REQUIRE(r[echo::kLoopHp] == 240.0, "filt.loop.hpHz at +2 octaves from 60 is %.6f, not 240", r[echo::kLoopHp]);
+  v = std::vector<double>(8, 0.0);
+  v[1] = 0.5;
+  v[6] = 1.0;  // two slots on fb.amount: 40 + 40*0.25 + 20 = 70
+  r = P::resolve(p, v);
+  REQUIRE(r[echo::kFb] == 70.0, "fb.amount with two slots is %.6f, not 40 + 10 + 20 = 70", r[echo::kFb]);
+  v[1] = 1.0;  // 40 + 40 + 20 = 100, then Time pushed past the range clamps
+  v[0] = 1.0;
+  auto big = p;
+  big.defaults[echo::kTimeMs] = 11900;
+  r = P::resolve(big, v);
+  REQUIRE(r[echo::kFb] == 100.0 && r[echo::kTimeMs] == 12000.0, "modify did not add or clamp (fb %.3f, time.ms %.3f)", r[echo::kFb], r[echo::kTimeMs]);
+  auto s = setLog();
+  r = P::resolve(s, {0.0, 0.5});
+  REQUIRE(r[echo::kLoopLp] == 12000.0 && r[echo::kFb] == 50.0, "set did not set (lpHz %.3f, fb %.3f)", r[echo::kLoopLp], r[echo::kFb]);
+  return true;
+}
+
+// A12: every preset saves and loads with slot order, labels, bindings, curves,
+// home, macroLaw and every internal value exact; written again, byte-identical.
+bool presetA12(Detail& d) {
+  auto bank = P::factory();
+  bank.push_back(richModify());
+  bank.push_back(setLog());
+  const std::string t1 = P::writeBank(bank);
+  std::vector<P::ModulePreset> got;
+  std::string why;
+  REQUIRE(P::readBank(t1, got, &why), "the bank's own text was refused: %s", why.c_str());
+  REQUIRE(got.size() == bank.size(), "%zu presets read back, %zu written", got.size(), bank.size());
+  for (std::size_t i = 0; i < bank.size(); ++i) {
+    const auto &a = bank[i], &b = got[i];
+    REQUIRE(a.id == b.id && a.label == b.label && a.description == b.description && a.law == b.law, "preset %zu's header changed", i);
+    for (int k = 0; k < echo::kNumParams; ++k)
+      if (echo::kParams[static_cast<std::size_t>(k)].morph != echo::Morph::Device)
+        REQUIRE(a.defaults[static_cast<std::size_t>(k)] == b.defaults[static_cast<std::size_t>(k)], "%s: internal value %d changed", a.id.c_str(), k);
+    REQUIRE(a.slots.size() == b.slots.size(), "%s: slot count changed", a.id.c_str());
+    for (std::size_t s = 0; s < a.slots.size(); ++s) {
+      const auto &x = a.slots[s], &y = b.slots[s];
+      REQUIRE(x.label == y.label && x.home == y.home && x.bind.size() == y.bind.size(), "%s: slot %zu (%s) changed or moved", a.id.c_str(), s + 1,
+              x.label.c_str());
+      for (std::size_t j = 0; j < x.bind.size(); ++j)
+        REQUIRE(x.bind[j].key == y.bind[j].key && x.bind[j].lo == y.bind[j].lo && x.bind[j].hi == y.bind[j].hi && x.bind[j].curve == y.bind[j].curve,
+                "%s: slot %zu's binding %zu changed", a.id.c_str(), s + 1, j);
+    }
+  }
+  REQUIRE(P::writeBank(got) == t1, "written again, the bank text differs");
+  return true;
+}
+
+// A13 (critic T-017 H2: one ENGINE taken through the corners, not only the
+// resolver): the preset text round-trips first (readBank of writeBank); then
+// for each corner c, one engine loads c, then every other corner in turn (each
+// a load mid-play, with input running), then c again; once the last fade ends,
+// its saved state equals a fresh engine's loaded at c, byte for byte, and a
+// fresh engine restored from it renders as that fresh one, both channels.
+bool presetA13(Detail& d) {
+  std::vector<P::ModulePreset> read;
+  std::string why;
+  REQUIRE(P::readBank(P::writeBank({richModify()}), read, &why), "the fixture's text was refused: %s", why.c_str());
+  auto& p = read[0];
+  const std::vector<std::vector<double>> corners{
+      {0, 0.25, 0.5, 0, 0.5, 0.5, 0, 0.75}, {1, 1, 0, 1, 0, 1, 1, 0}, {0.3, 0.6, 0.9, 0.2, 0.8, 0.1, 0.4, 0.5}, {0.5, 0, 1, 0.5, 1, 0, 0.5, 1}};
+  auto loadAt = [&](Echo& e, std::size_t c) {
+    const auto kv = P::patchOf(P::resolve(p, corners[c]));
+    e.loadState(std::span<const echo::KeyValue>(kv.data(), kv.size()));
+  };
+  g_rng = 61;
+  Vec live(S(0.05));
+  for (auto& v : live) v = 0.3 * noise();
+  const Vec in = impulse(S(0.4), 10, 0.5);
+  for (std::size_t c = 0; c < corners.size(); ++c) {
+    auto e = mk({});
+    loadAt(*e, c);
+    run(*e, live, live);
+    for (std::size_t o = 0; o < corners.size(); ++o)
+      if (o != c) { loadAt(*e, o); run(*e, live, live); }  // a corner flip mid-play, its fade run out
+    loadAt(*e, c);
+    run(*e, live, live);
+    auto ref = mk({});
+    loadAt(*ref, c);
+    const std::string se = saveText(*e), sr = saveText(*ref);
+    REQUIRE(se == sr, "corner %zu: after flipping through the corners the engine's state differs from a fresh load", c);
+    auto t = mk({});
+    REQUIRE(restore(*t, se, nullptr), "corner %zu: the state did not restore", c);
+    const auto rt = run(*t, in, in), rr = run(*ref, in, in);
+    for (long i = 0; i < S(0.4); ++i)
+      REQUIRE(rt.L[i] == rr.L[i] && rt.R[i] == rr.R[i], "corner %zu: the round-tripped engine renders differently at %ld", c, i);
+  }
+  return true;
+}
+
 struct Check {
   const char* name;
   bool (*fn)(Detail&);
@@ -2433,6 +2667,16 @@ const std::vector<Check> kChecks = {
     {"Clear: a performance event, the saved state byte-identical before and after", clearState, {"clearWritesState"}},
     {"Clear A23: same actions, same offsets, bit-identical at blocks 1/64/4096; no allocation; unknown refused; the cap refuses", clearA23,
      {"actionAtBlockStart"}},
+    // ---- M3 B3, T-017 ----
+    {"presets: every validation refusal (slots, Device and stepped keys, log endpoints and law, home, range); the reader takes only what the writer writes",
+     presetValidate, {"presetDeviceAccepted", "presetLogAccepted", "presetLogModifyAccepted"}},
+    {"presets: lin, exp, log hit lo and hi exactly and their closed forms at the quarters, rising and falling", presetCurves, {"presetEndpointInexact"}},
+    {"presets: set sets; modify adds contributions, Hz in octaves, clamps, and is the preset itself at v = 0", presetLaws, {"presetHzLinear"}},
+    {"presets A12: the bank saves and loads exactly (order, labels, bindings, curves, home, law, values incl. the fixed row); re-written byte-identical",
+     presetA12,
+     {"presetReordersSlots"}},
+    {"presets A13: one engine through all four corners and back, mid-play, equals a fresh load; restored, it renders the same (L and R)", presetA13,
+     {"presetResolveMutates"}},
 };
 
 #ifdef ECHO_PLANTS
@@ -2477,6 +2721,10 @@ bool* plantFlag(std::string_view n) {
       {"actionAtBlockStart", &actionAtBlockStart}, {"clearCuts", &clearCuts}, {"clearLandsValues", &clearLandsValues},
       {"clearWritesState", &clearWritesState}, {"clearRestartsFade", &clearRestartsFade},
       {"clearFreezesHeads", &clearFreezesHeads}, {"clearFreezesWet", &clearFreezesWet},
+
+      {"presetReordersSlots", &presetReordersSlots}, {"presetDeviceAccepted", &presetDeviceAccepted}, {"presetLogAccepted", &presetLogAccepted},
+      {"presetEndpointInexact", &presetEndpointInexact}, {"presetHzLinear", &presetHzLinear}, {"presetResolveMutates", &presetResolveMutates},
+      {"presetLogModifyAccepted", &presetLogModifyAccepted},
   };
   for (const auto& p : table)
     if (n == p.n) return p.f;
@@ -2546,7 +2794,9 @@ int main(int argc, char** argv) {
                         "stateFloat6g", "stateKeyMissing", "stateLatchSerialised", "stateOversizedAccepted", "stateDivByIndex",
                         "stateAcceptsUnknown", "adoptResets",
                         "actionAtBlockStart", "clearCuts", "clearLandsValues", "clearWritesState", "clearRestartsFade",
-                        "clearFreezesHeads", "clearFreezesWet"}) {
+                        "clearFreezesHeads", "clearFreezesWet",
+                        "presetReordersSlots", "presetDeviceAccepted", "presetLogAccepted", "presetEndpointInexact", "presetHzLinear",
+                        "presetResolveMutates", "presetLogModifyAccepted"}) {
     bool guarded = false;
     for (const auto& c : kChecks)
       for (const char* p : c.plants) guarded = guarded || std::string_view(p) == n;

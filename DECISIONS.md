@@ -990,3 +990,44 @@ two new planted drifts, and also compares the C++ action keys (`kActionKeys`, wh
 - **Same pre-release item:** pin the released lock and diff against it (B428's "append-only" is then enforced, not
   prose).
 - **L3:** the scope pin covers SPEC §1 only. Its pointer to ROADMAP §Deferred is outside it.
+
+## D-042 — T-017: module presets and macros, with C++ as the one source (RATIFIED by poll, 2026-10-24 and 2026-10-26; the rest the lead's record)
+
+**Ruled by poll:**
+- **2026-10-24: C++ is the one source** (Bulwark's shape). `core/include/echo/presets.h` holds the `ModulePreset`
+  model, the validator and the reference resolver. `echo_presets --json` writes `presets/echo-factory.json`, and
+  `./verify` fails if the committed file drifts from that output by a byte. A one-byte planted change must differ;
+  the comparison uses `cmp`, because command substitution drops trailing newlines.
+- **2026-10-26: `presets.h` carries the fp-contract pragma**, and `./verify`'s fused-op scan now covers
+  `echo::presets`. Two probe builds of the tool, `echo_presets_fpc` and `echo_presets_nopragma`, count 0 fused ops
+  with the pragma and 2 without on clang (critic M1).
+
+**The model** (SPEC §16.3; SPEC-MODULE-MACROS §4 – §5 with ADR-169 A3/A4/A5 and ADR-251):
+- `internal_defaults` holds every patch key, by name; no Device key.
+- Up to 8 ordered slots, numbered 1, 2, … in the file, each with its own label, a home in [0, 1], and bindings
+  `[lo, hi]` or `[lo, hi, curve]`.
+- The resolver implements both laws. Under `set` the last slot on a key wins; under `modify` contributions add, a
+  key in Hz moves in octaves, and the result is clamped. A slot without a given value sits at its home.
+- Curves return `lo` and `hi` exactly at 0 and 1. An invalid log met outside validation resolves as `lin`, never
+  as NaN.
+- **The reader is strict:** it accepts exactly what the writer produces. The field kinds, `module: echo` and this
+  build's `module_version` are checked; unknown fields and a slot number written as `2.0` are refused.
+
+**T-017 ships the init preset only.** T-021 adds the factory seven, and carries A19 (D-039). The fixed row's values
+travel in `internal_defaults` and are compared exactly by A12 (the fixture moves all four off their defaults).
+
+**Critic (Opus, fresh context): FIX-THEN-SHIP.** Fixed:
+- **H1:** "log under modify refused" could not fail for that reason: a mixed-sign rule refused it first. It is now a
+  same-sign, in-range case with its own plant, `presetLogModifyAccepted`.
+- **H2:** A13 re-resolved a pure function, never an engine, and read L only. It now takes one engine through all
+  four corners and back mid-play, compares its saved state with a fresh load, and renders both channels after a
+  restore.
+- **M1:** above.
+- **M2:** the NaN fallback.
+- **M3:** a log endpoint the bare formula misses (`[0.1, 1.7]`).
+- **M4:** the reader's strictness.
+- **L1:** the const fixtures the plant wrote through.
+- **L2:** control characters are refused.
+- **L3:** homes for missing values.
+- **L4:** this decision.
+- **L5:** the fixed row's values in A12's fixture.

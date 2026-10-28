@@ -156,6 +156,14 @@ ECHO_PLANT(clearWritesState)     // Clear edits the patch (feedback to 0): the s
 ECHO_PLANT(clearRestartsFade)    // a Clear during a fade restarts it (D-020: never)
 ECHO_PLANT(clearFreezesHeads)    // a Clear's fade holds the heads like a load's (critic T-037 H1; D-040: they keep moving)
 ECHO_PLANT(clearFreezesWet)      // a Clear's fading wet is frozen at the Clear (D-040: it follows the live mix)
+// ---- M3, B3 (T-017: module presets and macros, echo/presets.h) ----
+ECHO_PLANT(presetReordersSlots)  // reading a bank swaps the first and last slots (A12: order is the contract)
+ECHO_PLANT(presetDeviceAccepted) // a Device key is accepted in a preset (RS-4.5)
+ECHO_PLANT(presetLogAccepted)    // a log curve on a zero or mixed-sign endpoint is accepted (A3)
+ECHO_PLANT(presetLogModifyAccepted) // a log curve under macroLaw modify is accepted (ADR-251; critic T-017 H1)
+ECHO_PLANT(presetEndpointInexact) // curves lose their exact-endpoint special case (A3: lo + (hi - lo)*1 may miss hi)
+ECHO_PLANT(presetHzLinear)       // modify adds Hz offsets linearly instead of in octaves (ADR-251)
+ECHO_PLANT(presetResolveMutates) // resolve() writes back into the preset: a corner flip changes the next resolve (A13)
 }  // namespace echo::plant
 
 #undef ECHO_PLANT
