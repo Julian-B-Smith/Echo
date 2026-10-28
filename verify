@@ -197,6 +197,7 @@ lab_smoke_gate() { need_node && node tools/lab_smoke.mjs; }
 #   echo_ir_tests / echo_ir_plants  the same, for M4's offline IR renderer
 #   check_manifest.py  the C++ parameter table equals spec/params.json
 #   stereo report  docs/stereo-report.md equals echo_stereo_report's output (B408, T-019)
+#   cost bench   echo_bench --smoke prints well-formed rows (form only; CPU is never gated, T-020)
 #   fp-contract  the header's pragma holds: a contracting build hashes equal to
 #                the reference and the pragma-less control DIFFERS; where the
 #                render cannot show it (GCC), by fused-op counts in echo:: code
@@ -234,6 +235,9 @@ core_gate() {
   "$b/echo_ir_plants" | grep -v "^  PASS" || ok=1
   [ "${PIPESTATUS[0]}" -eq 0 ] || ok=1
   python3 tools/check_manifest.py "$b/echo_manifest" || ok=1
+  # The cost bench (T-020, D-045): smoke-run for well-formed rows only. CPU is
+  # Layer-E, never a gate (RS-8.3): no figure is compared with anything here.
+  python3 tools/check_bench.py "$b/echo_bench" || ok=1
   # The factory bank (T-017, D-042): C++ (echo/presets.h) is the one source, so the
   # committed presets/echo-factory.json must equal `echo_presets --json`, byte for
   # byte. Proven first on a copy with one byte changed, which must differ.

@@ -19,7 +19,8 @@ with HIGH findings the author's own suite had passed.
   modulation; 52 checks, 75 planted faults caught. **M3 (rack admission, the 1.0 bar,
   due 2026-12-11) is under way** (D-028; T-010 – T-027, T-037): batch 1 (T-010 – T-012,
   T-002) done on PR #19 (D-034 – D-036); batch 2's T-013 – T-015 and T-037 done on PR #20
-  (D-037 – D-040), T-016 on its own PR (D-041): **batch 2 done**. Batch 3 (T-017 – T-020) next. **M4 (the IR display and Echo's screen) is under way
+  (D-037 – D-040), T-016 on its own PR (D-041): **batch 2 done**. Batch 3 (T-017 – T-020) built (D-042 – D-045), on
+  open PRs awaiting merge. **M4 (the IR display and Echo's screen) is under way
   beside it** (D-027, D-030): T-030 – T-032 done (PR #15, PR #16); T-033 blocked on
   M3's T-014; T-036 (gate 4's flicker) open.
 - **Oracle:** `./verify fast` = kit integrity, leak gate, private-name gate,
@@ -166,9 +167,9 @@ commercial delay or borrow its mode names, presets or UI text.
   | 10 fidelity suite | 52 checks, 75 plants | T-018 (the thresholds, stated in one table) |
   | 11 silence, exact-zero tails | silence and tail checks | — (met; cited in T-018) |
   | 12 mono-safe (B408 report) | M/S folds to M; Q-A4 | T-019 |
-  | 13 CPU cost, default / worst | informal ns figures (M1) | T-020 |
-  | 14 automated + morphing cost | none | T-020 |
-  | 15 memory figure | 18.71 MiB at 192 kHz (M2) | T-020 (restated after M3's additions) |
+  | 13 CPU cost, default / worst | `docs/cost.md` (D-045) | T-020 (done) |
+  | 14 automated + morphing cost | `docs/cost.md` (D-045) | T-020 (done) |
+  | 15 memory figure | 18.71 MiB at 192 kHz, restated in `docs/cost.md` | T-020 (done) |
   | 16 face + expanded view | display names and laws in `params.json` | T-022 (Echo specifies, horde draws; D-028) |
   | 17 undo of every control | none | T-015 |
   | 18 factory presets | none | T-021 |
@@ -604,7 +605,11 @@ filings need the human's go-ahead each time.
 - **Out of scope:** a stereo width control (post-1.0).
 
 ### T-020 — M3: Cost bench and memory figure (bar rows 13–15)
-- **Status:** open.
+- **Status:** done 2026-10-28 (D-045, five rulings by poll; critic FIX-THEN-SHIP, all fixed or
+  recorded; `docs/cost.md` from one guarded run, load 1.76 – 1.95, no waits; trace
+  `traces/2026-10-28-t020-cost.md`). At 44.1 kHz / 128: default 0.40 % and worst (worst + morph)
+  1.65 % of a min-spec core (assumed), within 2 % / 4 %. Memory 4.30 MiB at 44.1 kHz, 18.71 MiB at
+  192 kHz, unchanged by M3. Reported, not judged: 192 kHz reads over 4 % on three rows (worst 7.06 %).
 - **Scope:** `core/tools/bench.cpp`, `docs/cost.md`. Reported, **never** a verify gate
   (RS-8.3).
 - **Acceptance criteria:** Release; horde's frozen protocol (`docs/port/cpu-ledger.md` §1 at a

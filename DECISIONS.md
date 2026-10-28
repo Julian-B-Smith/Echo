@@ -1150,3 +1150,61 @@ mixed two scales. D-010's ρ = E_M / mean(E_L, E_R) reads ½ (−3 dB) for any h
   clang; the tool builds with `-ffp-contract=off`). The first Linux CI run is the evidence.
 - **L5:** the fold law runs at 48 kHz only, on two patches with spread 0. SR independence of the fold is not
   exercised here.
+
+## D-045 — T-020: the cost bench (horde's B441-3 adapted to an FX module), docs/cost.md and the memory figure (RATIFIED by poll, 2026-10-27, five rulings; the rest the lead's record)
+
+**Ruled by poll (2026-10-27):**
+1. **Stimuli: both, reported.** Seeded decorrelated noise at −12 dBFS and horde's B265 chord at −6 dBFS, every row
+   on each.
+2. **The worst row is the max of the worst variants, and says which.** Tape repitch moving (`worst-repitch`) and
+   crossfade with a fade always in flight (`worst-crossfade`), on one declared patch: mid/side, all three filters on,
+   drift at 20 ms with spread 100, feedback 120 %.
+3. **The morph row moves every block, x on a 1 Hz sine,** blending the slot's `setParam` targets between corner A
+   (the defaults) and corner B (every continuous key ¾ along its own law).
+4. **`./verify` smoke-runs the bench for form only** (`tools/check_bench.py`): rows, fields, each row's own
+   arithmetic and its movement evidence. Never a timing, never a budget (RS-8.3).
+5. **After the critic's H1: worst + morph is a third variant in the max** (`worst-morph`: `worst-repitch` with the
+   morph sweep on top, `time.ms` left to the repitch move).
+
+**Critic (Opus, fresh context): FIX-THEN-SHIP.** Fixed:
+- **H1:** the morph row at the defaults out-cost the declared worst row (1.10 % against 0.91 %, best of 3, at load
+  ~8.6). Ruled as 5 above; the measured worst is now `worst-morph`.
+- **M1:** `auto-time` crossfades past the 12-semitone cap (D-006's fallback: 13 fallbacks, 16 fades in 2 s). The
+  row's description says so, with fades and fallbacks columns.
+- **M2:** 96 and 192 kHz rows, noise only, labelled informational.
+- **M3:** `docs/cost.md`'s raw rows drop the other processes' names (their %CPU kept); stdout keeps them.
+- **M4:** the CPU model is recorded in the header (`sysctl machdep.cpu.brand_string`); `--md` refuses `--force`,
+  and every row carries `"forced"`.
+- **M5:** each cell's move is an enum in the cell, not a name match. Every row prints engine-side evidence (blocks
+  whose moved key changed, fades and fallbacks on line 0, the read-speed range), and `check_bench.py` requires
+  movement on every moving row, a fade on `worst-crossfade`, and min-spec = 1.5 × %, ratio = % / calibration,
+  `over_budget` and the worst row's `from` consistent with the figures.
+- **L1, L2, L3:** horde's load record (the load the guard passed at, and the end of the repeat), the guard's own
+  snapshot for the foreign processes, one clock pair over the timed region.
+- **L4:** the memory figure is stated as a high-water mark (lines never shrink) plus `sizeof(Echo)`.
+- **L6:** each of the 12 plants in `check_bench.py` must fire with its own message.
+
+**The lead's readings (recorded, L5):**
+- The automated and morph rows are read against the 4 % worst-case budget. The criterion names the two budgets
+  (default, worst), not these rows.
+- **Min-spec = M3 × 1.5 stays an assumption** until measured once on an M1 base or the Intel min-spec.
+- Only 44.1 kHz / 128 is judged (E-6); 48 kHz is reported; 96 and 192 kHz are informational.
+
+**The measurement.** One guarded `echo_bench --md` on 2026-10-28, Apple M3: the guard passed first time at every
+rate (load 1.76 – 1.95, no waits, calibration 197 – 199 ms), on the T-020 tree before commit. Two earlier attempts
+refused, as the protocol requires: one on 2026-10-27 (load 17 – 26), then a 3-hour retry loop of 17 tries (load up
+to 58). Nothing was forced. At 44.1 kHz / 128, % of a min-spec core (assumed):
+- default 0.40 / 0.39 (noise / chord), budget 2 %;
+- worst = `worst-morph` 1.64 / 1.65; `worst-repitch` 1.07, `worst-crossfade` 0.65; budget 4 %;
+- `auto-time` 0.50, `auto-fb` 0.39, `morph` 1.29 / 1.30; budget 4 %.
+- 48 kHz: worst 1.79. 96 kHz: worst 3.54. **192 kHz: worst 7.06, `worst-repitch` 4.55 and `morph` 5.61, over
+  4 %**: informational, and per ADR-236 over budget does not cut a module. The critic's 6.5 % estimate held.
+- Memory per instance: 4.30 MiB at 44.1 kHz, 4.68 at 48, 9.35 at 96, 18.71 at 192 (the two lines 17.61): M3 added
+  nothing to M2's figure. M4's render service holds one more prepared `Echo` while the IR display is open.
+
+**Recorded (open for T-026):**
+- **The 192 kHz readings:** cost scales linearly with the rate. If horde judges at the host rate (ADR-237), the
+  worst row at 192 kHz needs either a stated rate ceiling or an optimisation item. Not opened here (ADR-236; T-020
+  scopes optimisation out).
+- **The morph sweep is the dearest single move** (`morph` at the defaults costs more than `worst-repitch`):
+  per-key `setParam` work every block. A candidate for optimisation if a row ever needs it.

@@ -73,6 +73,16 @@ target_link_libraries(echo_stereo_report PRIVATE echocore)
 target_include_directories(echo_stereo_report PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
 target_compile_options(echo_stereo_report PRIVATE ${ECHO_WARN} -ffp-contract=off)
 
+# echo_bench: the cost bench (T-020, D-045), horde's B441-3 protocol adapted to
+# an FX module. Reported, never a gate (RS-8.3): ./verify only smoke-runs it for
+# well-formed rows (tools/check_bench.py). -ffp-contract=off as horde's ledger
+# build: the timed arithmetic is the shipped one, and the calibration loop stays
+# a multiply then an add.
+add_executable(echo_bench tools/bench.cpp)
+target_link_libraries(echo_bench PRIVATE echocore)
+target_include_directories(echo_bench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+target_compile_options(echo_bench PRIVATE ${ECHO_WARN} -O3 -ffp-contract=off)
+
 # The fp-contract probe (critic M7; see tools/render_hash.cpp). Clang's default
 # contracting mode honours the pragma ("on"; "fast" would override it by
 # design); GCC's ISO default is already "off", so it is probed with "fast".
