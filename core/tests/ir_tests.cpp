@@ -36,6 +36,8 @@
 #include <utility>
 #include <vector>
 
+#include <time.h>  // clock_gettime, CLOCK_PROCESS_CPUTIME_ID: POSIX, not ISO <ctime>
+
 #include "echo/engine.h"
 #include "echo/ir_render.h"
 #include "echo/ir_service.h"
@@ -375,6 +377,15 @@ bool resumableEqualsOneShot(Detail& d) {
 
 using Clock = std::chrono::steady_clock;  // tests only: no clock is read in a render or a model
 
+// The CPU this process has spent, all its threads (the service's worker
+// included), in ms. Gate 4 judges frame 1 by it (T-036, D-046): the wall clock
+// also counts other processes' turns on the cores, and went red under load.
+// A failed call reads NaN, never 0: a 0 would pass every interval silently.
+double cpuMs() {
+  timespec ts{};
+  if (clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts) != 0) return std::nan("");
+  return static_cast<double>(ts.tv_sec) * 1e3 + static_cast<double>(ts.tv_nsec) * 1e-6;
+}
 // Waits (yielding) until pred() holds or `ms` pass. True if it held.
 template <class P>
 bool waitFor(P pred, double ms) {
@@ -498,11 +509,17 @@ bool serviceOffAudioThread(Detail& d) {
 
 // Gate 4: the display redraws within 100 ms of a change. Structurally (every
 // build, CI included): frame 1 is published covering exactly the head,
-// not the whole window. By the clock (Release, the dev Mac; reported on CI,
-// whose shared runners make wall-clock gates flaky): on a slow patch at 48 and
-// 192 kHz, frame 1 arrives within 100 ms, worst of 20 cold requests and of 20
-// made while another render is in flight (critic B4-2 M5): half during its
-// head, half during its extension.
+// not the whole window (plant irWholeTailFirst). By the clock (Release, the
+// dev Mac; reported on CI): on a slow patch at 48 and 192 kHz, frame 1 costs at
+// most 100 ms of this process's CPU from the request, each of 20 cold requests
+// and of 20 made while another render is in flight (critic B4-2 M5): half
+// during its head, half during its extension (plant irHeadRestarts).
+// CPU, not the wall (T-036, D-046): the wall clock also counted other
+// processes' turns on the cores and went red whenever the dev Mac was busy, a
+// gate that teaches re-running until green. CPU time cannot see a worker that
+// waits without working (a sleep, a poll, a lock held elsewhere), so the wall
+// keeps a loose ceiling, 1 s, ~5x the worst ever seen under load (plant
+// irWorkerNaps). Each request is judged as it lands, so a plant fails at once.
 bool serviceKeepsUp(Detail& d) {
   const bool ci = std::getenv("CI") != nullptr;
   for (double sr : {48000.0, 192000.0}) {
@@ -510,7 +527,7 @@ bool serviceKeepsUp(Detail& d) {
     REQUIRE(sv.start(svcConfig(sr, 8.0)), "service refused to start");
     std::vector<IrRequest> reqs;
     for (int k = 0; k < 60; ++k) reqs.push_back(driftReq(k, sr, 8.0));
-    double worstCold = 0.0, worstBusy = 0.0;
+    double worstCold = 0.0, worstBusy = 0.0, wallCold = 0.0, wallBusy = 0.0;
     for (int k = 0; k < 40; ++k) {
       const bool busy = k >= 20;
       if (busy) {  // another render in flight: in its head (even k) or past frame 1 (odd k)
@@ -519,19 +536,26 @@ bool serviceKeepsUp(Detail& d) {
         else std::this_thread::sleep_for(std::chrono::milliseconds(5));
       }
       const auto t0 = Clock::now();
+      const double c0 = cpuMs();
       const auto serial = sv.request(reqs[static_cast<std::size_t>(k)]);
       const bool got = waitFor([&] { const auto s = seen(sv); return s.serial == serial && s.ready > 0; }, 5000);
-      const double ms = std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
+      const double ms = cpuMs() - c0;
+      const double wall = std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
       REQUIRE(got, "%.0f kHz: no frame within 5 s", sr / 1000);
-      (busy ? worstBusy : worstCold) = std::max(busy ? worstBusy : worstCold, ms);
-      const auto first = sv.stats().firstReady;
+      const auto first = sv.stats().firstReady;  // the structure first, so irWholeTailFirst fails for its own reason
       REQUIRE(first == headOf(sr), "%.0f kHz: frame 1 covered %ld samples, not the head (%ld)", sr / 1000, static_cast<long>(first), headOf(sr));
+      if (!ci) {
+        REQUIRE(ms <= 100.0, "%.0f kHz: frame 1 took %.1f ms CPU %s (gate: 100 ms CPU)", sr / 1000, ms, busy ? "in flight" : "cold");
+        REQUIRE(wall <= 1000.0, "%.0f kHz: frame 1 took %.1f ms wall %s on %.1f ms CPU (ceiling: 1000 ms wall: a worker that waits)", sr / 1000,
+                wall, busy ? "in flight" : "cold", ms);
+      }
+      (busy ? worstBusy : worstCold) = std::max(busy ? worstBusy : worstCold, ms);
+      (busy ? wallBusy : wallCold) = std::max(busy ? wallBusy : wallCold, wall);
       waitFor([&] { return seen(sv).complete; }, 5000);  // let it finish, so the next request starts cold
     }
-    std::printf("  REPORT frame 1 at %.0f kHz: worst of 20 cold = %.1f ms, of 20 in flight = %.1f ms (gate 100 ms%s)\n", sr / 1000, worstCold, worstBusy,
-                ci ? ", reported only on CI" : "");
-    if (!ci) REQUIRE(std::max(worstCold, worstBusy) <= 100.0, "%.0f kHz: frame 1 took %.1f ms cold, %.1f ms in flight (gate: 100 ms)", sr / 1000,
-                     worstCold, worstBusy);
+    std::printf("  REPORT frame 1 at %.0f kHz: worst of 20 cold = %.1f ms CPU (%.1f wall), of 20 in flight = %.1f ms CPU (%.1f wall) "
+                "(gate 100 ms CPU, 1000 ms wall%s)\n",
+                sr / 1000, worstCold, wallCold, worstBusy, wallBusy, ci ? ", reported only on CI" : "");
   }
   return true;
 }
@@ -807,8 +831,8 @@ const std::vector<Check> kChecks = {
      {"irChunkResetsNoise"}},
     {"gate 3: beside a live engine, nothing allocates and every render runs on the worker, never the audio or UI thread", serviceOffAudioThread,
      {"irRenderInline"}},
-    {"gate 4: frame 1 is the 96 000-sample head, within 100 ms of the request, cold and with a render in flight (48 and 192 kHz; clock gated off CI)",
-     serviceKeepsUp, {"irWholeTailFirst"}},
+    {"gate 4: frame 1 is the 96 000-sample head, at most 100 ms of CPU and 1 s of wall from the request, cold and with a render in flight (48 and 192 kHz; clock gated off CI)",
+     serviceKeepsUp, {"irWholeTailFirst", "irHeadRestarts", "irWorkerNaps"}},
     {"the screen never blanks: through a drag, the frame on screen always has samples", serviceNeverBlank, {"irPublishesEmpty"}},
     {"cache: a finished request seen before is a hit with no render, even after a drag of cut renders", serviceCache,
      {"irCacheIgnored", "irCancelKeepsSlot"}},
@@ -834,6 +858,7 @@ bool* plantFlag(std::string_view n) {
       {"irLevelIgnored", &irLevelIgnored}, {"irSkipsOutputFilter", &irSkipsOutputFilter}, {"irAllocsInRender", &irAllocsInRender},
       {"irSeedAfterReset", &irSeedAfterReset}, {"irAcceptsClampedRate", &irAcceptsClampedRate}, {"irRestAtMissesEnd", &irRestAtMissesEnd},
       {"irChunkResetsNoise", &irChunkResetsNoise}, {"irRenderInline", &irRenderInline}, {"irWholeTailFirst", &irWholeTailFirst},
+      {"irHeadRestarts", &irHeadRestarts}, {"irWorkerNaps", &irWorkerNaps},
       {"irRendersWhilePaused", &irRendersWhilePaused}, {"irCacheIgnored", &irCacheIgnored}, {"irNoCancel", &irNoCancel},
       {"viewDecimatesPeaks", &viewDecimatesPeaks}, {"gridFixedTempo", &gridFixedTempo}, {"viewGenWindowFromBase", &viewGenWindowFromBase},
       {"edcForward", &edcForward}, {"viewGenIndexOffByOne", &viewGenIndexOffByOne}, {"irCancelKeepsSlot", &irCancelKeepsSlot},
@@ -855,7 +880,7 @@ int main() {
   // engine's; an M4 plant nobody looks for is a fault nobody would see).
   for (const char* n : {"irHashSkipsKey", "irReusesState", "irDropsDevice", "irLevelIgnored", "irSkipsOutputFilter", "irAllocsInRender",
                         "irSeedAfterReset", "irAcceptsClampedRate", "irRestAtMissesEnd", "irChunkResetsNoise", "irRenderInline",
-                        "irWholeTailFirst", "irRendersWhilePaused", "irCacheIgnored", "irNoCancel", "viewDecimatesPeaks", "gridFixedTempo",
+                        "irWholeTailFirst", "irHeadRestarts", "irWorkerNaps", "irRendersWhilePaused", "irCacheIgnored", "irNoCancel", "viewDecimatesPeaks", "gridFixedTempo",
                         "viewGenWindowFromBase", "edcForward", "viewGenIndexOffByOne", "irCancelKeepsSlot", "irPublishesEmpty",
                         "viewUnrenderedIsZero"}) {
     bool guarded = false;
@@ -866,6 +891,12 @@ int main() {
       ++fails;
     }
   }
+#endif
+#ifdef ECHO_PLANTS
+  // Plants only gate 4's clock can see: on CI the clock is reported, not
+  // judged (shared runners), so they would read as vacuous there (critic T-036 H1).
+  const bool ci = std::getenv("CI") != nullptr;
+  const auto clockOnly = [](std::string_view p) { return p == "irHeadRestarts" || p == "irWorkerNaps"; };
 #endif
   for (const auto& c : kChecks) {
     Detail d;
@@ -878,6 +909,10 @@ int main() {
       if (!f) {
         std::printf("  FAIL  unknown plant %s\n", p);
         ++fails;
+        continue;
+      }
+      if (ci && clockOnly(p)) {
+        std::printf("  SKIP  plant %s: gate 4's clock is not judged on CI\n", p);
         continue;
       }
       *f = true;
