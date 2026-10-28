@@ -381,8 +381,8 @@ commercial delay or borrow its mode names, presets or UI text.
 - **Status:** open.
 - **Scope:** `core/tests/core_tests.cpp`.
 - **Acceptance criteria:** both readings implemented as reports with planted
-  controls; whether either gates is a human ruling (D-023 gates on M2 only). Also
-  report horde's B265 reading beside them (contract §12 A11; critic M2-L5).
+  controls; whether either gates is a human ruling (D-023 gates on M2 only). ~~Also
+  report horde's B265 reading beside them~~ (**done 2026-10-26 by T-018, D-043**).
 - **Out of scope:** engine changes.
 
 ### T-002 — Spin-up filings
@@ -554,7 +554,9 @@ filings need the human's go-ahead each time.
 - **Out of scope:** horde's resolution at run time (RS-5.5: horde resolves Echo's macros).
 
 ### T-018 — M3: Admission self-test: rows A1–A23 mapped and the gaps filled
-- **Status:** open (after T-013 – T-015).
+- **Status:** done 2026-10-26 (D-043, two rulings by poll; critic FIX-THEN-SHIP, all fixed;
+  `docs/admission.md`; trace `traces/2026-10-26-t018-admission.md`). Absorbs T-008's B265
+  item.
 - **Scope:** `core_tests.cpp`, `plants.h`; a generated `docs/admission.md`.
 - **Acceptance criteria:** `docs/admission.md` lists each row A1–A23 with its check, its plant
   and the result, or "horde's" (A7 "off" is the router's: Echo has no bypass key) or "not

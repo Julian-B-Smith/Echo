@@ -30,6 +30,7 @@
 
 #include "echo/engine.h"
 #include "echo/presets.h"
+#include "b265.h"
 
 using echo::Echo;
 using Vec = std::vector<double>;
@@ -39,6 +40,22 @@ namespace {
 constexpr double kSr = 48000.0;
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kProbeHz = 431.7;  // incommensurate with the test times (SPEC §15 probe finding)
+
+// The fidelity thresholds (1.0 bar row 10), named once: each check below reads its
+// own, and docs/admission.md's table is printed from these same constants, so the
+// table can never state a threshold a check does not use (critic T-018 H1).
+namespace tol {
+constexpr double kCentroidSamples = 1e-6;  // timeAccuracy: read centroid vs delay, samples
+constexpr double kGen2Ratio = 1e-6;        // generationRatio: gen2/gen1 vs g(1 + R)/2 (float storage)
+constexpr double kGenLater = 1e-3;         // generationRatio: later generations vs g
+constexpr double kLoopGainSlack = 1e-5;    // loopBound: max |H_loop| <= 1 + this
+constexpr double kSrLoopDb = 0.5;          // srIndependence: loop filter vs 48 kHz, dB
+constexpr double kTapeSamples = 0.01;      // tapeLaw: vs the full-rate tape model, samples
+constexpr double kTapeCents = 2.5;         // tapeLaw: speed, cents
+constexpr double kRepitchCents = 1.0;      // repitchCents: output pitch vs 1 - dD/dt
+constexpr double kCurveRel = 1e-12;        // presetCurves: closed form, relative
+constexpr double kClearFade = 1e-12;       // clearFade, clearLiveWet: vs the no-Clear output x the ramp
+}  // namespace tol
 
 // ---- fixtures ----------------------------------------------------------------
 
@@ -203,7 +220,7 @@ bool timeAccuracy(Detail& d) {
     const auto q = run(*f, impulse(S(0.12)), zeros(S(0.12)));
     double s0 = 0, s1 = 0;
     for (long i = 4790; i < 4812; ++i) { s0 += q.L[i]; s1 += i * q.L[i]; }
-    REQUIRE(std::fabs(s1 / s0 - D) < 1e-6, "centroid %.6f, delay %.2f samples", s1 / s0, D);
+    REQUIRE(std::fabs(s1 / s0 - D) < tol::kCentroidSamples, "centroid %.6f, delay %.2f samples", s1 / s0, D);
   }
   return true;
 }
@@ -218,10 +235,10 @@ bool generationRatio(Detail& d) {
     const auto o = run(*e, impulse(8 * D, 0, 0.5), zeros(8 * D));
     const double R = std::exp(-2 * kPi * 5.0 / sr), g = 0.5;
     const double r2 = o.L[2 * D] / o.L[D];
-    REQUIRE(std::fabs(r2 - g * (1 + R) / 2) < 1e-6, "at %.0f Hz gen2/gen1 %.9f, expected %.9f", sr, r2, g * (1 + R) / 2);
+    REQUIRE(std::fabs(r2 - g * (1 + R) / 2) < tol::kGen2Ratio, "at %.0f Hz gen2/gen1 %.9f, expected %.9f", sr, r2, g * (1 + R) / 2);
     for (int k = 2; k <= 6; ++k) {
       const double r = o.L[(k + 1) * D] / o.L[k * D];
-      REQUIRE(std::fabs(r - g) < 1e-3, "at %.0f Hz gen%d/gen%d %.6f, expected %.3f within 1e-3", sr, k + 1, k, r, g);
+      REQUIRE(std::fabs(r - g) < tol::kGenLater, "at %.0f Hz gen%d/gen%d %.6f, expected %.3f within 1e-3", sr, k + 1, k, r, g);
     }
   }
   return true;
@@ -335,7 +352,7 @@ bool loopBound(Detail& d) {
         const double r = std::abs(y2[k]) / std::abs(y1[k]);
         if (r > worst) { worst = r; at = k * sr / N; }
       }
-      REQUIRE(worst <= 1.0 + 1e-5, "|H_loop| peaks at %.7f (%.0f Hz) at %.0f Hz rate, filter %s %g/%g, frac %.2f", worst, at, sr,
+      REQUIRE(worst <= 1.0 + tol::kLoopGainSlack, "|H_loop| peaks at %.7f (%.0f Hz) at %.0f Hz rate, filter %s %g/%g, frac %.2f", worst, at, sr,
               c.on ? "on" : "off", c.hp, c.lp, c.frac);
     }
   }
@@ -367,7 +384,7 @@ bool srIndependence(Detail& d) {
     for (int j = 0; j < 4; ++j) {
       const double db = 20 * std::log10(std::abs(dft(o.L, D - 3, D - 3 + S(0.1, sr), fs[j], sr)));
       if (sr == 48000.0) ref[j] = db;
-      else REQUIRE(std::fabs(db - ref[j]) <= 0.5, "at %.0f Hz rate the loop filter reads %.2f dB at %.0f Hz, 48 kHz reads %.2f", sr, db, fs[j], ref[j]);
+      else REQUIRE(std::fabs(db - ref[j]) <= tol::kSrLoopDb, "at %.0f Hz rate the loop filter reads %.2f dB at %.0f Hz, 48 kHz reads %.2f", sr, db, fs[j], ref[j]);
     }
   }
   return true;
@@ -396,7 +413,7 @@ bool blockIndependence(Detail& d) {
   const auto o0 = run(*ref, inL, inR, evs(), 120.0, [](long) { return 4096; });
   std::uint32_t seed = 5;
   const std::vector<std::function<int(long)>> pats = {
-      [](long) { return 1; }, [](long) { return 7; }, [](long) { return 64; }, [](long) { return 333; },
+      [](long) { return 1; }, [](long) { return 7; }, [](long) { return 64; }, [](long) { return 256; }, [](long) { return 333; },
       [&seed](long) { seed = seed * 1664525u + 1013904223u; return 1 + static_cast<int>(seed % 4096u); }};
   for (std::size_t p = 0; p < pats.size(); ++p) {
     auto e = mk({{"time.sync", 0}, {"time.ms", 120}, {"fb.amount", 40}, {"mod.depthMs", 3}, {"mod.rateHz", 1.7}, {"mod.spread", 60}});
@@ -999,7 +1016,7 @@ bool tapeLaw(Detail& d) {
       // between them (SPEC §11): measured <= 0.008 sample and <= 2 cents of
       // read speed at the fastest glide (10 ms), 0.01 cent at 0.3 s. Linear
       // interpolation erred by ~50 cents at 10 ms (critic M2-M5).
-      REQUIRE(worst < 0.01 && worstCents < 2.5, "glide %.2f, %g -> %g ms: off the full-rate model by %.4g samples (at %ld), %.2f cents of speed", glide,
+      REQUIRE(worst < tol::kTapeSamples && worstCents < tol::kTapeCents, "glide %.2f, %g -> %g ms: off the full-rate model by %.4g samples (at %ld), %.2f cents of speed", glide,
               mv.from, mv.to, worst, wAt, worstCents);
     }
   return true;
@@ -1063,7 +1080,7 @@ bool repitchCents(Detail& d) {
       const double err = std::fabs(cents(fMeas / (kProbeHz * sMean)));
       if (err > worst) { worst = err; wAt = a / kSr; }
     }
-    REQUIRE(worst < 1.0, "law %s, glide %.2f: the output's pitch departs from 1 - dD/dt by %.2f cents at %.2f s", law ? "exponential" : "tape", glide, worst, wAt);
+    REQUIRE(worst < tol::kRepitchCents, "law %s, glide %.2f: the output's pitch departs from 1 - dD/dt by %.2f cents at %.2f s", law ? "exponential" : "tape", glide, worst, wAt);
   }
   return true;
 }
@@ -2162,7 +2179,7 @@ bool clearFade(Detail& d) {
   REQUIRE(maxAbs(ob.L, T, T + N) > 1e-3, "the case is vacuous: nothing rings at the Clear");
   for (long j = 0; j < N; ++j) {
     const double g = static_cast<double>(N - 1 - j) / static_cast<double>(N);
-    REQUIRE(std::fabs(oa.L[T + j] - ob.L[T + j] * g) <= 1e-12, "at %.0f Hz, %ld after the Clear the output is %.9g, the 20 ms fade expects %.9g",
+    REQUIRE(std::fabs(oa.L[T + j] - ob.L[T + j] * g) <= tol::kClearFade, "at %.0f Hz, %ld after the Clear the output is %.9g, the 20 ms fade expects %.9g",
             sr, j, oa.L[T + j], ob.L[T + j] * g);
   }
   REQUIRE(maxAbs(oa.L, T + N) == 0.0 && maxAbs(oa.R, T + N) == 0.0, "at %.0f Hz the repeats still sound %.3g after the 20 ms fade", sr,
@@ -2221,7 +2238,7 @@ bool clearLiveWet(Detail& d) {
   REQUIRE(maxAbs(ob.L, T, T + N) > 1e-3, "the case is vacuous: nothing rings at the Clear");
   for (long j = 0; j < N; ++j) {
     const double g = static_cast<double>(N - 1 - j) / static_cast<double>(N);
-    REQUIRE(std::fabs(oa.L[T + j] - ob.L[T + j] * g) <= 1e-12, "%ld into the fade the wet is %.9g, the live mix expects %.9g", j, oa.L[T + j],
+    REQUIRE(std::fabs(oa.L[T + j] - ob.L[T + j] * g) <= tol::kClearFade, "%ld into the fade the wet is %.9g, the live mix expects %.9g", j, oa.L[T + j],
             ob.L[T + j] * g);
   }
   return true;
@@ -2442,7 +2459,7 @@ bool presetCurves(Detail& d) {
       const double want = c.c == P::Curve::Lin ? c.lo + (c.hi - c.lo) * v
                          : c.c == P::Curve::Exp ? c.lo + (c.hi - c.lo) * v * v
                                                 : c.lo * std::pow(c.hi / c.lo, v);
-      REQUIRE(std::fabs(P::shape(c.c, c.lo, c.hi, v) - want) <= 1e-12 * std::max(1.0, std::fabs(want)), "%s at %g is off its closed form",
+      REQUIRE(std::fabs(P::shape(c.c, c.lo, c.hi, v) - want) <= tol::kCurveRel * std::max(1.0, std::fabs(want)), "%s at %g is off its closed form",
               P::curveName(c.c), v);
     }
   }
@@ -2556,6 +2573,249 @@ bool presetA13(Detail& d) {
   return true;
 }
 
+// ---- M3 B3, T-018: the admission self-test's new checks (contract §2.2 rows; D-043) ----
+
+// A stress patch (no factory stress preset exists yet; T-021): past-unity
+// feedback, ping-pong, the tape law, deep fast SINE modulation (its phase is
+// the running state rest holds, so A2 can see a reset that skips it), every
+// filter on.
+std::unique_ptr<Echo> mkStress(double sr = kSr) {
+  return mk({{"time.sync", 0}, {"time.ms", 37}, {"time.offR", 30}, {"fb.amount", 110}, {"route.mode", 1}, {"time.law", 0}, {"mod.depthMs", 20},
+             {"mod.rateHz", 7}, {"mod.shape", 0}, {"mod.spread", 100}, {"filt.in.on", 1}, {"filt.out.on", 1}, {"filt.out.hpHz", 80}, {"mix", 70}}, sr);
+}
+
+// A2: seeded noise, 2 s, at the defaults and the stress patch (whose 20 ms of
+// drift modulation makes the phase audible): after reset() the output is
+// bit-identical to a freshly prepared instance, with a smoother mid-ramp at the
+// reset and 2 s of modulation run before it.
+bool a2ResetIdentity(Detail& d) {
+  for (int stress = 0; stress < 2; ++stress) {
+    g_rng = 71;
+    Vec in(S(2.0));
+    for (auto& v : in) v = 0.3 * noise();
+    auto a = stress ? mkStress() : mk({});
+    run(*a, in, in);
+    a->setParam("mix", 80);  // a 20 ms mix ramp in flight when reset() lands (healed by the rest landing either way)
+    a->reset();
+    auto b = stress ? mkStress() : mk({});
+    b->setParam("mix", 80);
+    b->reset();
+    const auto oa = run(*a, in, in), ob = run(*b, in, in);
+    for (long i = 0; i < S(2.0); ++i)
+      REQUIRE(oa.L[i] == ob.L[i] && oa.R[i] == ob.R[i], "%s: after reset() sample %ld differs from a fresh instance", stress ? "stress" : "defaults", i);
+  }
+  return true;
+}
+
+// A4: latency truth on an impulse and a swept sine: the dry path's delay is the
+// declared 0 samples. Feedback 0 and a 500 ms time keep the window dry-only, so
+// the output must be the input times the dry gain, sample for sample.
+bool a4Latency(Detail& d) {
+  REQUIRE(mk({})->properties().latency->samples == 0, "the declared latency is not 0");
+  auto e = mk({{"time.sync", 0}, {"time.ms", 500}, {"fb.amount", 0}, {"mix", 30}});
+  const double dg = std::cos(0.3 * kPi / 2);
+  const long n = S(0.4);
+  Vec imp = impulse(n, 1000, 1.0), sw(n);
+  for (long i = 0; i < n; ++i) {  // a log sweep 50 Hz -> 15 kHz
+    const double t = static_cast<double>(i) / kSr, T = 0.4, f0 = 50, f1 = 15000, k = std::log(f1 / f0);
+    sw[i] = 0.4 * std::sin(2 * kPi * f0 * T / k * (std::exp(t / T * k) - 1));
+  }
+  const auto oi = run(*e, imp, imp);
+  long first = -1;
+  for (long i = 0; i < n && first < 0; ++i)
+    if (oi.L[i] != 0.0) first = i;
+  REQUIRE(first == 1000 && std::fabs(oi.L[1000] - dg) < 1e-15 && std::fabs(oi.R[1000] - dg) < 1e-15,
+          "the impulse at 1000 comes out first at %ld (%.6f): the dry path is not on time", first, first >= 0 ? oi.L[first] : 0.0);
+  auto f = mk({{"time.sync", 0}, {"time.ms", 500}, {"fb.amount", 0}, {"mix", 30}});
+  const auto os = run(*f, sw, sw);
+  for (long i = 0; i < n; ++i)
+    REQUIRE(std::fabs(os.L[i] - dg * sw[i]) < 1e-15 && std::fabs(os.R[i] - dg * sw[i]) < 1e-15, "the swept sine's dry path is off at %ld (%.9g vs %.9g)",
+            i, os.L[i], dg * sw[i]);
+  return true;
+}
+
+// A8: L 220 Hz and R 330 Hz, decorrelated: in stereo routing |L - R| does not
+// collapse (Echo declares changes_image for ping-pong and mid/side only).
+bool a8Image(Detail& d) {
+  const long n = S(1.0);
+  const Vec L = sine(n, 220, 0.4), R = sine(n, 330, 0.4);
+  auto e = mk({{"route.mode", 0}});
+  const auto o = run(*e, L, R);
+  double din = 0, dout = 0;
+  for (long i = S(0.2); i < n; ++i) {
+    din += (L[i] - R[i]) * (L[i] - R[i]);
+    dout += (o.L[i] - o.R[i]) * (o.L[i] - o.R[i]);
+  }
+  const double ratio = std::sqrt(dout / din);
+  // Clean reads ~1.18 (the repeats add level); a 25 % crossfeed reads 0.59 (critic T-018 L), a mono sum 0.
+  REQUIRE(ratio > 0.9, "stereo routing narrows the image: rms |L - R| is %.3f of the input's", ratio);
+  return true;
+}
+
+// A10: a scripted session on the audio thread: sweeps of every continuous key,
+// macro-style moves (a preset resolved at moving slot values), corner loads,
+// a staged state adopted, Clear, tempo moves, sleep and wake, varied blocks.
+// Zero allocations. (Locks and syscalls are checked by review only: no
+// RealtimeSanitizer on this toolchain; the engine calls nothing that locks.)
+bool a10Session(Detail& d) {
+  auto e = mk({{"time.sync", 0}, {"mod.depthMs", 3}});
+  const auto rich = richModify();
+  std::vector<std::vector<echo::KeyValue>> corners;
+  for (double v : {0.0, 0.33, 0.66, 1.0}) corners.push_back(P::patchOf(P::resolve(rich, std::vector<double>(8, v))));
+  std::vector<std::vector<double>> macro;
+  for (int s = 0; s < 64; ++s) macro.push_back(std::vector<double>(8, (s % 16) / 15.0));
+  std::vector<echo::state::Values> resolved;  // resolution allocates; it is the host's, off the audio thread: done before arming
+  for (const auto& m : macro) resolved.push_back(P::resolve(rich, m));
+  auto other = mk({{"fb.amount", 70}, {"time.ms", 222}});
+  const std::string staged = saveText(*other);
+  e->stageState(staged);  // stageState runs off the audio thread too
+  g_rng = 73;
+  Vec in(4096), oL(4096), oR(4096), z(4096, 0.0);
+  for (auto& v : in) v = 0.3 * noise();
+  const int blocks[] = {1, 7, 64, 256, 4096, 33};
+  alloc_probe::arm();
+  int step = 0;
+  for (int pass = 0; pass < 6; ++pass) {
+    for (int k = 0; k < echo::kNumParams; ++k) {  // a sweep of every continuous key
+      const auto& p = echo::kParams[static_cast<std::size_t>(k)];
+      if (p.stepped || p.morph == echo::Morph::Device) continue;
+      e->setParam(k, p.min + (p.max - p.min) * ((step * 7 + k) % 11) / 10.0);
+      const int bs = blocks[step++ % 6];
+      e->process(in.data(), in.data(), oL.data(), oR.data(), bs, 100.0 + pass);
+    }
+    for (int k = 0; k < echo::kNumParams; ++k) e->setParam(k, resolved[static_cast<std::size_t>((step + k) % 64)][static_cast<std::size_t>(k)]);
+    e->loadState(std::span<const echo::KeyValue>(corners[static_cast<std::size_t>(pass % 4)].data(), corners[static_cast<std::size_t>(pass % 4)].size()));
+    e->fireAction(echo::Echo::kActionClear, 10);
+    e->process(in.data(), in.data(), oL.data(), oR.data(), 512, 140.0);
+    if (pass == 2) e->adoptStaged();
+    for (int q = 0; q < 200; ++q) e->process(z.data(), z.data(), oL.data(), oR.data(), 4096, 120.0);  // toward sleep
+    e->process(in.data(), in.data(), oL.data(), oR.data(), 64, 120.0);  // and the wake
+  }
+  alloc_probe::disarm();
+  REQUIRE(alloc_probe::g_allocs.load() == 0, "%ld allocation(s) on the audio thread in the scripted session", alloc_probe::g_allocs.load());
+  return true;
+}
+
+// A14: inside horde's cycle (one sample of feedback delay, the module called at
+// n = 1) at loop gain 1.2: silence in gives silence out, exactly, for 2 s. A
+// module that starts itself from silence would grow in the loop.
+bool a14Cycle(Detail& d) {
+  REQUIRE(*mk({})->properties().min_block == 1u, "min_block is not 1: Echo could not sit in a cycle");
+  for (int stress = 0; stress < 2; ++stress) {
+    auto e = stress ? mkStress() : mk({});
+    double fbL = 0, fbR = 0, worst = 0;
+    for (long i = 0; i < S(2.0); ++i) {
+      double xL = 1.2 * fbL, xR = 1.2 * fbR, yL = 0, yR = 0;
+      e->process(&xL, &xR, &yL, &yR, 1, 120.0);
+      fbL = yL;
+      fbR = yR;
+      worst = std::max({worst, std::fabs(yL), std::fabs(yR)});
+    }
+    REQUIRE(worst == 0.0, "%s: from silence, in a 1.2 cycle the output reached %.3g: the loop started itself", stress ? "stress" : "defaults", worst);
+  }
+  return true;
+}
+
+// The B265 port (b265.h): horde's own JavaScript, run under node at horde
+// 54caca8 on these eight vectors (the script and its output verbatim:
+// traces/2026-10-26-t018-admission.md), gave these readings; the port must match
+// all three numbers of each, the click (db), where it peaks (at) and the steady
+// floor, to 1e-9. The vectors aim at every window edge (critic T-018 M1): a
+// spike late in the span, one in the pre-window, a step just past the span.
+bool b265Port(Detail& d) {
+  const double sr = 48000.0;
+  const long n = 96000, t0 = 24000 + 12;  // a quarter period of 1 kHz past a zero crossing: the step lands on the peak
+  const auto sine = b265::sineProbe(n, sr), chord = b265::chordProbe(n, sr);
+  const long N = std::lround(0.02 * sr);
+  std::vector<double> step = sine, ramp = sine, past = sine, spike = chord, late = chord, pre = chord;  // copies, then each altered
+  for (long i = t0; i < n; ++i) step[i] *= 0.5;
+  for (long i = t0; i < n; ++i) ramp[i] *= (i >= t0 + N) ? 0.5 : 1 - 0.5 * static_cast<double>(i - t0 + 1) / static_cast<double>(N);
+  for (long i = t0 + std::lround(1.01 * sr); i < n; ++i) past[i] *= 0.5;
+  spike[t0] += 0.25;
+  late[t0 + std::lround(0.8 * sr)] += 0.25;
+  pre[t0 - std::lround(0.24 * sr)] += 0.25;
+  struct R { const char* name; const std::vector<double>* y; double db, at, floor; };
+  const R refs[] = {{"sine steady", &sine, 0.0, 0.97999999999999998, 5.3173016505731971e-12},
+                    {"sine step to half", &step, 15.589173966224418, 0.0, 5.3173016505731971e-12},
+                    {"sine 20 ms ramp", &ramp, 0.0, 0.97999999999999998, 5.3173016505731971e-12},
+                    {"chord spike", &spike, 52.662978959637798, 0.0, 7.9671571291875996},
+                    {"chord steady", &chord, 0.0, 0.17399999999999999, 7.9671571291875996},
+                    {"chord spike late in the span", &late, 54.308744084174734, 0.80000000000000004, 7.9671571291875996},
+                    {"chord spike in the pre-window", &pre, 0.0, 0.17399999999999999, 60.834654241877345},
+                    {"sine step just past the span", &past, 0.0, 0.99199999999999999, 15.589173966237640}};
+  for (const auto& r : refs) {
+    const auto c = b265::clickOf(*r.y, sr, t0);
+    REQUIRE(std::fabs(c.db - r.db) <= 1e-9 && std::fabs(c.at - r.at) <= 1e-9 && std::fabs(c.floor - r.floor) <= 1e-9,
+            "%s reads %.12f dB at %.6f s, floor %.12f; horde's JS %.12f dB at %.6f s, floor %.12f", r.name, c.db, c.at, c.floor, r.db, r.at, r.floor);
+  }
+  return true;
+}
+
+// A11's REPORTED reading (§12.1: never judged): every flip-class key switched,
+// both directions, on horde's two probes at 48 kHz, at every factory preset (the
+// bank: init today, T-021 adds the seven) and at a modulated patch (at the
+// defaults mod.depthMs is 0, so the seeded-jump keys mod.shape and mod.seed would
+// read 0 by construction; critic T-018 M3). Beside each, an ideal offline
+// equal-gain crossfade of the two steady renders over the key's DECLARED length
+// (params.json): 20 ms for the routing and filter switches; for time.sync and
+// time.div, per time.change mode: crossfade = time.xfadeMs, jump = 3 ms, repitch
+// = none (it declares no length, so no ideal is printed); the deferred and
+// seeded-jump keys declare none either. The worse of L and R is read.
+[[maybe_unused]] void b265Report() {
+  const double sr = 48000.0;
+  // The switch at 2 s: the probe onset's own repeats (every 375 ms at 35 %) have
+  // decayed to ~0.35^5 by then, so they no longer read inside the 1 s span.
+  const long n = S(3.4), t0 = S(2.0) + 12;
+  struct K { const char* key; double a, b; double change; double fadeS; };  // change < 0: leave time.change alone
+  const K keys[] = {{"route.mode", 0, 1, -1, 0.02},  {"filt.in.on", 0, 1, -1, 0.02}, {"filt.loop.on", 1, 0, -1, 0.02}, {"filt.out.on", 0, 1, -1, 0.02},
+                    {"time.sync", 1, 0, 0, -1},       {"time.div", 9, 12, 0, -1},     {"time.sync", 1, 0, 1, 0.06},    {"time.div", 9, 12, 1, 0.06},
+                    {"time.sync", 1, 0, 2, 0.003},    {"time.div", 9, 12, 2, 0.003},  {"mod.shape", 0, 1, -1, -1},     {"mod.seed", 1, 2, -1, -1},
+                    {"time.change", 0, 1, -1, -1},    {"time.law", 0, 1, -1, -1},     {"time.tempoMode", 1, 0, -1, -1}};
+  const char* changeName[] = {"repitch", "crossfade", "jump"};
+  struct Patch { std::string name; P::ModulePreset preset; bool modulated; };
+  std::vector<Patch> patches;
+  for (const auto& p : P::factory()) patches.push_back({p.id, p, false});
+  patches.push_back({"modulated", P::initPreset(), true});
+  for (const auto& pt : patches)
+    for (const auto& probe : {std::string("chord"), std::string("1 kHz")}) {
+      auto x = probe == "chord" ? b265::chordProbe(n, sr) : b265::sineProbe(n, sr);
+      // Faded in over 100 ms (LIBRARY L0013): an abrupt probe onset echoes back
+      // into the 1 s span and reads as a click of its own on every row.
+      for (long i = 0; i < S(0.1, sr); ++i) x[static_cast<std::size_t>(i)] *= 0.5 - 0.5 * std::cos(kPi * static_cast<double>(i) / static_cast<double>(S(0.1, sr)));
+      for (const auto& k : keys)
+        for (int dir = 0; dir < 2; ++dir) {
+          const double from = dir ? k.b : k.a, to = dir ? k.a : k.b;
+          auto mkAt = [&](double v) {
+            auto e = mk({}, sr);
+            const auto kv = P::patchOf(P::resolve(pt.preset, {}));
+            e->loadState(std::span<const echo::KeyValue>(kv.data(), kv.size()));
+            if (pt.modulated) { e->setParam("mod.depthMs", 3); e->setParam("mod.rateHz", 0.8); }
+            if (k.change >= 0) e->setParam("time.change", k.change);
+            e->setParam(k.key, v);
+            return e;
+          };
+          auto e = mkAt(from), sa = mkAt(from), sb = mkAt(to);
+          const auto o = run(*e, x, x, {set(t0, k.key, to)});
+          const auto oa = run(*sa, x, x), ob = run(*sb, x, x);
+          const double c = std::max(b265::clickOf(o.L, sr, t0).db, b265::clickOf(o.R, sr, t0).db);
+          char ideal[64] = "no declared length";
+          if (k.fadeS > 0) {
+            const long L = std::max<long>(1, std::lround(k.fadeS * sr));
+            std::vector<double> iL(static_cast<std::size_t>(n)), iR(static_cast<std::size_t>(n));
+            for (long i = 0; i < n; ++i) {
+              const double w = i < t0 ? 0.0 : std::min(1.0, static_cast<double>(i - t0 + 1) / static_cast<double>(L));
+              iL[static_cast<std::size_t>(i)] = (1 - w) * oa.L[i] + w * ob.L[i];
+              iR[static_cast<std::size_t>(i)] = (1 - w) * oa.R[i] + w * ob.R[i];
+            }
+            std::snprintf(ideal, sizeof ideal, "ideal equal-gain %g ms: %.2f dB", k.fadeS * 1000,
+                          std::max(b265::clickOf(iL, sr, t0).db, b265::clickOf(iR, sr, t0).db));
+          }
+          std::printf("  REPORT b265 %-9s %-6s %-15s %-9s %5g -> %-5g %6.2f dB  (%s)\n", pt.name.c_str(), probe.c_str(), k.key,
+                      k.change >= 0 ? changeName[static_cast<int>(k.change)] : "", from, to, c, ideal);
+        }
+    }
+}
+
 struct Check {
   const char* name;
   bool (*fn)(Detail&);
@@ -2572,7 +2832,7 @@ const std::vector<Check> kChecks = {
     {"true bypass: settled-off filters are bit-identical whatever their cutoffs", trueBypass, {"loopFilterInCircuit"}},
     {"loop bound: measured |H_loop| <= 1 at 4 rates x 7 loop settings (D-005)", loopBound, {"loopGainOverOne", "dcTextbook"}},
     {"sample-rate independence: time exact, loop filter within 0.5 dB at 44.1-192 kHz", srIndependence, {"fixedCoefRate"}},
-    {"block-size independence: blocks 1, 7, 64, 333, 4096 and random render bit-identically", blockIndependence, {"rampPerBlock", "blockSteppedD"}},
+    {"block-size independence: blocks 1, 7, 64, 256, 333, 4096 and random render bit-identically", blockIndependence, {"rampPerBlock", "blockSteppedD"}},
     {"determinism: interleaved instances = solo; reset() = fresh", determinism, {"sharedState", "resetKeepsLine"}},
     {"silence: exact zero in, exact zero out (9 routing x change modes at 120 %; awake engine)", silence, {"antiDenormalDc"}},
     {"tail: exact zero from the declared tail on; kInfiniteTail at g >= 1", tailExactZero, {"noTailGate"}},
@@ -2677,6 +2937,15 @@ const std::vector<Check> kChecks = {
      {"presetReordersSlots"}},
     {"presets A13: one engine through all four corners and back, mid-play, equals a fresh load; restored, it renders the same (L and R)", presetA13,
      {"presetResolveMutates"}},
+    // ---- M3 B3, T-018 ----
+    {"A2 reset identity: 2 s of seeded noise at the defaults and a stress patch; reset() mid-ramp, mid-modulation = fresh", a2ResetIdentity, {"resetKeepsModPhase"}},
+    {"A4 latency truth: an impulse and a swept sine pass the dry path at the declared 0 samples", a4Latency, {"dryLate"}},
+    {"A8 stereo image: L 220 / R 330 Hz, |L - R| kept in stereo routing", a8Image, {"monoSum"}},
+    {"A10 real time: a scripted session (sweeps, macros, corner loads, staged state, Clear, tempo, sleep and wake) allocates nothing", a10Session,
+     {"allocInProcess"}},
+    {"A14 feedback: in horde's n = 1 cycle at loop gain 1.2, silence in gives exact silence out (defaults, stress)", a14Cycle, {"selfStart"}},
+    {"B265 port: horde's click metric matches horde's JS (54caca8) to 1e-9 on eight pinned vectors (click, peak time, floor)", b265Port,
+     {"b265HoodHalved"}},
 };
 
 #ifdef ECHO_PLANTS
@@ -2725,6 +2994,7 @@ bool* plantFlag(std::string_view n) {
       {"presetReordersSlots", &presetReordersSlots}, {"presetDeviceAccepted", &presetDeviceAccepted}, {"presetLogAccepted", &presetLogAccepted},
       {"presetEndpointInexact", &presetEndpointInexact}, {"presetHzLinear", &presetHzLinear}, {"presetResolveMutates", &presetResolveMutates},
       {"presetLogModifyAccepted", &presetLogModifyAccepted},
+      {"resetKeepsModPhase", &resetKeepsModPhase}, {"dryLate", &dryLate}, {"monoSum", &monoSum}, {"selfStart", &selfStart}, {"b265HoodHalved", &b265HoodHalved},
   };
   for (const auto& p : table)
     if (n == p.n) return p.f;
@@ -2752,6 +3022,100 @@ bool* plantFlag(std::string_view n) {
 }
 
 }  // namespace
+
+// ---- docs/admission.md (T-018, D-043): horde's admission rows A1 - A23, each
+// mapped to the checks that evidence it in THIS suite, their plants, and the
+// result of this run; or "horde's" (the slot's side) or "not declared". Written
+// by `echo_tests --admission-out <file>`; ./verify fails if the committed file
+// differs, so the doc can never claim a row a passing check does not back.
+struct AdmissionRow {
+  const char* id;
+  const char* what;
+  std::vector<bool (*)(Detail&)> checks;
+  const char* also;  // other evidence, or the reason the row is not Echo's
+};
+const std::vector<AdmissionRow>& admissionRows() {
+  static const std::vector<AdmissionRow> rows = {
+      {"A1", "Declarations", {abiProperties, abiParamClasses}, "`check_manifest.py` (C++ table = params.json) and `manifest_lock.py` (the lock) in ./verify"},
+      {"A2", "Reset identity", {a2ResetIdentity, determinism}, ""},
+      {"A3", "Block independence", {blockIndependence}, ""},
+      {"A4", "Latency truth", {a4Latency, abiProperties}, "latency 0, no residual (nothing is buffered ahead)"},
+      {"A5", "Silence and tails", {silence, tailExactZero, tailFormula, tailAfterChange, tailNearUnity, restNeverCuts}, ""},
+      {"A6", "I/O gain (B435 tests 1-7)", {ioTest1Unity, ioGainLaw, ioTest3Opens, ioTest4Kept, ioTest5Placement, ioTest6Slot, ioTest7Latches, metersTaps},
+       "no limiter face: the post-limiter test does not apply"},
+      {"A7", "Off", {}, "horde's: \"off\" is the router's (RS-4.8); Echo has no bypass key"},
+      {"A8", "Stereo image", {a8Image, routing}, "changes_image is declared (ping-pong and mid/side move the image)"},
+      {"A9", "Non-finite", {finiteInput, loopRepair}, ""},
+      {"A10", "Real-time", {noAlloc, a10Session, ftzSet, ftzRestored},
+       "locks and syscalls by review only: no RealtimeSanitizer on this toolchain, and the engine calls nothing that locks"},
+      {"A11", "Parameter classes",
+       {switchesClickFree, crossfadeEqualGain, jumpIsShortFade, deferral, modSeeded, clickSweep, loadLeavesDevice, presetValidate, b265Port},
+       "structural: every flip key's switch declaration in params.json (`check_manifest.py`, with planted bare and length-less switches); the B265 reading REPORTED, never judged (`.harness/b265-report.txt`)"},
+      {"A12", "Macros", {presetA12, presetCurves, presetValidate}, "the factory seven are T-021's"},
+      {"A13", "Corner presets", {presetA13}, "the horde preset's own save and reload is horde's"},
+      {"A14", "Feedback", {a14Cycle}, "refusing a min_block > 1 module is the slot's; Echo declares 1"},
+      {"A15", "Determinism", {determinism}, ""},
+      {"A16", "Sleep and wake", {sleepTwin, floorAndWake}, ""},
+      {"A17", "State completeness", {stateComplete}, ""},
+      {"A18", "Restore exactness", {stateExact}, ""},
+      {"A19", "State size", {stateSize}, "every factory preset's state: T-021"},
+      {"A20", "Live-state exclusion", {stateLiveExcluded}, ""},
+      {"A21", "Morph position", {}, "not declared (RS-4.10; SPEC §16.6)"},
+      {"A22", "Note context", {}, "not declared (RS-4.11; SPEC §16.6, D-034)"},
+      {"A23", "Declared actions", {clearA23, clearFade, clearNoRestart, clearState}, "one action, Clear (SPEC §16.7)"},
+  };
+  return rows;
+}
+
+std::string mdCell(std::string t) {  // a check name inside a Markdown table cell: '|' would end the cell
+  std::string o;
+  for (char c : t) o += (c == '|') ? std::string("\\|") : std::string(1, c);
+  return o;
+}
+
+std::string admissionDoc(const std::vector<bool>& passed) {
+  std::string o =
+      "# Echo — admission self-test (horde's rack-slot contract §2.2, rows A1 – A23)\n\n"
+      "GENERATED by `echo_tests --admission-out docs/admission.md` (core/tests/core_tests.cpp, T-018, D-043); never edit by hand.\n"
+      "`./verify` fails if this file differs from a fresh run's, so a row is only ever claimed by a check that passed in that run.\n"
+      "Each check is proven on its planted faults by `echo_plants` (charter §Domain). \"horde's\" rows are the slot's side.\n\n"
+      "| row | what | evidence (checks in `echo_tests`) | planted faults | result |\n|---|---|---|---|---|\n";
+  for (const auto& r : admissionRows()) {
+    std::string checks, plants;
+    bool all = !r.checks.empty();
+    for (auto fn : r.checks) {
+      for (std::size_t i = 0; i < kChecks.size(); ++i)
+        if (kChecks[i].fn == fn) {
+          checks += std::string(checks.empty() ? "" : "<br>") + mdCell(kChecks[i].name);
+          for (const char* pl : kChecks[i].plants)
+            if (plants.find(std::string("`") + pl + "`") == std::string::npos) plants += std::string(plants.empty() ? "" : ", ") + "`" + pl + "`";
+          all = all && passed[i];
+        }
+    }
+    if (*r.also) checks += std::string(checks.empty() ? "" : "<br>") + "*" + mdCell(r.also) + "*";
+    const std::string result = r.checks.empty() ? (std::string(r.also).rfind("not declared", 0) == 0 ? "not declared" : "horde's") : (all ? "PASS" : "**FAIL**");
+    o += "| " + std::string(r.id) + " | " + r.what + " | " + checks + " | " + (plants.empty() ? "—" : plants) + " | " + result + " |\n";
+  }
+  char t[2048];
+  std::snprintf(t, sizeof t,
+                "\n## Fidelity thresholds (1.0 bar row 10: \"its own fidelity suite with measured thresholds\")\n\n"
+                "Printed from the constants the checks read (core_tests.cpp, namespace tol): a changed tolerance changes this table.\n\n"
+                "| claim | threshold | check |\n|---|---|---|\n"
+                "| time accuracy | repeats on their sample; read centroid within %g sample of the delay, whole and fractional | timeAccuracy |\n"
+                "| generation ratio | gen2/gen1 within %g of g(1 + R)/2; later generations within %g of g | generationRatio |\n"
+                "| loop bound | measured max abs(H_loop) <= 1 + %g | loopBound |\n"
+                "| sample-rate independence | time exact; loop filter within %g dB of 48 kHz, 44.1 – 192 kHz | srIndependence |\n"
+                "| block-size independence | bit-identical, blocks 1 … 4096 | blockIndependence |\n"
+                "| determinism, reset, state | bit-identical | determinism, a2ResetIdentity, stateComplete, stateExact |\n"
+                "| repitch | output pitch within %g cent; the tape model within %g sample and %g cents | repitchCents, tapeLaw |\n"
+                "| moving-time clicks | M2 metric <= %g at s = 2.25, zero backstop hits (D-023) | clickSweep |\n"
+                "| macro curves | endpoints exact; closed form within %g (relative) | presetCurves |\n"
+                "| Clear's fade | within %g of the no-Clear output times the 20 ms ramp | clearFade, clearLiveWet |\n",
+                tol::kCentroidSamples, tol::kGen2Ratio, tol::kGenLater, tol::kLoopGainSlack, tol::kSrLoopDb, tol::kRepitchCents, tol::kTapeSamples,
+                tol::kTapeCents, kClickProposed, tol::kCurveRel, tol::kClearFade);
+  o += t;
+  return o;
+}
 
 int main(int argc, char** argv) {
   // --click-report: print every click reading (threshold lifted), clean and,
@@ -2796,16 +3160,19 @@ int main(int argc, char** argv) {
                         "actionAtBlockStart", "clearCuts", "clearLandsValues", "clearWritesState", "clearRestartsFade",
                         "clearFreezesHeads", "clearFreezesWet",
                         "presetReordersSlots", "presetDeviceAccepted", "presetLogAccepted", "presetEndpointInexact", "presetHzLinear",
-                        "presetResolveMutates", "presetLogModifyAccepted"}) {
+                        "presetResolveMutates", "presetLogModifyAccepted",
+                        "resetKeepsModPhase", "dryLate", "monoSum", "selfStart", "b265HoodHalved"}) {
     bool guarded = false;
     for (const auto& c : kChecks)
       for (const char* p : c.plants) guarded = guarded || std::string_view(p) == n;
     if (!plantFlag(n) || !guarded) { std::printf("  FAIL  plant %s is %s\n", n, plantFlag(n) ? "guarded by no check" : "not in the plant table"); ++fails; }
   }
 #endif
+  std::vector<bool> passed(kChecks.size(), false);
   for (const auto& c : kChecks) {
     Detail d;
     const bool ok = c.fn(d);
+    passed[static_cast<std::size_t>(&c - kChecks.data())] = ok;
     std::printf("  %s  %s%s%s\n", ok ? "PASS" : "FAIL", c.name, ok ? "" : " -- ", ok ? "" : d.c_str());
     if (!ok) ++fails;
 #ifdef ECHO_PLANTS
@@ -2822,6 +3189,18 @@ int main(int argc, char** argv) {
 #endif
   }
 #ifndef ECHO_PLANTS
+  b265Report();
+  for (int a = 1; a + 1 < argc; ++a)
+    if (std::string_view(argv[a]) == "--admission-out") {
+      if (std::FILE* f = std::fopen(argv[a + 1], "wb")) {
+        const std::string doc = admissionDoc(passed);
+        std::fwrite(doc.data(), 1, doc.size(), f);
+        std::fclose(f);
+      } else {
+        std::printf("  FAIL  cannot write %s\n", argv[a + 1]);
+        ++fails;
+      }
+    }
   if (ECHO_ALLOC_PROBE && !memoryReport()) { std::printf("  FAIL  memory at 192 kHz exceeds the spec's 18.75 MiB (lines + tape history)\n"); ++fails; }
 #endif
   std::printf("%s: %s (%d failing)\n",

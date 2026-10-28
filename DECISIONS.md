@@ -1031,3 +1031,64 @@ travel in `internal_defaults` and are compared exactly by A12 (the fixture moves
 - **L3:** homes for missing values.
 - **L4:** this decision.
 - **L5:** the fixed row's values in A12's fixture.
+
+## D-043 — T-018: the admission self-test, docs/admission.md generated and gated, and horde's B265 metric ported exactly (RATIFIED by poll, 2026-10-26, two rulings; the rest the lead's record)
+
+**Ruled by poll, 2026-10-26:**
+- **Port horde's B265 click metric, pinning reference values from horde's own JavaScript.**
+  - `core/tests/b265.h` ports lines 1802 – 1834 of horde's `docs/design/fx-chain-morph-lab-r3.html` at `54caca8`
+    (sha256 of the extracted lines `2cd321f9…`), line for line.
+  - horde's JS, run under node once on eight seeded vectors, gave the readings `b265Port` pins: the click, the peak
+    time and the steady floor, each to 1e-9.
+  - Echo's oracle never reads horde's tree. horde's code is not copied into this public repo; the trace carries
+    Echo's own driver script and its output.
+- **`docs/admission.md` is generated and gated.** `echo_tests --admission-out` writes it from a row table and THIS
+  run's results, and `./verify` fails if the committed file differs by a byte (proven on a planted change). A row is
+  never claimed by a check that did not pass in that run.
+
+**What the rows say:** A1 – A23 are mapped. 20 rows pass. A7 is horde's ("off" is the router's). A21 and A22 are not
+declared. A23 is Clear (T-037).
+
+**New checks (contract §2.2):**
+- **A2:** a stress patch, with reset mid-ramp and mid-modulation.
+- **A3:** blocks of 256 added.
+- **A4:** dry latency on an impulse and a sweep, on both channels.
+- **A8:** `|L − R|` kept, with the ratio above 0.9.
+- **A10:** a scripted session that sleeps and wakes, with zero allocations. Locks and syscalls are checked by
+  review only.
+- **A11:** the switch declarations, full-matched per clause, in `check_manifest.py` (three plants).
+- **A14:** horde's n = 1 cycle at a loop gain of 1.2.
+- **The B265 port** (`b265Port`).
+- **The fidelity table**, printed from the named constants the checks read.
+
+**The B265 reading (A11, reported, never judged).** 120 rows, kept in `.harness/b265-report.txt` (values in the
+trace):
+- **Coverage:** every flip key, both directions, on both probes, at every bank preset (init today) and at a
+  modulated patch.
+- **The ideal crossfade beside each reading** uses the key's declared length: 20 ms for routing and filters;
+  `time.xfadeMs` or 3 ms for the time keys in crossfade or jump mode. Where nothing is declared (repitch, deferred
+  keys, seeded jumps), no ideal is printed. That choice is derived from `params.json`, not invented (critic M3).
+- **The method:** probes fade in over 100 ms and the switch sits at 2 s, so the probe onset's own repeats are not
+  read as clicks (LIBRARY L0013).
+- **The worst reading is 2.53 dB:** a repitch `time.div` move on the chord, a real pitch glide.
+
+**A2's plant deviates from the contract's, and it is sound.** The contract plants "a reset that leaves one smoother
+unsnapped", but in Echo that cannot reach the output: `reset()` snaps every smoother, and a reset instance is at rest,
+where the first sample lands everything again. Two attempts at that plant were vacuous. The critic confirmed no
+smoother survives. The plant is instead a reset that keeps the modulation phase, which is the running state rest
+HOLDS (`resetKeepsModPhase`), seen through the stress patch's sine modulation.
+
+**Critic (Opus, fresh context): FIX-THEN-SHIP.** Fixed:
+- **H1:** the hand-typed threshold table misstated three tolerances. It is now printed from shared constants.
+- **M1:** six mutants of the port survived five vectors that pinned only the click. It now runs eight vectors and
+  pins all three numbers.
+- **M2:** the provenance.
+- **M3:** the report's lengths and coverage.
+- **M4:** the switch check's looseness.
+- **LOW:** A8's threshold; A4's right channel; the stale-doc hazard; the A11 row's plants; dead code.
+
+**Recorded:**
+- A14 from exact silence is the contract as written; its plant (a 1e-24 speck at rest) is contrived but grows in
+  the loop.
+- **A seeded jump in time.sync and time.div (repitch) has no planted unseeded jump of its own.** It is covered by
+  `bareJump` and the M2 click sweep, not by a §12.2-style per-key plant. That is open for T-026's review.

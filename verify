@@ -208,8 +208,22 @@ core_gate() {
   cmake -S "$(pwd)/core" -B "$b" -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release -DECHO_WERROR=ON -DECHO_SANITIZE=OFF >"$log" 2>&1 \
     && cmake --build "$b" -j4 >>"$log" 2>&1 \
     || { echo "verify: core — build failed (warnings are errors):" >&2; grep -E "error|warning" "$log" | head -20 >&2; return 1; }
-  "$b/echo_tests" | grep -v "^  PASS" || ok=1
+  # The clean suite also writes docs/admission.md's text (T-018, D-043) from THIS run's results;
+  # the B265 readings (A11, reported, never judged) go to .harness/b265-report.txt, not the screen.
+  rm -f "$HARNESS_DIR/admission.md"  # a crash before the write must not leave the last run's doc to compare
+  "$b/echo_tests" --admission-out "$HARNESS_DIR/admission.md" | tee "$HARNESS_DIR/echo_tests.log" | grep -v "^  PASS\|^  REPORT b265" || ok=1
   [ "${PIPESTATUS[0]}" -eq 0 ] || ok=1
+  grep "^  REPORT b265" "$HARNESS_DIR/echo_tests.log" > "$HARNESS_DIR/b265-report.txt" || true
+  # The committed docs/admission.md must equal this run's, byte for byte: a row is never claimed by a
+  # check that did not pass here, and a renamed or remapped check makes it stale. Proven first on a
+  # copy with one byte changed, which must differ.
+  if sed '1s/^#/%/' "$HARNESS_DIR/admission.md" | cmp -s - docs/admission.md; then
+    echo "verify: core — the admission-doc check did not see a planted one-byte change (vacuous)" >&2; ok=1
+  elif ! cmp -s "$HARNESS_DIR/admission.md" docs/admission.md; then
+    echo "verify: core — docs/admission.md is stale (or a row failed): regenerate with echo_tests --admission-out docs/admission.md" >&2; ok=1
+  else
+    echo "admission: docs/admission.md equals this run's (rows A1 - A23); planted change seen"
+  fi
   "$b/echo_plants" | grep -v "^  PASS" || ok=1
   [ "${PIPESTATUS[0]}" -eq 0 ] || ok=1
   # M4 (T-030, D-030): the one offline IR renderer's suite, clean and under

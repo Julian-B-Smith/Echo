@@ -203,12 +203,20 @@ class Echo {
     n_ = 0;
     paramMoved_ = false;
     fadeCount_[0] = fadeCount_[1] = 0;
+    // A2's must-fail (resetKeepsModPhase): a reset that leaves one piece of running
+    // state as it was. The contract's literal plant, an unsnapped smoother, cannot
+    // reach the output here: a reset instance is at rest, and the rest landing
+    // snaps every smoother on its first sample (D-043). The modulation phase is
+    // what rest HOLDS, so a reset that skips it shows (D-019, §10).
+    const double keptPhase = modPhase_;
     modPhase_ = 0.0;
     mods_[0] = mods_[1] = 0.0;
     reseed(false);
+    if (plant::resetKeepsModPhase) modPhase_ = keptPhase;
     seedApplied_ = p_[kModSeed];
     resetStats();
     snapAll(true);
+    dryPrev_[0] = dryPrev_[1] = 0.0;
     resolveBoth(bpm_);
     for (int k = 0; k < 2; ++k) { landHead(k); head_[k].lastPos = head_[k].D; head_[k].statsLive = false; }
     idle_ = true;
@@ -335,7 +343,13 @@ class Echo {
         atRest(bpmEnd);
         if (!plant::tempoGlidesAtRest) bpmStart = bpmEnd;
         const bool wake = plant::wakeLeftOnly ? (xL != 0.0) : (xL != 0.0 || xR != 0.0);
-        if (!wake) { outL[i] = outR[i] = 0.0; continue; }
+        if (!wake) {
+          // At rest the output is exact zero. The planted selfStart emits a
+          // speck instead: in horde's feedback cycle (A14, loop gain 1.2) that
+          // speck grows, a loop that starts itself from silence.
+          outL[i] = outR[i] = plant::selfStart ? 1e-24 : 0.0;
+          continue;
+        }
         idle_ = false;
         silentRun_ = quietRun_ = tailClock_ = 0;
       }
@@ -458,11 +472,16 @@ class Echo {
       // level, because its new patch has already landed (D-020).
       const bool frozenWet = loading && (fadeLands_ || plant::clearFreezesWet);
       const double wg = frozenWet ? fadeWg_ : (mix <= 0.0 ? 0.0 : std::sin(mix * k::kPi / 2));
-      const double dL = plant::dryLimiter ? std::tanh(xL) : xL;
-      const double dR = plant::dryLimiter ? std::tanh(xR) : xR;
+      double dL = plant::dryLimiter ? std::tanh(xL) : xL;
+      double dR = plant::dryLimiter ? std::tanh(xR) : xR;
+      if (plant::dryLate) {  // A4's must-fail: the dry path one sample late (a latency the module does not declare)
+        std::swap(dL, dryPrev_[0]);
+        std::swap(dR, dryPrev_[1]);
+      }
       const double gLate = plant::inGainAfterLoop ? gIn : 1.0;  // the planted misplaced Input Gain
       double oL = (dg * dL + wg * wo[0]) * gOut * gLate;
       double oR = (dg * dR + wg * wo[1]) * gOut * gLate;
+      if (plant::monoSum) oL = oR = 0.5 * (oL + oR);  // A8's must-fail: the image collapsed to mono
       if (!plant::noOutputGuard && (!std::isfinite(oL) || !std::isfinite(oR))) {
         oL = oR = 0.0;
         clearLoop();
@@ -1680,6 +1699,7 @@ class Echo {
   int loadLeft_ = 0;
   double fadeWg_ = 0.0;          // the old wet level, frozen while a load fades (D-020)
   bool fadeLands_ = false;       // the running fade ends by adopting a patch (a load); false for a Clear alone
+  double dryPrev_[2] = {0.0, 0.0};  // the dryLate plant's one-sample delay (test-only)
   std::array<ActionEvent, kMaxActions> actions_{};  // the next block's actions, in offset order
   int actionsN_ = 0, actionsDone_ = 0;
   bool idle_ = true;
