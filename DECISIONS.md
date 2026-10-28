@@ -1092,3 +1092,61 @@ HOLDS (`resetKeepsModPhase`), seen through the stress patch's sine modulation.
   the loop.
 - **A seeded jump in time.sync and time.div (repitch) has no planted unseeded jump of its own.** It is covered by
   `bareJump` and the M2 click sweep, not by a §12.2-style per-key plant. That is open for T-026's review.
+
+## D-044 — T-019: the B408 stereo report; the mono-fold law per routing mode in ρ's own scale, gated on exact impulses (RATIFIED by poll, 2026-10-27, six rulings in two rounds; the rest the lead's record)
+
+**Found before building (measured through the one renderer at the defaults).** The ratified law and its controls
+mixed two scales. D-010's ρ = E_M / mean(E_L, E_R) reads ½ (−3 dB) for any hard-panned repeat, so:
+- equal-time ping-pong reads exactly ½ per repeat on a mono input, and fails "ρ_out ≥ ρ_in in every mode";
+- prior-art §5.3's P5 ("0 dB per repeat") and P3 ("ρ ≈ 1") were stated on the 1 + r scale (= 2ρ). A 1 ms
+  equal-gain offset reads ρ = ½ broadband, with its notch at 500 Hz.
+
+**Ruled by poll, round 1 (2026-10-27):**
+1. **Ping-pong has its own exact law:** no cross term, ρ = ½ per repeat. It sums the input to mono and hard-pans each
+   repeat by design. Stereo and mid/side keep ρ_out ≥ ρ_in. The gate runs on equal-time patches; offset patches are
+   reported (an offset is a requested widening, and any offset reads ½ on a mono impulse). P3 and P5 are restated
+   in ρ's scale.
+2. *(superseded by round 2)* A noise margin of 3σ, σ = 1/(2√N).
+3. **The colouring flag is stereo mode only:** 0 < |tL − tR| < 40 ms. Measured: ping-pong's taps never coincide (its
+   fold stays −3.1 dB under 1 – 50 ms offsets) and mid/side's fold is exactly the M line (a flat 0 dB).
+4. **`./verify` regenerates `docs/stereo-report.md`** with `echo_stereo_report` and compares it byte for byte, proven
+   on a planted one-byte change.
+
+**Critic (Opus, fresh context): FIX-THEN-SHIP.** H1 overturned ruling 2. **Ruled by poll, round 2 (2026-10-27):**
+5. **Gate on exact impulses only; noise is reported, never judged.** The critic swept 40 seeds, and the lead
+   re-measured it: 15 of 80 fault-free runs broke 3/(2√N), the worst 0.051 below (the dark patch, seed 9, g8). The
+   loop and output filters shrink the effective sample count every pass, so σ = 1/(2√N) is not the output's σ.
+   **The lead's round-1 poll had called that margin "derived, not fitted" on four seeds: it was wrong.** The gate is
+   now the mono impulse (ρ_in = 1) and the left and right impulses (ρ_in = ½), all exact; `msSideGain2`, which only
+   the noise caught before, reads 0.2 on the left impulse.
+6. **40 ms is stated as a convention, not a measured boundary.** A stereo offset combs the fold at low frequency at
+   any size: −7.9 dB at 31 Hz at 50 ms, against −8.6 dB at 74 Hz at 20 ms. SPEC §3.2 and the report say so, and
+   `b408Zone` asserts that the +50 ms fold combs too.
+
+**Also fixed from the critic:**
+- **M1:** ping-pong's per-repeat law cannot see an inverted side (each window holds one side, so r stays 0). Where
+  repeats overlap, the fold at 1 kHz (500 periods of 1/T) must equal (1 + g)² / (2 (1 + g²)) = 0.8118 with the loop
+  filter off. The new plant `pingpongInvertsR` reads exactly the inverted form, 0.1882.
+- **L1:** the flag compares in whole microseconds. Both "exactly 40 ms" cases (0.29 − 0.25 and 0.54 − 0.5, an ulp
+  apart as doubles) now read the same way, and both are tested.
+- **L4:** every minus in the report is U+2212, and the noise rows' notches are labelled as the burst's own
+  sampling structure.
+
+**What T-019 adds:**
+- **`core/tests/fold.h`:** the metric (generations, spectra by Parseval, octaves, the ⅓-octave notch on a
+  1/24-octave grid), the law, the flag, `take()` through `echo/ir_render.h` (no second render path), and the
+  report's patches.
+- **`core/tools/stereo_report.cpp`** and the generated `docs/stereo-report.md`.
+- **Checks `b408Gate`, `b408Controls` and `b408Zone`, with 8 plants:** `stereoInvertsR`, `pingpongBothLines`,
+  `pingpongInvertsR` (engine), `foldScaleSlip`, `foldOctaveNarrow`, `foldNotchUnsmoothed`, `zoneAnyMode` and
+  `zoneAtEqual` (test-side), plus `msSideGain2`, reused. Each fires for its own reason.
+- **The renderer criterion:** already met by M4's `equalsPlainRender` (mono, left, right, S-only and noise, bit for
+  bit), cited, not duplicated.
+
+**Recorded (open for T-026's review):**
+- **M3:** offset patches are reported, not gated. A fault only on unequal times would change report rows. The
+  byte-compare turns red, but regenerating hides it unless the diff is read. This is within ruling 1.
+- **L2:** byte identity across GCC and clang is plausible (no printed value sits within 1e-7 of a rounding edge on
+  clang; the tool builds with `-ffp-contract=off`). The first Linux CI run is the evidence.
+- **L5:** the fold law runs at 48 kHz only, on two patches with spread 0. SR independence of the fold is not
+  exercised here.

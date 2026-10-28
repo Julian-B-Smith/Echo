@@ -63,6 +63,16 @@ add_executable(echo_presets tools/presets.cpp)
 target_link_libraries(echo_presets PRIVATE echocore)
 target_compile_options(echo_presets PRIVATE ${ECHO_WARN})
 
+# echo_stereo_report: prints docs/stereo-report.md, the B408 report (T-019,
+# D-044), from core/tests/fold.h, the metric echo_tests gates with. ./verify
+# compares its output with the committed file byte for byte, on GCC (CI) and
+# clang alike, so its own arithmetic is uncontracted on both (a fused a*b+c
+# would move a last digit between the two).
+add_executable(echo_stereo_report tools/stereo_report.cpp)
+target_link_libraries(echo_stereo_report PRIVATE echocore)
+target_include_directories(echo_stereo_report PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+target_compile_options(echo_stereo_report PRIVATE ${ECHO_WARN} -ffp-contract=off)
+
 # The fp-contract probe (critic M7; see tools/render_hash.cpp). Clang's default
 # contracting mode honours the pragma ("on"; "fast" would override it by
 # design); GCC's ISO default is already "off", so it is probed with "fast".

@@ -1,4 +1,4 @@
-// core_tests.cpp — Echo's invariant suite, M1 + M2 + M3 (ROADMAP M1 – M3; SPEC revision 3).
+// core_tests.cpp — Echo's invariant suite, M1 + M2 + M3 (ROADMAP M1 – M3; SPEC revision 4).
 //
 // ONE SOURCE, TWO BINARIES (core/CMakeLists.txt):
 //   echo_tests   built WITHOUT ECHO_PLANTS: every plant is constexpr false, so
@@ -31,6 +31,7 @@
 #include "echo/engine.h"
 #include "echo/presets.h"
 #include "b265.h"
+#include "fold.h"
 
 using echo::Echo;
 using Vec = std::vector<double>;
@@ -2816,6 +2817,128 @@ bool b265Port(Detail& d) {
     }
 }
 
+// ---- M3 B3, T-019: the B408 stereo report's Layer-0 (D-010 as ruled by D-044) ----
+// The metric is core/tests/fold.h, the code echo_stereo_report prints
+// docs/stereo-report.md from; these checks judge what the report states.
+
+// The law, per repeat generation, on the report's equal-time patches in every
+// mode, on exact inputs only (D-044 as re-ruled after critic T-019 H1): the mono
+// impulse (rho_in = 1) and the left and right impulses (rho_in = 1/2). Stereo and
+// mid/side keep rho_out >= rho_in; ping-pong has no cross term (rho = 1/2:
+// hard-panned by design). Then where ping-pong's sides overlap: its fold at 1 kHz
+// (a whole multiple of 1/T) equals the closed form, so an inverted side is seen.
+bool b408Gate(Detail& d) {
+  for (const auto& np : fold::reportPatches()) {
+    if (!np.gated) continue;
+    for (int mode = 0; mode < 3; ++mode)
+      for (auto in : {echo::IrInput::Mono, echo::IrInput::Left, echo::IrInput::Right}) {
+        auto p = np.p;
+        p[fold::keyIndex("route.mode")] = mode;
+        const auto t = fold::take(p, in, kSr, 0);
+        REQUIRE(t.ok, "%s mode %d: the renderer refused the request", np.name, mode);
+        REQUIRE(t.info.times[0] == t.info.times[1], "%s mode %d: a gated patch has unequal times", np.name, mode);
+        const double rin = fold::rho(fold::energy(t.inL, t.inR));
+        REQUIRE(rin == (in == echo::IrInput::Mono ? 1.0 : 0.5), "%s mode %d input %d: rho_in %.17g is not exact", np.name, mode, static_cast<int>(in), rin);
+        const auto g = fold::generations(t.L, t.R, t.info.times[0] * kSr);
+        REQUIRE(g.size() == static_cast<std::size_t>(fold::kMaxGenerations), "%s mode %d: only %zu generations read (the gate would be thin)",
+                np.name, mode, g.size());
+        for (const auto& x : g)
+          REQUIRE(fold::genPasses(mode, x, rin), "%s, mode %d, input %d: generation %d reads rho %.6f (r %.3g) against rho_in %.6f", np.name, mode,
+                  static_cast<int>(in), x.n, x.rho, x.corr, rin);
+      }
+  }
+  // Ping-pong's overlap: loop filter off (its phase would turn per pass), 500 ms,
+  // 35 %: 1 kHz is 500 periods of 1/T. g is the feedback; the DC blocker's phase
+  // at 1 kHz (~0.005 rad a pass) moves the reading by < 1e-4.
+  const auto q = fold::take(fold::patchWith({{"route.mode", fold::kPingPong}, {"filt.loop.on", 0}}), echo::IrInput::Mono, kSr, -1);
+  REQUIRE(q.ok, "ping-pong overlap: the renderer refused");
+  const double got = fold::foldAt(q.L, q.R, 1000.0, kSr), want = fold::pingPongFoldClosedForm(0.35);
+  REQUIRE(std::fabs(got - want) < 1e-3, "ping-pong at 1 kHz: the overlapping repeats fold to %.5f, the closed form %.5f (a side inverted?)", got, want);
+  return true;
+}
+
+// The closed-form fold of a 1 ms equal-gain offset (L = d, R = d delayed by D
+// samples): |M|^2 / mean(|L|^2, |R|^2) = cos^2(pi f D / sr), averaged over a band
+// [lo, hi] as 1/2 + (sin 2x2 - sin 2x1) / (4 (x2 - x1)), x = pi f D / sr.
+double cosSqAverage(double lo, double hi, double D, double sr) {
+  const double x1 = kPi * lo * D / sr, x2 = kPi * hi * D / sr;
+  return 0.5 + (std::sin(2 * x2) - std::sin(2 * x1)) / (4 * (x2 - x1));
+}
+
+// The metric's own controls: prior-art §5.3's P1 - P5, restated in rho's scale
+// (D-044). P3 is held to the closed form at every point of both band views, so
+// the smoothing, the band edges and the scale are each pinned.
+bool b408Controls(Detail& d) {
+  const long n = 1L << 18;  // 0.18 Hz bins: the band edges cost < 0.1 dB at the notch
+  Vec L = zeros(n), R = zeros(n);
+  L[0] = 1, R[0] = -1;  // P1
+  const double p1 = fold::rho(fold::energy(L, R));
+  REQUIRE(p1 == 0.0 && !fold::genPasses(fold::kStereo, {1, p1, -1.0, 2.0}, 1.0), "P1 (hL = d, hR = -d) reads rho %.6f and the law passes it", p1);
+  R[0] = 1;  // P2
+  const double p2 = fold::rho(fold::energy(L, R));
+  REQUIRE(p2 == 1.0, "P2 (hL = hR = d) reads rho %.6f, not 1 (the scale)", p2);
+  R[0] = 0, R[48] = 1;  // P3: 1 ms at 48 kHz
+  const double p3 = fold::rho(fold::energy(L, R));
+  REQUIRE(p3 == 0.5, "P3 (1 ms equal-gain offset) reads rho %.6f broadband, not 1/2 (no cross term)", p3);
+  const auto sp = fold::spectra(L, R, kSr);
+  double cfMin = 1e9, cfHz = 0;
+  for (int j = 0; j < fold::gridPoints(); ++j) {
+    const double f = fold::gridHz(j), cf = cosSqAverage(f * std::pow(2.0, -1.0 / 6), f * std::pow(2.0, 1.0 / 6), 48, kSr);
+    const double got = fold::smoothedAt(sp, j);
+    REQUIRE(std::fabs(fold::db(got) - fold::db(cf)) < 0.1, "P3 smoothed at %.1f Hz: %.3f dB, closed form %.3f dB", f, fold::db(got), fold::db(cf));
+    if (cf < cfMin) cfMin = cf, cfHz = f;
+  }
+  const auto nn = fold::worstNotch(sp);
+  REQUIRE(std::fabs(std::log2(nn.hz / cfHz)) <= 1.0 / fold::kGridPerOctave + 1e-9 && std::fabs(std::log2(nn.hz / 500.0)) < 1.0 / 3,
+          "P3's notch at %.1f Hz: the closed form's is %.1f Hz (expected ~500 Hz)", nn.hz, cfHz);
+  const auto oct = fold::octaves(sp);
+  for (int k = 0; k < fold::kOctaves; ++k) {
+    const double fc = fold::octaveCentre(k), cf = cosSqAverage(fc / std::sqrt(2.0), fc * std::sqrt(2.0), 48, kSr);
+    REQUIRE(std::fabs(fold::db(oct[static_cast<std::size_t>(k)]) - fold::db(cf)) < 0.1, "P3 octave %.1f Hz: %.3f dB, closed form %.3f dB", fc,
+            fold::db(oct[static_cast<std::size_t>(k)]), fold::db(cf));
+  }
+  // P4: the S-only impulse through mid/side: the repeats sound, and fold to exactly nothing.
+  const auto s = fold::take(fold::patchWith({{"route.mode", fold::kMidSide}}), echo::IrInput::SideOnly, kSr, 0);
+  const auto es = fold::energy(s.L, s.R);
+  REQUIRE(s.ok && es.l > 1e-6 && es.m == 0.0, "P4 (S-only through mid/side): energy %.3g, fold %.3g (expected repeats folding to 0)", es.l, es.m);
+  // P5: equal-time ping-pong, mono input: every repeat exactly 1/2, no cross term.
+  const auto q = fold::take(fold::patchWith({{"route.mode", fold::kPingPong}}), echo::IrInput::Mono, kSr, 0);
+  const auto g = fold::generations(q.L, q.R, q.info.times[0] * kSr);
+  REQUIRE(q.ok && g.size() >= 4, "P5: %zu generations read", g.size());
+  for (const auto& x : g)
+    REQUIRE(std::fabs(x.rho - 0.5) <= fold::kExact && std::fabs(x.corr) <= fold::kExact, "P5: generation %d reads rho %.15f, r %.3g", x.n, x.rho, x.corr);
+  return true;
+}
+
+// The colouring flag (SPEC §3.2 as ruled, D-044): stereo mode, 0 < |tL - tR| <
+// 40 ms in whole microseconds; and the facts the ruling rests on, measured: a
+// stereo offset combs the fold (inside the zone AND at 50 ms: 40 ms is a warning
+// convention, not a boundary this metric shows), while ping-pong and mid/side
+// offsets do not comb at all.
+bool b408Zone(Detail& d) {
+  struct C { int mode; double tl, tr; bool want; };
+  const C cases[] = {{fold::kStereo, 0.5, 0.5, false},   {fold::kStereo, 0.5, 0.501, true},    {fold::kStereo, 0.5, 0.5399, true},
+                     {fold::kStereo, 0.5399, 0.5, true},   {fold::kStereo, 0.5, 0.5401, false},  {fold::kStereo, 0.25, 0.2901, false},
+                     {fold::kStereo, 0.25, 0.29, false},   {fold::kStereo, 0.54, 0.5, false},  // exactly 40 ms both ways, though the doubles differ by an ulp
+                     {fold::kPingPong, 0.5, 0.501, false}, {fold::kMidSide, 0.5, 0.501, false}, {fold::kMidSide, 0.5, 0.5, false}};
+  for (const auto& c : cases)
+    REQUIRE(fold::colouringZone(c.mode, c.tl, c.tr) == c.want, "mode %d, %.4f / %.4f s: the flag reads %d", c.mode, c.tl, c.tr, !c.want);
+  // Through the engine's own resolved times, and the folds they make.
+  struct E { int mode; double offR; bool want; double lo, hi; };  // the smoothed fold's worst point must lie in [lo, hi] dB
+  const E es[] = {{fold::kStereo, 0.0, false, -0.01, 0.01},  {fold::kStereo, 0.2, true, -60, -6},  {fold::kStereo, 10.0, false, -60, -6},
+                  {fold::kPingPong, 0.2, false, -3.6, -2.9}, {fold::kMidSide, 0.2, false, -0.01, 0.01}};
+  for (const auto& e : es) {
+    const auto t = fold::take(fold::patchWith({{"route.mode", e.mode}, {"time.offR", e.offR}}), echo::IrInput::Mono, kSr, -1);
+    REQUIRE(t.ok, "mode %d, offR %g: the renderer refused", e.mode, e.offR);
+    const bool z = fold::colouringZone(e.mode, t.info.times[0], t.info.times[1]);
+    REQUIRE(z == e.want, "mode %d, offR %g %%: %.4f / %.4f s, the flag reads %d", e.mode, e.offR, t.info.times[0], t.info.times[1], z);
+    const auto w = fold::worstNotch(fold::spectra(t.L, t.R, kSr, t.info.restAt > 0 ? static_cast<std::size_t>(t.info.restAt) : 0));
+    REQUIRE(fold::db(w.rho) >= e.lo && fold::db(w.rho) <= e.hi, "mode %d, offR %g %%: the fold's worst 1/3 octave is %.2f dB at %.0f Hz, outside [%g, %g]",
+            e.mode, e.offR, fold::db(w.rho), w.hz, e.lo, e.hi);
+  }
+  return true;
+}
+
 struct Check {
   const char* name;
   bool (*fn)(Detail&);
@@ -2946,6 +3069,13 @@ const std::vector<Check> kChecks = {
     {"A14 feedback: in horde's n = 1 cycle at loop gain 1.2, silence in gives exact silence out (defaults, stress)", a14Cycle, {"selfStart"}},
     {"B265 port: horde's click metric matches horde's JS (54caca8) to 1e-9 on eight pinned vectors (click, peak time, floor)", b265Port,
      {"b265HoodHalved"}},
+    // ---- M3 B3, T-019 ----
+    {"B408 law: per repeat on mono, L and R impulses, stereo and mid/side keep rho_out >= rho_in, ping-pong 1/2 with no cross term; ping-pong's overlap at 1 kHz = closed form (D-044)",
+     b408Gate, {"stereoInvertsR", "msSideGain2", "pingpongBothLines", "pingpongInvertsR"}},
+    {"B408 controls P1 - P5 in rho's scale; P3's 1/3-octave and octave views equal the closed form within 0.1 dB, its notch ~500 Hz",
+     b408Controls, {"foldScaleSlip", "foldNotchUnsmoothed", "foldOctaveNarrow"}},
+    {"B408 colouring flag: stereo mode, 0 < |tL - tR| < 40 ms (whole us); stereo offsets comb, ping-pong and mid/side offsets do not", b408Zone,
+     {"zoneAnyMode", "zoneAtEqual"}},
 };
 
 #ifdef ECHO_PLANTS
@@ -2995,6 +3125,9 @@ bool* plantFlag(std::string_view n) {
       {"presetEndpointInexact", &presetEndpointInexact}, {"presetHzLinear", &presetHzLinear}, {"presetResolveMutates", &presetResolveMutates},
       {"presetLogModifyAccepted", &presetLogModifyAccepted},
       {"resetKeepsModPhase", &resetKeepsModPhase}, {"dryLate", &dryLate}, {"monoSum", &monoSum}, {"selfStart", &selfStart}, {"b265HoodHalved", &b265HoodHalved},
+      {"stereoInvertsR", &stereoInvertsR}, {"pingpongBothLines", &pingpongBothLines}, {"foldScaleSlip", &foldScaleSlip},
+      {"foldOctaveNarrow", &foldOctaveNarrow}, {"foldNotchUnsmoothed", &foldNotchUnsmoothed}, {"zoneAnyMode", &zoneAnyMode}, {"zoneAtEqual", &zoneAtEqual},
+      {"pingpongInvertsR", &pingpongInvertsR},
   };
   for (const auto& p : table)
     if (n == p.n) return p.f;
@@ -3161,7 +3294,9 @@ int main(int argc, char** argv) {
                         "clearFreezesHeads", "clearFreezesWet",
                         "presetReordersSlots", "presetDeviceAccepted", "presetLogAccepted", "presetEndpointInexact", "presetHzLinear",
                         "presetResolveMutates", "presetLogModifyAccepted",
-                        "resetKeepsModPhase", "dryLate", "monoSum", "selfStart", "b265HoodHalved"}) {
+                        "resetKeepsModPhase", "dryLate", "monoSum", "selfStart", "b265HoodHalved",
+                        "stereoInvertsR", "pingpongBothLines", "foldScaleSlip", "foldOctaveNarrow", "foldNotchUnsmoothed",
+                        "zoneAnyMode", "zoneAtEqual", "pingpongInvertsR"}) {
     bool guarded = false;
     for (const auto& c : kChecks)
       for (const char* p : c.plants) guarded = guarded || std::string_view(p) == n;

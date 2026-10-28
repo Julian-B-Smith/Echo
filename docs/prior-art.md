@@ -239,6 +239,12 @@ Planted controls:
 
 The result is stated per routing mode: B408's "measured and stated".
 
+> **Correction, 2026-10-27 (T-019, D-044).** P3's "ρ ≈ 1" and P5's "0 dB per repeat" are on the 1 + r scale
+> (= 2ρ), not ρ's: in ρ as defined in §5.1, a 1 ms equal-gain offset reads ρ = ½ broadband (no cross term) and an
+> equal-time ping-pong repeat reads ρ = ½ (−3 dB), the fold of a hard-panned source. The gate and SPEC §4.1 use ρ's
+> scale. Measured too: the ~40 ms colouring zone applies to stereo mode only; ping-pong's taps never coincide and the
+> mid/side fold is exactly M.
+
 **Design implications.** Reuse ρ as the headline (with r = 2ρ − 1 for correlation-minded readers). Never gate on
 correlation alone, or on a raw narrowband minimum. Warn when \|tL − tR\| (or a small combination of the two) falls
 inside the colouring zone. → D-010.

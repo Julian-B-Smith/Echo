@@ -11,6 +11,9 @@ while a head moves; §7, §10: a seed reseeds only when it changes, and a load r
 **Revision 3, RATIFIED 2026-10-23 by poll (D-035):** what rack admission (M3) adds — the meter taps, the saved
 state, module presets and macros, the fixed row, the tail declaration's mapping, the entries not declared, and one
 action, Clear (§16). The 29 keys' ranges, defaults and classes are unchanged.
+**Amended 2026-10-27 by D-044** (§3.2, §4.1: the mono-fold law per routing mode in ρ's own scale, gated on exact
+impulses with noise reported, and the colouring flag raised in stereo mode only as a stated convention), from T-019's
+measurements and its critic review.
 
 **What this is.** The behaviour Echo must have, stated so the C++ core (M1–M3) can be built and tested against it.
 The machine-readable half is [`params.json`](params.json): every key, unit, range, default, morph class, rate
@@ -87,8 +90,14 @@ Each side's time is `base × (1 + offset/100)`, with `time.offL` and `time.offR`
 milliseconds, so a pattern survives a tempo change: +50 % turns 1/4 into 1/4D, −33.3 % into 1/4T, and a few percent
 gives a Haas-style widening. Offsets apply in every routing; in mid/side they offset the M and S lines.
 
-**Colouring zone (D-010).** When the two resolved times differ by less than about 40 ms (and are not equal), mono
-playback combs. Echo's screen warns; the mono-fold report states it.
+**Colouring zone (D-010; D-044).** In **stereo** mode, when the two resolved times differ by less than 40 ms and are
+not equal, mono playback combs (a 1 ms offset puts the first ⅓-octave notch at 500 Hz, −9.4 dB at the defaults).
+Echo's screen warns; the mono-fold report states it. The flag is exactly 0 < |tL − tR| < 40 ms, compared in whole
+microseconds ("about 40 ms" in the literature, ruled a strict 40 ms). **40 ms is a warning convention** (the
+precedence-effect range), not a boundary the fold metric shows: a stereo offset combs the fold at low frequency at
+any size (−7.9 dB at 31 Hz at 50 ms; T-019). **Not in ping-pong or mid/side** (measured, T-019): ping-pong's taps
+never coincide, so its fold stays flat at −3 dB under any offset; in mid/side the offsets move the M and S lines and
+the fold is exactly the M line, a flat 0 dB.
 
 ### 3.3 Tempo
 
@@ -203,15 +212,25 @@ Line 0 and line 1, each with its own time (`offL` for line 0, `offR` for line 1)
 The mono fold (L+R)/2 of each mode, stated:
 - **stereo**: the fold of two independent lines; equal times fold without colouring. Offsets inside the colouring
   zone comb (§3.2).
-- **ping-pong**: equal-time ping-pong folds to exactly 0 dB per repeat (no two taps overlap; D-010 P5).
+- **ping-pong**: every repeat sits on one side, so each folds with **no cross term**: ρ = ½ (−3 dB, the fold of a
+  hard-panned source) exactly, on any input. That is panning by design, not cancellation: no two taps overlap
+  (D-010 P5, restated in ρ's scale by D-044; the "0 dB" first written there was the 1 + r scale).
 - **mid/side**: **the fold is exactly the M line's output, by construction.** Repeats that live only in S vanish in
   mono, and that is **not** a B408 defect: the S line carries only the input's own side content, which the dry path
-  also loses in mono. **Unintended cancellation** is the output's fold losing more than the input's fold:
-  ρ_out per repeat generation ≥ ρ_in, measured on a mono input (ρ = 1 every repeat) and on seeded decorrelated noise
-  (ρ_out = ρ_in). The S-only impulse row of D-010 reads 0 and is labelled *by construction*.
+  also loses in mono. The S-only impulse row of D-010 reads 0 and is labelled *by construction*.
 
-The B408 report (M3) states, per mode, D-010's readings: ρ broadband, per generation and per octave band, and the
-⅓-octave-smoothed worst notch with its frequency.
+**The law (D-044).** ρ = E_M / mean(E_L, E_R), M = (L+R)/2: 1 for a centred source, ½ for a hard-panned or
+decorrelated one, 0 for total cancellation. **Unintended cancellation** is the output's fold losing more than the
+input's. Gated per repeat generation on equal-time patches (an L/R offset is a requested widening, reported, not
+gated), on **exact inputs only**: the mono impulse (ρ_in = 1) and the left and right impulses (ρ_in = ½).
+**Stereo and mid/side**: ρ_out ≥ ρ_in. **Ping-pong**: no cross term (ρ = ½); and where its repeats overlap
+(sustained material) the fold at any whole multiple of 1/T equals (1 + g)² / (2 (1 + g²)) with the loop filter off,
+so a side inverted cannot hide behind r = 0. **Seeded decorrelated noise is reported, never judged:** a finite
+burst's ρ moves under the loop's filtering with no fault present by more than any independent-sample margin (the
+filters shrink the effective sample count every pass; 15 of 80 seeds broke 3/(2√N), up to 0.051 below).
+
+The B408 report (M3, T-019: `docs/stereo-report.md`, generated and gated) states, per mode, D-010's readings: ρ
+broadband, per generation and per octave band, and the ⅓-octave-smoothed worst notch with its frequency.
 
 ## 5. Feedback
 
@@ -452,6 +471,7 @@ intents unless a preset binds it. What a preset holds, which keys a macro may bi
 | Q-A5 | what "jump" means (raised by revision 1) | **ruled** 2026-10-20: a 3 ms crossfade (D-016) |
 | load | what a load does to ringing repeats (raised by the critic) | **ruled** 2026-10-20: they end; spill-over is horde's (D-016) |
 | Q-A4 | mid/side and B408 | **ruled** 2026-10-20: by construction (D-015) |
+| B408 law | ping-pong's scale, the noise gate, the colouring flag (found by T-019 and its critic) | **ruled** 2026-10-27: ρ = ½ exact for ping-pong; exact impulses gated, noise reported; the flag stereo only, a convention (D-044) |
 | offsets | L/R offset model | **ruled** 2026-10-20: % of base (D-015) |
 | S-1 | the generation ratio against the DC blocker (§5.3) | **ruled** 2026-10-20: g within 10⁻³ (D-017) |
 | defaults | `time.law` = tape, `time.tempoMode` = glide | **ruled** 2026-10-20 (D-017) |

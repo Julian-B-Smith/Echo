@@ -170,6 +170,15 @@ ECHO_PLANT(b265HoodHalved)       // TEST-SIDE: the click metric's +-16 neighbour
 ECHO_PLANT(presetEndpointInexact) // curves lose their exact-endpoint special case (A3: lo + (hi - lo)*1 may miss hi)
 ECHO_PLANT(presetHzLinear)       // modify adds Hz offsets linearly instead of in octaves (ADR-251)
 ECHO_PLANT(presetResolveMutates) // resolve() writes back into the preset: a corner flip changes the next resolve (A13)
+// ---- M3, B3 (T-019: the B408 stereo report, D-010 / D-044; core/tests/fold.h) ----
+ECHO_PLANT(stereoInvertsR)       // stereo mode decodes line 1 inverted: a centred source cancels in mono (P1 in the engine)
+ECHO_PLANT(pingpongBothLines)    // ping-pong also feeds the input into the right line: repeats land on both sides at once
+ECHO_PLANT(pingpongInvertsR)     // ping-pong decodes the right line inverted: per repeat r stays 0, but sustained material combs (critic T-019 M1)
+ECHO_PLANT(foldScaleSlip)        // TEST-SIDE: rho divides by the SUM of the channel energies (the 1 + r scale slip D-044 found)
+ECHO_PLANT(foldOctaveNarrow)     // TEST-SIDE: the octave bands are half an octave wide
+ECHO_PLANT(foldNotchUnsmoothed)  // TEST-SIDE: the notch search reads one raw bin, not the 1/3 octave (D-010's rejected raw minimum)
+ECHO_PLANT(zoneAnyMode)          // TEST-SIDE: the colouring flag is raised in every mode (the rule before D-044)
+ECHO_PLANT(zoneAtEqual)          // TEST-SIDE: the colouring flag is raised at equal times too
 }  // namespace echo::plant
 
 #undef ECHO_PLANT
