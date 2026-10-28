@@ -112,6 +112,8 @@ ECHO_PLANT(irRestAtMissesEnd)    // a clone that rested inside the last block re
 ECHO_PLANT(irChunkResetsNoise)   // each renderNext restarts the noise stream: a chunked render differs from the one-shot
 ECHO_PLANT(irRenderInline)       // the service renders inside request(), on the caller's thread
 ECHO_PLANT(irWholeTailFirst)     // the service publishes nothing until the whole window is rendered
+ECHO_PLANT(irHeadRestarts)       // frame 1 re-renders the head from sample 0 forty times: right samples, ~40x the CPU (T-036)
+ECHO_PLANT(irWorkerNaps)         // the worker sleeps 1.5 s before publishing frame 1: no CPU spent, the wall only (T-036)
 ECHO_PLANT(irRendersWhilePaused) // pause() is ignored: renders run with the editor closed
 ECHO_PLANT(irCacheIgnored)       // the cache never hits: every request re-renders
 ECHO_PLANT(irNoCancel)           // a new request waits for the render in flight to finish

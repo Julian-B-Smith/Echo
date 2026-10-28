@@ -19,10 +19,12 @@ with HIGH findings the author's own suite had passed.
   modulation; 52 checks, 75 planted faults caught. **M3 (rack admission, the 1.0 bar,
   due 2026-12-11) is under way** (D-028; T-010 – T-027, T-037): batch 1 (T-010 – T-012,
   T-002) done on PR #19 (D-034 – D-036); batch 2's T-013 – T-015 and T-037 done on PR #20
-  (D-037 – D-040), T-016 on its own PR (D-041): **batch 2 done**. Batch 3 (T-017 – T-020) built (D-042 – D-045), on
-  open PRs awaiting merge. **M4 (the IR display and Echo's screen) is under way
-  beside it** (D-027, D-030): T-030 – T-032 done (PR #15, PR #16); T-033 blocked on
-  M3's T-014; T-036 (gate 4's flicker) open.
+  (D-037 – D-040), T-016 on its own PR (D-041): **batch 2 done**. Batch 3's four items done
+  2026-10-28 (D-042 – D-045): T-017 on PR #24 (2975c34), T-018 on PR #25 (1a78af5), T-019 on
+  PR #26 (2966256), T-020 on PR #27 (985c1d1); the T-021 bank draft B3 also plans is not
+  started (the bank holds the init only). Batch 4 (T-021 finished, T-022, T-023) next. **M4 (the IR
+  display and Echo's screen) is under way beside it** (D-027, D-030): T-030 – T-032 done (PR #15,
+  PR #16); T-033 open (T-014 is on main, PR #20); T-036 (gate 4's flicker) done 2026-10-28 (D-046).
 - **Oracle:** `./verify fast` = kit integrity, leak gate, private-name gate,
   structure, manifest, intake pin, legal gate, **lab smoke** (`tools/lab_smoke.mjs`,
   ~7 s), the **core gate** and the **plan-map smoke**. The core gate: a `-Werror`
@@ -33,7 +35,8 @@ with HIGH findings the author's own suite had passed.
   ~90 s from a cold build). `full` = `fast` for now (goldens and sweeps arrive with M3).
 - **Hard date:** horde's module cutoff **2026-12-11**. Every MUST row of the 1.0
   bar met by then, or Echo ships after 1.0.
-- **Last human ratification:** 2026-10-22 — the reflection prune by poll (the standing
+- **Last human ratification:** 2026-10-28 — gate 4 judged by CPU time with a 1 s wall
+  ceiling off CI, by poll (D-046, T-036). 2026-10-22: the reflection prune by poll (the standing
   critic rule above; T-036). Before it, 2026-10-21: frame 1 is 96 000 samples (D-033),
   the M4 plan (D-030), the M3 plan (D-028), M4's gate (D-027).
 
@@ -731,7 +734,7 @@ filings need the human's go-ahead each time.
 ### T-031 — M4: the render service (B4-2)
 - **Status:** done 2026-10-22 (PR #16 merged, 369edb1; trace
   `traces/2026-10-21-b4-2-service-view.md`; critic FIX-THEN-SHIP, all fixed). Gate 4's
-  wall-clock check flickers under load: T-036.
+  wall-clock check flickered under load: fixed by T-036 (D-046, CPU time).
 - **Amended 2026-10-21 by poll (D-033):** frame 1 covers the first **96 000 samples** (2 s at
   48 kHz, 0.5 s at 192 kHz). The render costs per sample, and once built, a 2 s head at
   192 kHz measured 90–196 ms worst of 20. Every chunk is cancellable, the head's included,
@@ -754,6 +757,11 @@ filings need the human's go-ahead each time.
      worst of 20 runs. The plant `irWholeTailFirst` withholds frame 1 until the whole
      tail is rendered, and must fail the check. CI reports the timing but does not gate
      on it, because shared runners make wall-clock gates flaky.
+     **Amended 2026-10-28 by poll (D-046, T-036):** "within 100 ms" is judged as at most
+     100 ms of the process's CPU from the request, each request as it lands, with a 1 s
+     wall-clock ceiling beside it for a worker that waits without working. Plants
+     `irHeadRestarts` (CPU) and `irWorkerNaps` (wall) fail the clock alone; on CI they are
+     skipped with a visible line.
   5. **Fed only while open.** With the editor closed (`pause()`), no renders run.
   6. **No re-rendering of the head (critic T-030 M2).** Head-first frames extend one
      render. `IrRenderer` gains a resumable form (start, then render the next n
@@ -797,7 +805,8 @@ filings need the human's go-ahead each time.
 - **Out of scope:** pixels, styling.
 
 ### T-033 — M4: the snapshot label's engine hooks (B4-3)
-- **Status:** blocked (until M3's T-014 lands on main; approved 2026-10-21, D-030).
+- **Status:** open (approved 2026-10-21, D-030; its blocker, M3's T-014, landed on main with
+  PR #20 on 2026-10-24).
 - **Scope:** `core/include/echo/engine.h` (additive only): a ceiling-engagement count, and
   a status word published once per block through T-014's mechanism (heads moving, time
   modulated). Also `ir_render.h`, `ir_tests.cpp` and `plants.h`.
@@ -852,15 +861,24 @@ filings need the human's go-ahead each time.
 - **Out of scope:** any edit inside horde's tree beyond that one path.
 
 ### T-036 — M4: make gate 4's clock check stop flickering (T-031)
-- **Status:** open (graduated from REFLECTIONS by poll, 2026-10-22).
+- **Status:** done 2026-10-28 (D-046; critic FIX-THEN-SHIP, all findings fixed or recorded;
+  criterion 3: ten `./verify fast` runs green at load 120 – 240, made with CPU burners;
+  trace `traces/2026-10-28-t036-gate4.md`). Graduated from REFLECTIONS by poll, 2026-10-22.
 - **Why:** T-031's gate 4 (frame 1 within 100 ms, worst of 20, wall clock, enforced
   locally) turned `./verify fast` red twice in a row at the 2026-10-22 close, then green
   four runs straight with nothing changed. A stop gate that flickers teaches re-running
   until green. **Seen again 2026-10-27** during T-019 (load averages 20 – 114): 48 kHz frame 1
   took 101.2 ms cold (in flight 65.5 ms), red in `echo_ir_plants`' clean pass only; every
   other gate green. Held red, not re-run into green; T-019's PR waits for a run at low load.
+  **Seen again 2026-10-28** on the batch-3 ROADMAP fix (load 41.9, another project's suite and
+  file sync running): frame 1 took 130.4 ms cold at 48 kHz and 129.9 ms at 192 kHz (in flight
+  71.4 and 82.7 ms). A second run on the corrected tree (load 29.9 falling to 17.9) went red the
+  same way: 172.4 ms cold at 192 kHz in `echo_ir_tests`, 201.2 ms in flight at 48 kHz in
+  `echo_ir_plants`; every other gate green. Held red and recorded here; the fix waits for a run
+  at low load.
 - **Scope:** `core/tests/ir_tests.cpp` (gate 4) and, if the human picks it, `./verify`'s
-  wiring (a human gate).
+  wiring (a human gate). As built (D-046): also `plants.h` and `ir_service.h`, for the two
+  clock plants only (constexpr false in production, so the service's behaviour is unchanged).
 - **Acceptance criteria:**
   1. The human rules the option by poll, recorded in DECISIONS: time on CPU rather than
      the wall; a percentile with a bounded retry; or the clock check moves to

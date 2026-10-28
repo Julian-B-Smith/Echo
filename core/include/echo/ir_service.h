@@ -28,6 +28,7 @@
 // clone's lines, ~18 MiB at 192 kHz) and 2 x slots x maxLength doubles.
 #pragma once
 #include <array>
+#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <memory>
@@ -295,6 +296,13 @@ class IrService {
         // The slot's samples past `ready` belong to the worker alone: read()
         // shows only [0, ready), and `ready` moves under the lock.
         pos = ren_->renderNext(s.L, s.R, target);
+        if (pos >= head && s.ready == 0) {  // frame 1 is about to be published: gate 4's two planted slow paths
+          for (int k = 0; plant::irHeadRestarts && k < 40; ++k) {  // same samples, rendered from 0 again
+            ren_->start(r);
+            ren_->renderNext(s.L, s.R, head);
+          }
+          if (plant::irWorkerNaps) std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+        }
         lk.lock();
         noteThread();
         ++stats_.chunks;

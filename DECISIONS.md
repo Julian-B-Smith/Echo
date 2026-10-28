@@ -1208,3 +1208,50 @@ to 58). Nothing was forced. At 44.1 kHz / 128, % of a min-spec core (assumed):
   scopes optimisation out).
 - **The morph sweep is the dearest single move** (`morph` at the defaults costs more than `worst-repitch`):
   per-key `setParam` work every block. A candidate for optimisation if a row ever needs it.
+
+## D-046 — T-036: gate 4 judges frame 1 by the process's CPU time, with a 1 s wall ceiling off CI (RATIFIED by poll, 2026-10-28, four rulings; the rest the lead's record)
+
+**Ruled by poll (2026-10-28):**
+1. **CPU time, not the wall.** Frame 1 costs at most 100 ms of the process's CPU from `request()`
+   (`clock_gettime(CLOCK_PROCESS_CPUTIME_ID)`: every thread, the service's worker included). The 100 ms figure is
+   not relaxed. The wall clock also counted other processes' turns on the cores and went red whenever the dev Mac
+   was busy (T-036's record: 101.2 – 201.2 ms at load 20 – 114), a gate that teaches re-running until green.
+2. **A 1 s wall-clock ceiling beside it, judged off CI only** (critic M3): CPU time cannot see a worker that waits
+   without working (a sleep, a poll, a timed wait in place of a notify, a lock held elsewhere).
+3. **The batch-3 ROADMAP correction rides on T-036's branch** rather than a PR of its own.
+4. **Criterion 3's load is made, not waited for:** the machine would not be quiet, or loaded on demand, for a while.
+
+**The lead's record (the shape of the check):**
+- The structure is checked first on every build (frame 1 covers exactly the head), so `irWholeTailFirst` still
+  fails for its own reason (criterion 2); then, off CI, the CPU gate and the wall ceiling, each request judged as
+  it lands rather than the worst of 20 at the end, so a plant fails at once. The REPORT line prints both clocks.
+- Two plants guard the clock alone (constexpr false in production; `plants.h`, `ir_service.h`):
+  `irHeadRestarts` re-renders the head from sample 0 forty times before frame 1 is published (right samples,
+  ~40× the CPU at every rate); `irWorkerNaps` sleeps 1.5 s before publishing (no CPU, the wall only).
+
+**Critic (Opus, fresh context): FIX-THEN-SHIP.** Fixed:
+- **H1:** on CI the clock is skipped, so a clock-only plant reads as vacuous and turns CI red. `echo_ir_plants`
+  now prints `SKIP  plant <name>: gate 4's clock is not judged on CI` for the two clock plants when `CI` is set;
+  both stay in the guarded-plant cross-check.
+- **M1:** this entry; ROADMAP T-031 criterion 4 carries an "Amended … (D-046)" line; T-036's scope names the two
+  headers.
+- **M2:** the first plant re-rendered per chunk (cost ~head²), caught only at 48 kHz by 1.25 – 1.6×. Now a fixed
+  40 re-renders of the head at frame-1 publish: 428.6 ms CPU measured, ~4.3× over the gate at both rates.
+- **M3:** ruled as 2 above (plant `irWorkerNaps`, 1523.2 ms wall at ~32 ms CPU).
+- **L1, L2:** `<time.h>` (POSIX) included for what it is; a failed `clock_gettime` reads NaN, never 0 (a 0 would
+  pass every interval).
+- **L3:** the ROADMAP status line no longer says "batch 3 done" while B3's T-021 bank draft is unstarted.
+
+**Known limits (recorded, M4):**
+- CPU time depends on the core the worker lands on: pinned to the efficiency cores (`taskpolicy -b`) the clean
+  suite read 39.8 – 47.3 ms CPU against 11.7 – 19.2 ms unpinned, ~3×. The CPU margin is ~2× on E-cores, ~4× seen.
+- The wall ceiling's margin under extreme load is ~2.5× (407.5 ms worst in criterion 3's runs).
+- The plant `irHeadRestarts` fires by ~4.3× here; a CPU ~4× faster than an M3 would need more re-renders.
+
+**Criterion 3 (2026-10-28), on the T-036 code tree (base `985c1d1`, the code unchanged since):** ten
+`./verify fast` runs in a row, all exit 0, each recorded with its load. The load was made with 24 `yes > /dev/null`
+burners (3 per core on the 8-core M3), not another build as the criterion's parenthesis suggests (the build loop was
+the denied part of the first attempt); other work on the machine added to it. 1-minute load averages 120 – 240 across
+the runs, harsher than the 20 – 114 that turned the old gate red. Across 80 REPORT figures (two suites × two rates ×
+cold / in flight × ten runs): CPU 18.9 – 38.3 ms (gate 100), wall up to 407.5 ms (ceiling 1000). The old wall rule
+would have gone red in every run. An earlier set at load 5 – 7 read 10 – 24 ms CPU.
