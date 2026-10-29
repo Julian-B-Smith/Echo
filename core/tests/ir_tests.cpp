@@ -226,7 +226,7 @@ bool reuseIsFresh(Detail& d) {
   return true;
 }
 
-// The cache key (T-030 criterion 3): changing any one of the 29 keys, the rate,
+// The cache key (T-030 criterion 3): changing any one of the 30 keys, the rate,
 // the tempo, the level, the length or the input changes the hash; an equal
 // request hashes equal.
 bool hashCoversEveryInput(Detail& d) {
@@ -820,7 +820,7 @@ const std::vector<Check> kChecks = {
     {"one renderer reused: every render equals a fresh one, drift seeds included (nothing leaks from the last patch)", reuseIsFresh,
      {"irReusesState", "irSeedAfterReset"}},
     {"rates: a rate the engine would clamp is refused, never rendered under the wrong hash", rateIsKept, {"irAcceptsClampedRate"}},
-    {"cache hash: each of the 29 keys, the rate, tempo, level, length and input change it", hashCoversEveryInput, {"irHashSkipsKey"}},
+    {"cache hash: each of the 30 keys, the rate, tempo, level, length and input change it", hashCoversEveryInput, {"irHashSkipsKey"}},
     {"tail oracle through the renderer: exact zero from the declared tail on; rest reported; held loop = kInfiniteTail", tailThroughRenderer,
      {"noTailGate", "irRestAtMissesEnd"}},
     {"stated level: the response is rendered at the request's level (-20, -40 dBFS)", levelIsStated, {"irLevelIgnored"}},

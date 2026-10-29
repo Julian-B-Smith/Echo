@@ -248,6 +248,7 @@ const ECHO_PARAMS = [
   P("mod.spread", "Mod Spread", "%", "scalar", 0, 100, 0, "continuous", "lin", "mod"),
   P("mod.seed", "Mod Seed", "", "stepped", 0, 65535, 1, "jump", "step", "mod", null,
     "seeded jump (contract §12.2): the new streams start from the value being applied"),
+  P("time.scale", "Time Scale", "×", "scalar", 0.25, 4, 1, "continuous", "log", "time"),   // T-038, D-048: appended
 ];
 const ECHO_PARAM_INDEX = Object.fromEntries(ECHO_PARAMS.map((p, i) => [p.key, i]));
 const EI = ECHO_PARAM_INDEX;
@@ -417,6 +418,11 @@ class EchoLab {
   _applied(key, v) {
     if (key === "time.sync" || key === "time.ms" || key === "time.div" || key === "time.offL" || key === "time.offR") {
       this.timeDirty = true; this.paramMoved = true;
+    } else if (key === "time.scale") {
+      // A scale send is a control move only if it MOVES a time (SPEC §3.5, D-048): a re-sent value, or a synced
+      // scale staying inside one octave's snap band, moves nothing and must not re-latch a tempo move in flight.
+      const t = this._timesNow(this.bpm);
+      if (t[0] !== this.Tt[0] || t[1] !== this.Tt[1]) { this.timeDirty = true; this.paramMoved = true; }
     } else if (key === "route.mode") {
       this.routeFrom = this.routeTo; this.routeTo = v; this.routeW = this.lab.plant === "instantSwitch" ? 1 : 0;
       if (this.routeW === 1) this.routeFrom = v;
@@ -493,19 +499,40 @@ class EchoLab {
     this.resetStats();
   }
 
-  // ---- time resolution: base x (1 + offset), the 12 s clamp ---------------
-  // Synced times past the line FOLD by halving, BOTH lines together so the
-  // L/R ratio survives (the `folded` flag is for the display). Free times
-  // clamp. Both clamp below at minDelayS. Spec §3.4. Also refreshes the
-  // declared tail, which depends on the times, the feedback and the depth.
-  _resolveBoth(bpm) {
+  // ---- time resolution: base x scale x (1 + offset), the 12 s clamp -------
+  // time.scale (D-048) multiplies the base BEFORE the offsets and the clamp:
+  // free, the value itself; synced, the nearest octave. Synced times past the
+  // line FOLD by halving, BOTH lines together so the L/R ratio survives (the
+  // `folded` flag is for the display). Free times clamp. Both clamp below at
+  // minDelayS. Spec §3.4. _resolveBoth also refreshes the declared tail, which
+  // depends on the times, the feedback and the depth.
+  //
+  // The octave snap, exactly as the C++ (engine.h timeScale): the boundaries
+  // 2^(k + 1/2) are irrational, so no double sits on one; the double nearest
+  // each (SQRT2 x 2^k) lies just ABOVE it and snaps up. s = m x 2^e with
+  // m in [1, 2) and the boundary at m = SQRT2 whatever the octave. Not
+  // round(log2 s): log2 of the double nearest 2^-1.5 is exactly -1.5, which
+  // rounds to the wrong octave (critic T-038 L1).
+  _octaveScale(s) {
+    let e = Math.floor(Math.log2(s));            // an estimate, fixed up exactly below
+    if (Math.pow(2, e) > s) e--; else if (Math.pow(2, e + 1) <= s) e++;
+    return Math.pow(2, s / Math.pow(2, e) >= Math.SQRT2 ? e + 1 : e);
+  }
+  // The resolved times in samples for this tempo: [L, R, folded]. Pure: _resolveBoth lands them.
+  _timesNow(bpm) {
     const p = this.p, sync = p[EI["time.sync"]] === 1;
-    const base = sync ? ECHO_DIVS[p[EI["time.div"]]][1] * 60 / (bpm > 1 ? bpm : 120) : p[EI["time.ms"]] / 1000;
+    const scale = sync ? this._octaveScale(p[EI["time.scale"]]) : p[EI["time.scale"]];
+    const base = (sync ? ECHO_DIVS[p[EI["time.div"]]][1] * 60 / (bpm > 1 ? bpm : 120) : p[EI["time.ms"]] / 1000) * scale;
     let tL = base * (1 + p[EI["time.offL"]] / 100), tR = base * (1 + p[EI["time.offR"]] / 100);
-    this.folded = false;
-    if (sync) while (Math.max(tL, tR) > ECHO_K.maxDelayS) { tL *= 0.5; tR *= 0.5; this.folded = true; }
-    this.Tt[0] = Math.min(ECHO_K.maxDelayS, Math.max(ECHO_K.minDelayS, tL)) * this.sr;
-    this.Tt[1] = Math.min(ECHO_K.maxDelayS, Math.max(ECHO_K.minDelayS, tR)) * this.sr;
+    let folded = false;
+    if (sync) while (Math.max(tL, tR) > ECHO_K.maxDelayS) { tL *= 0.5; tR *= 0.5; folded = true; }
+    return [Math.min(ECHO_K.maxDelayS, Math.max(ECHO_K.minDelayS, tL)) * this.sr, Math.min(ECHO_K.maxDelayS, Math.max(ECHO_K.minDelayS, tR)) * this.sr, folded];
+  }
+  _resolveBoth(bpm) {
+    const t = this._timesNow(bpm);
+    this.Tt[0] = t[0];
+    this.Tt[1] = t[1];
+    this.folded = t[2];
     this.tailN = this._tailSamples();
   }
 

@@ -1,7 +1,7 @@
 {
  "schema": "echo-params.1 — the B439 / RS-2.1 manifest: key, unit, range, default, morph class (continuous | jump = flip | device; OQ #33 map in SPEC §9), rate class (FOUNDATIONS ReadCadence), normalised law, smoothing, and each flip key's switch method (contract A11 as amended). Flip keys carry their A11 switch declaration. One key per line.",
  "module": "Echo",
- "status": "RATIFIED 2026-10-20 by poll (spec revision 2, D-017); revision 3 by poll 2026-10-23 (D-035: fixedControls, actions); a protected path. Keys freeze at first release (B428).",
+ "status": "RATIFIED 2026-10-20 by poll (spec revision 2, D-017); revision 3 by poll 2026-10-23 (D-035: fixedControls, actions); revision 4 by poll 2026-10-29 (D-048: time.scale appended, fixedControls now three); a protected path. Keys freeze at first release (B428).",
  "params": [
   {"key":"io.inGain","name":"Input Gain","unit":"dB","type":"scalar","min":-24,"max":24,"def":0,"morph":"device","rate":"continuous","law":"io","smoothing":"gain"},
   {"key":"io.outGain","name":"Output Gain","unit":"dB","type":"scalar","min":-24,"max":24,"def":0,"morph":"device","rate":"continuous","law":"io","smoothing":"gain"},
@@ -31,13 +31,13 @@
   {"key":"mod.rateHz","name":"Mod Rate","unit":"Hz","type":"scalar","min":0.05,"max":10,"def":0.6,"morph":"continuous","rate":"continuous","law":"log","smoothing":"mod"},
   {"key":"mod.shape","name":"Mod Shape","unit":"","type":"stepped","min":0,"max":1,"def":0,"morph":"jump","rate":"continuous","law":"step","smoothing":"mod","labels":["sine","drift"],"switch":"seeded jump of the modulation offset: it starts from the value being applied (250 ms value blend, slew-limited)"},
   {"key":"mod.spread","name":"Mod Spread","unit":"%","type":"scalar","min":0,"max":100,"def":0,"morph":"continuous","rate":"continuous","law":"lin","smoothing":"mod"},
-  {"key":"mod.seed","name":"Mod Seed","unit":"","type":"stepped","min":0,"max":65535,"def":1,"morph":"jump","rate":"continuous","law":"step","smoothing":"mod","switch":"seeded jump (contract §12.2): the new streams start from the value being applied"}
+  {"key":"mod.seed","name":"Mod Seed","unit":"","type":"stepped","min":0,"max":65535,"def":1,"morph":"jump","rate":"continuous","law":"step","smoothing":"mod","switch":"seeded jump (contract §12.2): the new streams start from the value being applied"},
+  {"key":"time.scale","name":"Time Scale","unit":"×","type":"scalar","min":0.25,"max":4,"def":1,"morph":"continuous","rate":"continuous","law":"log","smoothing":"time"}
  ],
  "fixedControls": [
-  {"k":1,"label":"Feedback","key":"fb.amount"},
-  {"k":2,"label":"Tone","key":"filt.loop.lpHz"},
-  {"k":3,"label":"Mod Depth","key":"mod.depthMs"},
-  {"k":4,"label":"Mix","key":"mix"}
+  {"k":1,"label":"Time","key":"time.scale"},
+  {"k":2,"label":"Feedback","key":"fb.amount"},
+  {"k":3,"label":"Mix","key":"mix"}
  ],
  "actions": [
   {"key":"clear","label":"Clear","does":"ends the repeats: from the action's sample offset the old audio fades out over 20 ms under the current settings and ends (the load's fade, D-020); no value lands; a performance event, never automated, no history (RS-4.12, ADR-267 A1; SPEC §16.7)"}
