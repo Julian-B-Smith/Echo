@@ -1255,3 +1255,50 @@ the denied part of the first attempt); other work on the machine added to it. 1-
 the runs, harsher than the 20 – 114 that turned the old gate red. Across 80 REPORT figures (two suites × two rates ×
 cold / in flight × ten runs): CPU 18.9 – 38.3 ms (gate 100), wall up to 407.5 ms (ceiling 1000). The old wall rule
 would have gone red in every run. An earlier set at load 5 – 7 read 10 – 24 ms CPU.
+
+## D-047 — T-021: the factory bank, an init plus seven, as a proposal for the listen (the lead's record; D-028's size, D-042's one source)
+
+**The bank.** `factory()` in `core/include/echo/presets.h` returns the init and seven presets, in this order:
+slap, pingpong-dotted, dub-loop, chorus-line, wide-ms, tape-throw, runaway. `presets/echo-factory.json` is generated
+from it (D-042). Each preset starts from the init's values and changes only its listed keys. All seven are modify
+law, all curves lin, 3 – 4 labelled slots each. Every slot's home puts its offset at exactly 0, so a preset loads as
+its own values say and the macros move it from there. The voicing is the lead's. **The human picks the final set by
+listening (T-023)**; any rejected preset is replaced or dropped there.
+
+**Checks.** `presetFactoryBank` (A12) requires:
+- exactly these eight ids, in order;
+- every preset valid;
+- every binding's offset at its home exactly 0;
+- the engine's saved state, parsed back, bit-equal to the preset on every patch key.
+
+`presetFactoryStateSize` (A19) requires each saved text ≤ 2 KiB; the sizes are 460 – 465 B. `presetFactoryStereo`
+reports B408 for the bank and never gates it. Plants:
+- `presetPatchOfDropsKey` (product side, in `patchOf`);
+- `factoryHomeOffset` and `factoryLabelTypo` (product side, in `factory()`);
+- `presetStateOversized` (test side: no reachable preset can outgrow 2 KiB, since `stateSize` bounds any state at
+  616 B, so it pads the text; ROADMAP T-021 records this reading).
+
+**Critic (Opus, fresh context): FIX-THEN-SHIP, no HIGH.** Fixed:
+- **M1:** the check measured some state's size, not the preset's. A `patchOf` that dropped `fb.amount` passed the
+  whole suite. The check now parses the save back, and the new plant guards it.
+- **M2:** two detectors had no planted control; both are now planted.
+- **M5:** B408 for the bank is stated by a REPORT line. slap (110.0 / 116.6 ms, a −18.9 dB fold notch at 77 Hz) and
+  runaway (250 / 220 ms) sit in D-044's colouring zone, by voicing.
+- **L1:** `jsonValue` indexed a label array with −1 on an unvalidated typo (UB). It now writes the number, which
+  `readBank` refuses.
+- **L2, L3:** offsets are checked at the home exactly, and failures print `%.17g`.
+- **L7:** the admission rows list their own controls.
+
+**Revoiced from the critic's sound probes** (48 kHz, at the homes):
+- **wide-ms (M3):** bit-for-bit mono on a centred source, by D-044's design (S = 0, so Width moves nothing). Voicing
+  kept; the description says so. T-023's sources are to be heard in stereo.
+- **runaway (M4):** at fb 110 behind loop filters at 300 Hz / 3.5 kHz it fell for ~30 s. Now loop 120 Hz / 6 kHz,
+  fb 115, Feedback slot [−35, +5] at home 0.875. From a burst it rises from 1 s on (rms 0.117 → 0.168 at 20 s) and
+  reaches its ceiling plateau, 0.373, at ~75 s; bounded and finite throughout.
+- **dub-loop (L5):** fb 92 → 96, loop low cut 250 → 120 Hz, Feedback slot [−28, +4] at home 0.875 (its top is unity).
+  Per-repeat ratio 0.746 at 150 Hz and 0.882 at 700 Hz: a finite tail.
+
+**The lead's ruling:** the targets the lead set the implementer (runaway at its plateau by 20 s; dub-loop ≥ 0.9 per
+repeat) were voicing aims, not gates, and are not met. Rather than tune further by number, the two descriptions now
+say what the presets do, and the listen decides. L6 (chorus-line's coherent +3.2 dB peak, legal, as the dry path is
+never limited) is noted for gain staging at the listen.

@@ -11,6 +11,94 @@
    "macroLaw": "modify",
    "internal_defaults": {"mix": 30, "time.sync": "sync", "time.ms": 375, "time.div": "1/4", "time.offL": 0, "time.offR": 0, "time.change": "repitch", "time.law": "tape", "time.tempoMode": "glide", "time.glide": 0.3, "time.xfadeMs": 60, "fb.amount": 35, "route.mode": "stereo", "filt.in.on": "off", "filt.in.hpHz": 20, "filt.in.lpHz": 20000, "filt.loop.on": "on", "filt.loop.hpHz": 60, "filt.loop.lpHz": 9000, "filt.out.on": "off", "filt.out.hpHz": 20, "filt.out.lpHz": 20000, "mod.depthMs": 0, "mod.rateHz": 0.6, "mod.shape": "sine", "mod.spread": 0, "mod.seed": 1},
    "slots": []
+  },
+  {
+   "id": "slap",
+   "label": "Slap",
+   "description": "A short slapback: one or two quick repeats, a little width.",
+   "macroLaw": "modify",
+   "internal_defaults": {"mix": 28, "time.sync": "free", "time.ms": 110, "time.div": "1/4", "time.offL": 0, "time.offR": 6, "time.change": "repitch", "time.law": "tape", "time.tempoMode": "glide", "time.glide": 0.3, "time.xfadeMs": 60, "fb.amount": 8, "route.mode": "stereo", "filt.in.on": "off", "filt.in.hpHz": 20, "filt.in.lpHz": 20000, "filt.loop.on": "on", "filt.loop.hpHz": 120, "filt.loop.lpHz": 5500, "filt.out.on": "off", "filt.out.hpHz": 20, "filt.out.lpHz": 20000, "mod.depthMs": 0, "mod.rateHz": 0.6, "mod.shape": "sine", "mod.spread": 0, "mod.seed": 1},
+   "slots": [
+    {"slot": 1, "label": "Time", "home": 0.5, "bind": {"time.ms": [-40, 40]}},
+    {"slot": 2, "label": "Tone", "home": 0.5, "bind": {"filt.loop.lpHz": [-1, 1]}},
+    {"slot": 3, "label": "Body", "home": 0.5, "bind": {"filt.loop.hpHz": [-1, 1]}},
+    {"slot": 4, "label": "Width", "home": 0.5, "bind": {"time.offR": [-6, 6]}}
+   ]
+  },
+  {
+   "id": "pingpong-dotted",
+   "label": "Dotted Ping-Pong",
+   "description": "A synced dotted-eighth bouncing between the sides.",
+   "macroLaw": "modify",
+   "internal_defaults": {"mix": 32, "time.sync": "sync", "time.ms": 375, "time.div": "3/16", "time.offL": 0, "time.offR": 0, "time.change": "repitch", "time.law": "tape", "time.tempoMode": "glide", "time.glide": 0.3, "time.xfadeMs": 60, "fb.amount": 45, "route.mode": "pingpong", "filt.in.on": "off", "filt.in.hpHz": 20, "filt.in.lpHz": 20000, "filt.loop.on": "on", "filt.loop.hpHz": 150, "filt.loop.lpHz": 7000, "filt.out.on": "off", "filt.out.hpHz": 20, "filt.out.lpHz": 20000, "mod.depthMs": 0, "mod.rateHz": 0.4, "mod.shape": "sine", "mod.spread": 0, "mod.seed": 1},
+   "slots": [
+    {"slot": 1, "label": "Feedback", "home": 0.5, "bind": {"fb.amount": [-30, 30]}},
+    {"slot": 2, "label": "Tone", "home": 0.5, "bind": {"filt.loop.lpHz": [-1.5, 1.5]}},
+    {"slot": 3, "label": "Wobble", "home": 0, "bind": {"mod.depthMs": [0, 3]}}
+   ]
+  },
+  {
+   "id": "dub-loop",
+   "label": "Dub Loop",
+   "description": "A dark, synced dotted-quarter loop with long repeats; its Feedback macro takes it to unity.",
+   "macroLaw": "modify",
+   "internal_defaults": {"mix": 35, "time.sync": "sync", "time.ms": 375, "time.div": "3/8", "time.offL": 0, "time.offR": 0, "time.change": "repitch", "time.law": "tape", "time.tempoMode": "glide", "time.glide": 0.3, "time.xfadeMs": 60, "fb.amount": 96, "route.mode": "stereo", "filt.in.on": "off", "filt.in.hpHz": 20, "filt.in.lpHz": 20000, "filt.loop.on": "on", "filt.loop.hpHz": 120, "filt.loop.lpHz": 1800, "filt.out.on": "off", "filt.out.hpHz": 20, "filt.out.lpHz": 20000, "mod.depthMs": 0.6, "mod.rateHz": 0.3, "mod.shape": "drift", "mod.spread": 0, "mod.seed": 1},
+   "slots": [
+    {"slot": 1, "label": "Feedback", "home": 0.875, "bind": {"fb.amount": [-28, 4]}},
+    {"slot": 2, "label": "Darkness", "home": 0.5, "bind": {"filt.loop.lpHz": [1, -1]}},
+    {"slot": 3, "label": "Low Cut", "home": 0.5, "bind": {"filt.loop.hpHz": [-1, 1]}},
+    {"slot": 4, "label": "Wobble", "home": 0.25, "bind": {"mod.depthMs": [-0.6, 1.8]}}
+   ]
+  },
+  {
+   "id": "chorus-line",
+   "label": "Chorus Line",
+   "description": "A short modulated line, closer to a chorus than an echo.",
+   "macroLaw": "modify",
+   "internal_defaults": {"mix": 45, "time.sync": "free", "time.ms": 18, "time.div": "1/4", "time.offL": 0, "time.offR": 0, "time.change": "repitch", "time.law": "tape", "time.tempoMode": "glide", "time.glide": 0.3, "time.xfadeMs": 60, "fb.amount": 15, "route.mode": "stereo", "filt.in.on": "off", "filt.in.hpHz": 20, "filt.in.lpHz": 20000, "filt.loop.on": "on", "filt.loop.hpHz": 40, "filt.loop.lpHz": 12000, "filt.out.on": "off", "filt.out.hpHz": 20, "filt.out.lpHz": 20000, "mod.depthMs": 4, "mod.rateHz": 0.8, "mod.shape": "sine", "mod.spread": 100, "mod.seed": 1},
+   "slots": [
+    {"slot": 1, "label": "Depth", "home": 0.5, "bind": {"mod.depthMs": [-3, 3]}},
+    {"slot": 2, "label": "Rate", "home": 0.5, "bind": {"mod.rateHz": [-1, 1]}},
+    {"slot": 3, "label": "Feedback", "home": 0, "bind": {"fb.amount": [0, 40]}},
+    {"slot": 4, "label": "Time", "home": 0.5, "bind": {"time.ms": [-8, 8]}}
+   ]
+  },
+  {
+   "id": "wide-ms",
+   "label": "Wide M/S",
+   "description": "Mid/side repeats: on a stereo source the sides echo apart from the centre; a mono source stays centred.",
+   "macroLaw": "modify",
+   "internal_defaults": {"mix": 30, "time.sync": "free", "time.ms": 240, "time.div": "1/4", "time.offL": 0, "time.offR": 25, "time.change": "repitch", "time.law": "tape", "time.tempoMode": "glide", "time.glide": 0.3, "time.xfadeMs": 60, "fb.amount": 30, "route.mode": "midside", "filt.in.on": "off", "filt.in.hpHz": 20, "filt.in.lpHz": 20000, "filt.loop.on": "on", "filt.loop.hpHz": 200, "filt.loop.lpHz": 8000, "filt.out.on": "off", "filt.out.hpHz": 20, "filt.out.lpHz": 20000, "mod.depthMs": 0, "mod.rateHz": 0.6, "mod.shape": "sine", "mod.spread": 0, "mod.seed": 1},
+   "slots": [
+    {"slot": 1, "label": "Width", "home": 0.5, "bind": {"time.offR": [-20, 20]}},
+    {"slot": 2, "label": "Feedback", "home": 0.5, "bind": {"fb.amount": [-20, 20]}},
+    {"slot": 3, "label": "Tone", "home": 0.5, "bind": {"filt.loop.lpHz": [-1, 1]}}
+   ]
+  },
+  {
+   "id": "tape-throw",
+   "label": "Tape Throw",
+   "description": "A tape-style line: throw the time and the repeats bend in pitch.",
+   "macroLaw": "modify",
+   "internal_defaults": {"mix": 30, "time.sync": "free", "time.ms": 450, "time.div": "1/4", "time.offL": 0, "time.offR": 0, "time.change": "repitch", "time.law": "tape", "time.tempoMode": "glide", "time.glide": 0.8, "time.xfadeMs": 60, "fb.amount": 55, "route.mode": "stereo", "filt.in.on": "off", "filt.in.hpHz": 20, "filt.in.lpHz": 20000, "filt.loop.on": "on", "filt.loop.hpHz": 120, "filt.loop.lpHz": 4500, "filt.out.on": "off", "filt.out.hpHz": 20, "filt.out.lpHz": 20000, "mod.depthMs": 1.5, "mod.rateHz": 0.5, "mod.shape": "drift", "mod.spread": 40, "mod.seed": 1},
+   "slots": [
+    {"slot": 1, "label": "Throw", "home": 0, "bind": {"time.ms": [0, -300]}},
+    {"slot": 2, "label": "Glide", "home": 0.5, "bind": {"time.glide": [-0.6, 0.6]}},
+    {"slot": 3, "label": "Feedback", "home": 0.5, "bind": {"fb.amount": [-25, 25]}},
+    {"slot": 4, "label": "Tone", "home": 0.5, "bind": {"filt.loop.lpHz": [-1, 1]}}
+   ]
+  },
+  {
+   "id": "runaway",
+   "label": "Runaway",
+   "description": "Feedback past unity, held by the ceiling: it climbs slowly to a steady roar. An edge patch; ride it with care.",
+   "macroLaw": "modify",
+   "internal_defaults": {"mix": 30, "time.sync": "sync", "time.ms": 375, "time.div": "1/8", "time.offL": 0, "time.offR": -12, "time.change": "repitch", "time.law": "tape", "time.tempoMode": "glide", "time.glide": 0.3, "time.xfadeMs": 60, "fb.amount": 115, "route.mode": "stereo", "filt.in.on": "off", "filt.in.hpHz": 20, "filt.in.lpHz": 20000, "filt.loop.on": "on", "filt.loop.hpHz": 120, "filt.loop.lpHz": 6000, "filt.out.on": "off", "filt.out.hpHz": 20, "filt.out.lpHz": 20000, "mod.depthMs": 0, "mod.rateHz": 0.3, "mod.shape": "drift", "mod.spread": 0, "mod.seed": 1},
+   "slots": [
+    {"slot": 1, "label": "Feedback", "home": 0.875, "bind": {"fb.amount": [-35, 5]}},
+    {"slot": 2, "label": "Tone", "home": 0.5, "bind": {"filt.loop.lpHz": [-1, 1]}},
+    {"slot": 3, "label": "Drift", "home": 0, "bind": {"mod.depthMs": [0, 2]}}
+   ]
   }
  ]
 }

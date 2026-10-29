@@ -29,9 +29,11 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdio>
+#include <initializer_list>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "echo/engine.h"  // KeyValue, the load's input
@@ -135,7 +137,7 @@ inline state::Values resolve(const ModulePreset& p, const std::vector<double>& v
 inline std::vector<KeyValue> patchOf(const state::Values& ip) {
   std::vector<KeyValue> kv;
   for (int k = 0; k < kNumParams; ++k)
-    if (kParams[static_cast<std::size_t>(k)].morph != Morph::Device) kv.push_back({kParams[static_cast<std::size_t>(k)].key, ip[static_cast<std::size_t>(k)]});
+    if (kParams[static_cast<std::size_t>(k)].morph != Morph::Device && !(plant::presetPatchOfDropsKey && k == kFb)) kv.push_back({kParams[static_cast<std::size_t>(k)].key, ip[static_cast<std::size_t>(k)]});
   return kv;
 }
 
@@ -205,7 +207,9 @@ inline std::string jsonNumber(double v) {
 // A patch key's value in the file: a label for a labelled stepped key, else a number.
 inline std::string jsonValue(int k, double v) {
   const auto& d = kParams[static_cast<std::size_t>(k)];
-  if (d.stepped && !d.labels.empty()) return jsonString(d.labels[static_cast<std::size_t>(v)]);
+  // Bounds-safe: an unvalidated typo (step() answers -1) is written as the number,
+  // which readBank then refuses; indexing labels[-1] would be UB.
+  if (d.stepped && !d.labels.empty() && v >= 0 && v < static_cast<double>(d.labels.size())) return jsonString(d.labels[static_cast<std::size_t>(v)]);
   if (d.stepped) return std::to_string(static_cast<long long>(v));
   return jsonNumber(v);
 }
@@ -444,7 +448,7 @@ inline bool readBank(std::string_view text, std::vector<ModulePreset>& out, std:
   return true;
 }
 
-// ---- the factory bank (T-021 fills it; T-017 ships the init) ---------------------
+// ---- the factory bank (T-021, D-028: an init plus seven) --------------------------
 // The manifest's defaults, no macros (D-028: "an init plus 7").
 inline ModulePreset initPreset() {
   ModulePreset p;
@@ -455,7 +459,89 @@ inline ModulePreset initPreset() {
   for (int k = 0; k < kNumParams; ++k) p.defaults[static_cast<std::size_t>(k)] = kParams[static_cast<std::size_t>(k)].def;
   return p;
 }
-inline std::vector<ModulePreset> factory() { return {initPreset()}; }
+
+// A stepped key's index from its label, as the state text spells it. -1 (out of
+// range, so validate() refuses the preset) if the label is not the key's: a typo
+// must not silently become index 0.
+inline double step(int key, std::string_view label) {
+  double v = -1;
+  return state::parseValue(key, label, v) ? v : -1.0;
+}
+
+// One voicing: the init's values with only the listed keys changed, so a key left
+// out keeps the manifest default. Every slot's home puts its offset at EXACTLY 0
+// (home = -lo / (hi - lo), a binary-exact quarter in each range below): under
+// modify the preset sounds at load as its own values say, and the macros move it
+// away from there.
+inline ModulePreset voiced(std::string id, std::string label, std::string description,
+                           std::initializer_list<std::pair<int, double>> values, std::vector<Slot> slots) {
+  ModulePreset p = initPreset();
+  p.id = std::move(id);
+  p.label = std::move(label);
+  p.description = std::move(description);
+  for (const auto& [k, v] : values) p.defaults[static_cast<std::size_t>(k)] = v;
+  p.slots = std::move(slots);
+  return p;
+}
+
+// The seven, chosen to show the range (D-028); the human picks the final set by
+// listening (T-023). Hz keys are bound in octaves, so [-1, +1] is a doubling
+// either way.
+inline std::vector<ModulePreset> factory() {
+  const double on = 1, sync = step(kSync, "sync"), freeTime = step(kSync, "free");
+  std::vector<ModulePreset> bank{
+      initPreset(),
+      voiced("slap", "Slap", "A short slapback: one or two quick repeats, a little width.",
+             {{kSync, freeTime}, {kTimeMs, 110}, {kFb, 8}, {kMix, 28}, {kLoopOn, on}, {kLoopHp, 120}, {kLoopLp, 5500}, {kOffR, 6}},
+             {{"Time", {{kTimeMs, -40, 40}}, 0.5},
+              {"Tone", {{kLoopLp, -1, 1}}, 0.5},
+              {"Body", {{kLoopHp, -1, 1}}, 0.5},
+              {"Width", {{kOffR, -6, 6}}, 0.5}}),
+      voiced("pingpong-dotted", "Dotted Ping-Pong", "A synced dotted-eighth bouncing between the sides.",
+             {{kSync, sync}, {kDiv, step(kDiv, plant::factoryLabelTypo ? "3/16 " : "3/16")}, {kRoute, step(kRoute, "pingpong")}, {kFb, 45}, {kMix, 32}, {kLoopOn, on},
+              {kLoopHp, 150}, {kLoopLp, 7000}, {kModRate, 0.4}},
+             {{"Feedback", {{kFb, -30, 30}}, 0.5},
+              {"Tone", {{kLoopLp, -1.5, 1.5}}, 0.5},
+              {"Wobble", {{kModDepth, 0, 3}}, 0.0}}),
+      voiced("dub-loop", "Dub Loop", "A dark, synced dotted-quarter loop with long repeats; its Feedback macro takes it to unity.",
+             {{kSync, sync}, {kDiv, step(kDiv, "3/8")}, {kFb, 96}, {kMix, 35}, {kLoopOn, on}, {kLoopHp, 120}, {kLoopLp, 1800},
+              {kChange, step(kChange, "repitch")}, {kLaw, step(kLaw, "tape")}, {kModShape, step(kModShape, "drift")}, {kModDepth, 0.6},
+              {kModRate, 0.3}},
+             {{"Feedback", {{kFb, -28, 4}}, 0.875},
+              {"Darkness", {{kLoopLp, 1, -1}}, 0.5},  // lo > hi on purpose: turning the macro UP darkens
+              {"Low Cut", {{kLoopHp, -1, 1}}, 0.5},
+              {"Wobble", {{kModDepth, -0.6, 1.8}}, 0.25}}),
+      voiced("chorus-line", "Chorus Line", "A short modulated line, closer to a chorus than an echo.",
+             {{kSync, freeTime}, {kTimeMs, 18}, {kFb, 15}, {kMix, 45}, {kModShape, step(kModShape, "sine")}, {kModDepth, 4}, {kModRate, 0.8},
+              {kModSpread, 100}, {kLoopOn, on}, {kLoopHp, 40}, {kLoopLp, 12000}},
+             {{"Depth", {{kModDepth, -3, 3}}, 0.5},
+              {"Rate", {{kModRate, -1, 1}}, 0.5},
+              {"Feedback", {{kFb, 0, 40}}, 0.0},
+              {"Time", {{kTimeMs, -8, 8}}, 0.5}}),
+      voiced("wide-ms", "Wide M/S", "Mid/side repeats: on a stereo source the sides echo apart from the centre; a mono source stays centred.",
+             {{kSync, freeTime}, {kTimeMs, 240}, {kRoute, step(kRoute, "midside")}, {kOffR, 25}, {kFb, 30}, {kMix, 30}, {kLoopOn, on},
+              {kLoopHp, 200}, {kLoopLp, 8000}},
+             {{"Width", {{kOffR, -20, 20}}, 0.5},
+              {"Feedback", {{kFb, -20, 20}}, 0.5},
+              {"Tone", {{kLoopLp, -1, 1}}, 0.5}}),
+      voiced("tape-throw", "Tape Throw", "A tape-style line: throw the time and the repeats bend in pitch.",
+             {{kSync, freeTime}, {kTimeMs, 450}, {kChange, step(kChange, "repitch")}, {kLaw, step(kLaw, "tape")}, {kGlide, 0.8}, {kFb, 55},
+              {kMix, 30}, {kLoopOn, on}, {kLoopHp, 120}, {kLoopLp, 4500}, {kModShape, step(kModShape, "drift")}, {kModDepth, 1.5},
+              {kModRate, 0.5}, {kModSpread, 40}},
+             {{"Throw", {{kTimeMs, 0, -300}}, 0.0},  // one way only: the macro shortens the time, which is the throw
+              {"Glide", {{kGlide, -0.6, 0.6}}, 0.5},
+              {"Feedback", {{kFb, -25, 25}}, 0.5},
+              {"Tone", {{kLoopLp, -1, 1}}, 0.5}}),
+      voiced("runaway", "Runaway", "Feedback past unity, held by the ceiling: it climbs slowly to a steady roar. An edge patch; ride it with care.",
+             {{kSync, sync}, {kDiv, step(kDiv, "1/8")}, {kFb, 115}, {kMix, 30}, {kLoopOn, on}, {kLoopHp, 120}, {kLoopLp, 6000}, {kOffR, -12},
+              {kModShape, step(kModShape, "drift")}, {kModRate, 0.3}},
+             {{"Feedback", {{kFb, -35, 5}}, 0.875},
+              {"Tone", {{kLoopLp, -1, 1}}, 0.5},
+              {"Drift", {{kModDepth, 0, 2}}, 0.0}}),
+  };
+  if (plant::factoryHomeOffset) bank[3].slots[3].home = 0.2500001;
+  return bank;
+}
 
 }  // namespace echo::presets
 
