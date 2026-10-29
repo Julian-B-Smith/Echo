@@ -21,3 +21,5 @@ performance-budget.
 - [L0014](LIBRARY.md#L0014) — never normalise a detector by the render's own extreme; normalise by a declared bound (gates) · candidate
 - [L0015](LIBRARY.md#L0015) — check a PR's base before merging: a stacked PR merges into its base branch, not main (process) · candidate
 - [L0016](LIBRARY.md#L0016) — push only through a gate that reads the recorded verify exit (act.py push); a chained command pushed red (process) · candidate
+- [L0017](LIBRARY.md#L0017) — judge a timing gate on process CPU time, keep a loose wall ceiling, skip clock-only plants on CI (performance-budget, gates) · candidate
+- [L0018](LIBRARY.md#L0018) — a round trip passes any self-inverting law; pin each law at interior formula points (gates) · candidate
