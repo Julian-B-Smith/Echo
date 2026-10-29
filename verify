@@ -281,8 +281,8 @@ core_gate() {
       printf '%s\n' "$dis" | awk -v want="$2" '
         /^[0-9a-f]+ <.*>:$/ || /^[_A-Za-z].*:$/ {fn=$0}
         tolower($0) ~ /vfmadd|vfmsub|vfnmadd|fmadd|fmsub|fmla/ {
-          eng = (fn ~ /4echo/); pre = (fn ~ /7presets/)
-          if ((want=="engine" && eng) || (want=="caller" && !eng) || (want=="presets" && pre)) n++ }
+          eng = (fn ~ /4echo/); pre = (fn ~ /7presets/); par = (fn ~ /4echo(8fromNorm|6toNorm)E/)
+          if ((want=="engine" && eng) || (want=="caller" && !eng) || (want=="presets" && pre) || (want=="params" && par)) n++ }
         END {print n+0}'
     }
     if ! command -v objdump >/dev/null 2>&1 && ! command -v otool >/dev/null 2>&1; then
@@ -314,8 +314,8 @@ core_gate() {
       printf '%s\n' "$dis" | awk -v want="$2" '
         /^[0-9a-f]+ <.*>:$/ || /^[_A-Za-z].*:$/ {fn=$0}
         tolower($0) ~ /vfmadd|vfmsub|vfnmadd|fmadd|fmsub|fmla/ {
-          eng = (fn ~ /4echo/); pre = (fn ~ /7presets/)
-          if ((want=="engine" && eng) || (want=="caller" && !eng) || (want=="presets" && pre)) n++ }
+          eng = (fn ~ /4echo/); pre = (fn ~ /7presets/); par = (fn ~ /4echo(8fromNorm|6toNorm)E/)
+          if ((want=="engine" && eng) || (want=="caller" && !eng) || (want=="presets" && pre) || (want=="params" && par)) n++ }
         END {print n+0}'
     }
     pp="$(fused_in "$b/echo_presets_fpc" presets)"; pn="$(fused_in "$b/echo_presets_nopragma" presets)"
@@ -325,6 +325,18 @@ core_gate() {
       echo "fp-contract (presets.h): OK — echo::presets holds 0 fused ops with the pragma, $pn without"
     else
       echo "fp-contract (presets.h): NOT SEEN here — no fused op in echo::presets even without the pragma (this ISA/compiler did not contract it)"
+    fi
+    # echo/params.h's own pragma (T-022, critic M1): the normalised laws, called out of line by
+    # `echo_presets --norm` (the symbols are echo::toNorm / echo::fromNorm; nothing else of
+    # params.h is arithmetic). Same rule: 0 fused ops with the pragma, > 0 without.
+    local qp qn
+    qp="$(fused_in "$b/echo_presets_fpc" params)"; qn="$(fused_in "$b/echo_presets_nopragma" params)"
+    if [ "$qp" -gt 0 ]; then
+      echo "verify: core — fp-contract: echo::toNorm/fromNorm hold $qp fused op(s) with params.h's pragma: the pragma does not hold" >&2; ok=1
+    elif [ "$qn" -gt 0 ]; then
+      echo "fp-contract (params.h): OK — echo::toNorm/fromNorm hold 0 fused ops with the pragma, $qn without"
+    else
+      echo "fp-contract (params.h): NOT SEEN here — no fused op in echo::toNorm/fromNorm even without the pragma (this ISA/compiler did not contract them)"
     fi
   fi
   local cxx probe; cxx="$(command -v c++ || command -v g++ || command -v clang++)"

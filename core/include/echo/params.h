@@ -7,8 +7,10 @@
 // parameter handle.
 #pragma once
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -152,3 +154,108 @@ constexpr std::optional<int> paramIndex(std::string_view key) {
 }
 
 }  // namespace echo
+
+// ---- the normalised laws (ADR-203, SPEC §9; T-022) ----------------------------
+//
+// Every key maps [0, 1] onto its range and back, so horde can expose any of them
+// (module 1.0 bar row 16). NOTHING ON THE AUDIO THREAD CALLS THESE: they serve the
+// host's parameter surface and the face (docs/face.md). They are pure, allocate
+// nothing, and read only the table.
+//   lin   x = min + (max - min) v
+//   log   x = min (max/min)^v   (geometric; every log key has min > 0)
+//   io    dB = 48 (v - 1/2), so v = 1/2 is EXACTLY 0 dB (B435, intake/module-io-gain.md)
+//   step  v = index / (n - 1), back index = round(v (n - 1)), n = max - min + 1
+//         (poll ruling 2026-10-28: both ends exact; a stepped key is integer-valued)
+// Out of range clamps to the ends (+-inf too); NaN, in either direction, reads as the
+// key's DEFAULT, not its minimum (poll ruling 2026-10-28).
+// The ends are returned as the table's own min and max, not computed: min * pow(max/min, 1)
+// or min + (max - min) * 1 can miss max by an ulp, and "v = 1 is max" is contractual.
+// No fused multiply-add here either (the §Domain invariant); same scoping as engine.h,
+// at global scope, restored at the end of the file. ./verify's fused-op scan holds
+// echo::toNorm / echo::fromNorm to it (echo_presets_fpc vs _nopragma).
+#if !defined(ECHO_FP_PRAGMA_OFF)
+#if defined(__clang__)
+#pragma STDC FP_CONTRACT OFF
+#elif defined(__GNUC__)
+#pragma GCC push_options
+#pragma GCC optimize("fp-contract=off")
+#endif
+#endif
+
+namespace echo {
+
+// The display name and law as the host reads them. The two ADR-203 plants substitute
+// here, at the one read point, so production reads the constexpr table unchanged.
+inline std::string_view nameOf(int key) {
+  if (key < 0 || key >= kNumParams) return {};
+  if (plant::paramNoName && key == kOutLp) return {};
+  return kParams[static_cast<std::size_t>(key)].name;
+}
+inline std::string_view lawOf(int key) {
+  if (key < 0 || key >= kNumParams) return {};
+  if (plant::paramNoLaw && key == kXfadeMs) return {};
+  return kParams[static_cast<std::size_t>(key)].law;
+}
+
+namespace detail {
+constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
+// v clamped into [0, 1] (NaN is handled by the callers, before this).
+constexpr double unit(double v) { return !(v > 0.0) ? 0.0 : (v < 1.0 ? v : 1.0); }
+constexpr double within(double x, const ParamDef& p) { return !(x > p.min) ? p.min : (x < p.max ? x : p.max); }
+constexpr bool known(std::string_view law) { return law == "lin" || law == "log" || law == "io" || law == "step"; }
+}  // namespace detail
+
+// v in [0, 1] -> the key's value. An unknown law (or key) answers NaN, which no check passes.
+inline double fromNorm(int key, double v) {
+  if (key < 0 || key >= kNumParams) return detail::kNaN;
+  const ParamDef& p = kParams[static_cast<std::size_t>(key)];
+  const std::string_view law = lawOf(key);
+  if (!detail::known(law)) return detail::kNaN;
+  if (std::isnan(v)) return p.def;
+  v = detail::unit(v);
+  if (v <= 0.0) return p.min;
+  if (v >= 1.0) return p.max;
+  double x;
+  if (law == "lin" || (plant::logLawLinear && law == "log")) {
+    x = p.min + (p.max - p.min) * v;
+  } else if (law == "log") {
+    // normRoundTripOff: the exponent is nudged, so toNorm(fromNorm(v)) != v.
+    x = p.min * std::pow(p.max / p.min, plant::normRoundTripOff ? v * 0.999 : v);
+  } else if (law == "io") {
+    x = 48.0 * (v - 0.5);  // v = 1/2 -> exactly 0.0
+  } else if (plant::stepFloors) {
+    x = p.min + std::floor(v * (p.max - p.min) + 1e-9);  // stepFloors: a truncating step
+  } else {
+    x = p.min + std::round(v * (p.max - p.min));
+  }
+  return detail::within(x, p);
+}
+
+// The key's value -> v in [0, 1] (the value is clamped to the range first). A stepped
+// key's non-integer value is NOT snapped here: v is its fractional index, and fromNorm
+// rounds it back to a whole step.
+inline double toNorm(int key, double x) {
+  if (key < 0 || key >= kNumParams) return detail::kNaN;
+  const ParamDef& p = kParams[static_cast<std::size_t>(key)];
+  const std::string_view law = lawOf(key);
+  if (!detail::known(law)) return detail::kNaN;
+  if (std::isnan(x)) x = p.def;
+  x = detail::within(x, p);
+  if (x <= p.min) return 0.0;
+  if (x >= p.max) return 1.0;
+  double v;
+  if (law == "log" && !plant::logLawLinear) v = std::log(x / p.min) / std::log(p.max / p.min);
+  else if (law == "io") v = x / 48.0 + 0.5;
+  else v = (x - p.min) / (p.max - p.min);  // lin, and step: index / (n - 1)
+  return detail::unit(v);
+}
+
+}  // namespace echo
+
+#if !defined(ECHO_FP_PRAGMA_OFF)
+#if defined(__clang__)
+#pragma STDC FP_CONTRACT DEFAULT
+#elif defined(__GNUC__)
+#pragma GCC pop_options
+#endif
+#endif

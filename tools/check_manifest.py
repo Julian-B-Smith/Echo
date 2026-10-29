@@ -12,6 +12,9 @@ Usage: check_manifest.py <path to echo_manifest>
 Before trusting a clean comparison, the detector is proven on planted drifts
 (a default, a label, a missing key, a reordered pair): each must be reported,
 or the check itself is vacuous and exits red.
+
+Also (T-022): docs/face.md covers every key exactly once, with a keyboard order
+1 ... N and the fixedControls on the face in their declared order (face_problems).
 """
 import copy
 import json
@@ -60,6 +63,54 @@ def switch_problems(params):
     return out
 
 
+# T-022 (bar row 16): docs/face.md places every key once, on the face or in the expanded view, with a
+# keyboard-order number; the numbers are 1 ... N each once; the fixedControls sit on the face, in
+# their declared order, under their declared labels. A key table row reads
+# `| <keyboard> | `<key>` | <name> | ... |`; the "## ... face" / "## ... expanded" headings say where.
+FACE_ROW = re.compile(r"\|\s*(\d+)\s*\|\s*`([^`]+)`\s*\|\s*([^|]+?)\s*\|")
+
+
+def parse_face(text):
+    """[(section, keyboard, key, name)] from the face spec's tables; section is 'face' or 'expanded'."""
+    rows, section = [], None
+    for line in text.splitlines():
+        if line.startswith("## "):
+            low = line.lower()
+            section = "expanded" if "expanded" in low else ("face" if "face" in low else None)
+            continue
+        m = FACE_ROW.match(line)
+        if m and section:
+            rows.append((section, int(m.group(1)), m.group(2), m.group(3)))
+    return rows
+
+
+def face_problems(rows, spec_keys, fixed):
+    out = []
+    keys = [r[2] for r in rows]
+    for k in spec_keys:
+        if keys.count(k) == 0:
+            out.append(f"face.md: {k} is on neither the face nor the expanded view")
+        elif keys.count(k) > 1:
+            out.append(f"face.md: {k} appears {keys.count(k)} times")
+    for k in sorted(set(keys) - set(spec_keys)):
+        out.append(f"face.md: {k} is not a key in params.json")
+    nums = sorted(r[1] for r in rows)
+    if nums != list(range(1, len(spec_keys) + 1)):
+        out.append(f"face.md: the keyboard order is {nums}, not 1 ... {len(spec_keys)} each once")
+    last = 0
+    for fc in sorted(fixed, key=lambda f: f["k"]):
+        hit = [r for r in rows if r[2] == fc["key"]]
+        if not hit or hit[0][0] != "face":
+            out.append(f"face.md: fixed control {fc['key']} is not on the face")
+            continue
+        if hit[0][3] != fc["label"]:
+            out.append(f"face.md: fixed control {fc['key']} is labelled {hit[0][3]!r}, not {fc['label']!r}")
+        if hit[0][1] <= last:
+            out.append(f"face.md: fixed control {fc['key']} is out of its declared order")
+        last = hit[0][1]
+    return out
+
+
 def main():
     root = pathlib.Path(__file__).resolve().parent.parent
     spec = json.loads((root / "spec" / "params.json").read_text())["params"]
@@ -98,7 +149,25 @@ def main():
             print(f"check_manifest: the switch check did NOT see {what} (vacuous)", file=sys.stderr)
             return 1
 
-    problems = diff(spec, cpp) + switch_problems(full_spec)
+
+    # T-022: docs/face.md covers every key; the check first sees its plants (copies with one fault each).
+    spec_all = json.loads((root / "spec" / "params.json").read_text())
+    spec_keys = [x["key"] for x in spec_all["params"]]
+    fixed = spec_all["fixedControls"]
+    face_rows = parse_face((root / "docs" / "face.md").read_text())
+    face_plants = []
+    face_plants.append(("a key missing from the face spec", [r for r in face_rows if r[2] != "time.glide"]))
+    face_plants.append(("a key listed twice", face_rows + [face_rows[10]]))
+    face_plants.append(("an unknown key", face_rows + [("expanded", 30, "time.bogus", "Bogus")]))
+    face_plants.append(("a fixed control moved to the expanded view", [("expanded",) + r[1:] if r[2] == "mix" else r for r in face_rows]))
+    face_plants.append(("two fixed controls out of order", [(r[0], {5: 6, 6: 5}.get(r[1], r[1])) + r[2:] for r in face_rows]))
+    face_plants.append(("a gap in the keyboard order", [(r[0], 30 if r[1] == 29 else r[1]) + r[2:] for r in face_rows]))
+    for what, planted in face_plants:
+        if not face_problems(planted, spec_keys, fixed):
+            print(f"check_manifest: the face check did NOT see {what} (vacuous)", file=sys.stderr)
+            return 1
+
+    problems = diff(spec, cpp) + switch_problems(full_spec) + face_problems(face_rows, spec_keys, fixed)
     if spec_actions != cpp_actions:
         problems.append(f"actions: spec={spec_actions!r} c++={cpp_actions!r}")
     for line in problems:
@@ -107,7 +176,9 @@ def main():
         return 1
     nflip = sum(1 for x in full_spec if x.get("morph") == "jump")
     print(f"check_manifest: OK — {len(cpp)} keys and {len(cpp_actions)} action(s) equal spec/params.json; {len(plants)} planted drifts seen; "
-          f"all {nflip} flip keys declare an admitted switch (A11; 3 planted switch faults seen)")
+          f"all {nflip} flip keys declare an admitted switch (A11; 3 planted switch faults seen); "
+          f"docs/face.md places all {len(spec_keys)} keys once, keyboard 1-{len(spec_keys)}, the fixed four in order on the face "
+          f"({len(face_plants)} planted faults seen)")
     return 0
 
 

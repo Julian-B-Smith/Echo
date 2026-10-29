@@ -646,7 +646,13 @@ filings need the human's go-ahead each time.
 - **Out of scope:** horde's presets lab and its library size (B395/B409).
 
 ### T-022 — M3: The face and expanded view (bar row 16)
-- **Status:** open (Echo specifies, horde's workshop draws, D-028).
+- **Status:** in progress 2026-10-28 (Echo specifies, horde's workshop draws, D-028; branch stacked
+  on T-021's, PR #29).
+- **Ruled by poll 2026-10-28:** (1) a stepped key's normalised law is v = index / (n − 1), and back
+  index = round(v · (n − 1)), so both ends are exact. (2) The face carries horde's fixed four
+  (Feedback, Tone, Mod Depth, Mix), time (Time, or Division when synced, with its Sync switch) and
+  the Routing switch; everything else is in the expanded view. The law check runs inside the core
+  suite, so `./verify` runs it with no edit to `./verify`.
 - **Scope:** `docs/face.md`: which keys sit on the face and which in the
   expanded view, their grouping and order, a keyboard order; the ADR-203 check that every
   key has a display name and a normalised law that maps [0, 1] onto its range and back

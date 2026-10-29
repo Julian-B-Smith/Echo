@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <functional>
+#include <span>
 #include <string_view>
 #include <cstring>
 #include <clocale>
@@ -55,6 +56,7 @@ constexpr double kTapeSamples = 0.01;      // tapeLaw: vs the full-rate tape mod
 constexpr double kTapeCents = 2.5;         // tapeLaw: speed, cents
 constexpr double kRepitchCents = 1.0;      // repitchCents: output pitch vs 1 - dD/dt
 constexpr double kCurveRel = 1e-12;        // presetCurves: closed form, relative
+constexpr double kLawRoundTrip = 1e-12;    // paramLaws: toNorm(fromNorm(v)) vs v, and fromNorm(toNorm(x)) vs x as a fraction of the range
 constexpr double kClearFade = 1e-12;       // clearFade, clearLiveWet: vs the no-Clear output x the ramp
 }  // namespace tol
 
@@ -1614,6 +1616,124 @@ bool abiParamClasses(Detail& d) {
       const auto ca = echo::oq33Class(a), cb = echo::oq33Class(b);
       REQUIRE(a == b || ca.kind != cb.kind || ca.participation != cb.participation, "two local classes share one OQ #33 pair");
     }
+  return true;
+}
+
+// ADR-203 (module 1.0 bar row 16, T-022): every key has a display name and a
+// normalised law that maps [0, 1] onto its range and back. Exact where the law is
+// exact (both ends, io's centre, every stepped index), tight where it is
+// transcendental: kLawRoundTrip = 1e-12 is ~4 orders above the double rounding of
+// pow + log (about 1e-16 relative) and ~9 below any slip a human could hear or a
+// plausible wrong law could hide in.
+// The table-shape detectors, over any span of ParamDefs so the suite can feed them a
+// tampered copy (critic T-022 M3): each clause below has a plant that breaks exactly it.
+bool lawShape(std::span<const echo::ParamDef> ps, Detail& d) {
+  for (const auto& p : ps) {
+    const std::string key(p.key);
+    const std::string_view law = p.law;
+    REQUIRE((law == "step") == p.stepped, "%s: law %.*s but the key is %s", key.c_str(), static_cast<int>(law.size()), law.data(),
+            p.stepped ? "stepped" : "a scalar");
+    REQUIRE(law != "log" || p.min > 0, "%s: a log law needs min > 0, min is %g", key.c_str(), p.min);
+    REQUIRE(law != "io" || (p.min == -24 && p.max == 24 && p.unit == "dB"), "%s: io is the +-24 dB law, this runs %g ... %g", key.c_str(),
+            p.min, p.max);
+    REQUIRE(p.min < p.max, "%s: empty range %g ... %g", key.c_str(), p.min, p.max);
+    REQUIRE(!p.stepped || (p.min == std::round(p.min) && p.max == std::round(p.max)), "%s: a stepped key's ends are not whole (%g ... %g)",
+            key.c_str(), p.min, p.max);
+  }
+  return true;
+}
+
+bool paramLaws(Detail& d) {
+  using namespace echo;
+  // Names and laws as the host reads them (nameOf / lawOf are where the two ADR-203 plants substitute).
+  for (int k = 0; k < kNumParams; ++k) {
+    const std::string key(kParams[static_cast<std::size_t>(k)].key);
+    const std::string_view law = lawOf(k);
+    REQUIRE(!nameOf(k).empty(), "%s has no display name", key.c_str());
+    REQUIRE(law == "lin" || law == "log" || law == "io" || law == "step", "%s has no normalised law (reads \"%.*s\")", key.c_str(),
+            static_cast<int>(law.size()), law.data());
+  }
+  // The table's shape: once on the real table (a tampered copy when a test-side plant is up).
+  std::vector<ParamDef> table(kParams.begin(), kParams.end());
+  if (plant::shapeStepLawLin) table[kSync].law = "lin";
+  if (plant::shapeLogMinZero) table[kTimeMs].min = 0;
+  if (plant::shapeIoRange) table[kInGain].min = -12, table[kInGain].max = 12;
+  if (plant::shapeEmptyRange) table[kMix].max = table[kMix].min;
+  if (plant::shapeStepFraction) table[kDiv].max = 21.5;
+  if (!lawShape(table, d)) return false;
+
+  const auto closeTo = [](double a, double b, double rel) { return std::fabs(a - b) <= rel * std::max(std::fabs(a), std::fabs(b)); };
+  for (int k = 0; k < kNumParams; ++k) {
+    const ParamDef& p = kParams[static_cast<std::size_t>(k)];
+    const std::string key(p.key);
+    const std::string_view law = lawOf(k);
+    const double inf = std::numeric_limits<double>::infinity(), nan = std::numeric_limits<double>::quiet_NaN();
+
+    REQUIRE(fromNorm(k, 0.0) == p.min, "%s: fromNorm(0) = %.17g, not min %.17g", key.c_str(), fromNorm(k, 0.0), p.min);
+    REQUIRE(fromNorm(k, 1.0) == p.max, "%s: fromNorm(1) = %.17g, not max %.17g", key.c_str(), fromNorm(k, 1.0), p.max);
+    REQUIRE(toNorm(k, p.min) == 0.0 && toNorm(k, p.max) == 1.0, "%s: toNorm does not map min to 0 and max to 1", key.c_str());
+    if (law == "io") REQUIRE(fromNorm(k, 0.5) == 0.0, "%s: fromNorm(0.5) = %.17g dB, not exactly 0", key.c_str(), fromNorm(k, 0.5));
+
+    // Out of range clamps to the ends; NaN reads as the default (poll 2026-10-28).
+    REQUIRE(fromNorm(k, -0.5) == p.min && fromNorm(k, -inf) == p.min, "%s: v below 0 does not clamp to min", key.c_str());
+    REQUIRE(fromNorm(k, 1.5) == p.max && fromNorm(k, inf) == p.max, "%s: v above 1 does not clamp to max", key.c_str());
+    REQUIRE(fromNorm(k, nan) == p.def, "%s: fromNorm(NaN) = %.17g, not the default %g", key.c_str(), fromNorm(k, nan), p.def);
+    REQUIRE(toNorm(k, p.min - 1) == 0.0 && toNorm(k, -inf) == 0.0, "%s: x below min does not clamp to 0", key.c_str());
+    REQUIRE(toNorm(k, p.max + 1) == 1.0 && toNorm(k, inf) == 1.0, "%s: x above max does not clamp to 1", key.c_str());
+    REQUIRE(toNorm(k, nan) == toNorm(k, p.def), "%s: toNorm(NaN) = %.17g, not toNorm(default) = %.17g", key.c_str(), toNorm(k, nan),
+            toNorm(k, p.def));
+
+    // The declared law, not just a law that inverts itself: an interior point against each formula (critic T-022 H1).
+    if (law == "lin") {
+      const double mid = (p.min + p.max) / 2;
+      REQUIRE(std::fabs(fromNorm(k, 0.5) - mid) <= tol::kLawRoundTrip * (p.max - p.min), "%s: lin fromNorm(0.5) = %.17g, not the midpoint %.17g",
+              key.c_str(), fromNorm(k, 0.5), mid);
+    } else if (law == "log") {
+      const double geo = std::sqrt(p.min * p.max);
+      REQUIRE(closeTo(fromNorm(k, 0.5), geo, tol::kLawRoundTrip), "%s: log fromNorm(0.5) = %.17g, not the geometric mean %.17g", key.c_str(),
+              fromNorm(k, 0.5), geo);
+    } else if (law == "io") {
+      REQUIRE(fromNorm(k, 0.25) == -12.0 && fromNorm(k, 0.75) == 12.0, "%s: io fromNorm(0.25, 0.75) = %.17g, %.17g, not -12, 12", key.c_str(),
+              fromNorm(k, 0.25), fromNorm(k, 0.75));
+    } else {
+      const double n1 = p.max - p.min;  // n - 1
+      for (double i : {0.0, std::floor((n1 - 1) / 2), n1 - 1}) {
+        REQUIRE(fromNorm(k, (i + 0.4) / n1) == p.min + i, "%s: step fromNorm((%g + 0.4)/(n-1)) = %.17g, not index %g", key.c_str(), i,
+                fromNorm(k, (i + 0.4) / n1), i);
+        REQUIRE(fromNorm(k, (i + 0.6) / n1) == p.min + i + 1, "%s: step fromNorm((%g + 0.6)/(n-1)) = %.17g, not index %g", key.c_str(), i,
+                fromNorm(k, (i + 0.6) / n1), i + 1);
+      }
+    }
+
+    // Monotone non-decreasing, inside the range, over a fine grid; the round trip v -> x -> v.
+    double prev = p.min;
+    for (int i = 0; i <= 1000; ++i) {
+      const double v = i / 1000.0, x = fromNorm(k, v);
+      REQUIRE(x >= p.min && x <= p.max, "%s: fromNorm(%g) = %.17g leaves [min, max]", key.c_str(), v, x);
+      REQUIRE(x >= prev, "%s: fromNorm falls at v = %g (%.17g after %.17g)", key.c_str(), v, x, prev);
+      prev = x;
+      if (!p.stepped) {
+        const double back = toNorm(k, x);
+        REQUIRE(std::fabs(back - v) <= tol::kLawRoundTrip, "%s: toNorm(fromNorm(%g)) = %.17g, off by %.3g", key.c_str(), v, back,
+                std::fabs(back - v));
+      } else {
+        REQUIRE(x == std::round(x), "%s: fromNorm(%g) = %.17g is not an integer", key.c_str(), v, x);
+      }
+    }
+    // x -> v -> x at min, default, max (continuous keys), as a fraction of the range.
+    if (!p.stepped)
+      for (double x : {p.min, p.def, p.max}) {
+        const double back = fromNorm(k, toNorm(k, x));
+        REQUIRE(std::fabs(back - x) <= tol::kLawRoundTrip * (p.max - p.min), "%s: fromNorm(toNorm(%.17g)) = %.17g", key.c_str(), x, back);
+      }
+    // Stepped: every index returns to itself exactly, and v = index / (n - 1).
+    if (p.stepped)
+      for (double i = p.min; i <= p.max; i += 1.0) {
+        const double v = toNorm(k, i);
+        REQUIRE(v == (i - p.min) / (p.max - p.min), "%s: toNorm(%g) = %.17g is not index / (n - 1)", key.c_str(), i, v);
+        REQUIRE(fromNorm(k, v) == i, "%s: index %g comes back as %.17g", key.c_str(), i, fromNorm(k, v));
+      }
+  }
   return true;
 }
 
@@ -3182,6 +3302,10 @@ const std::vector<Check> kChecks = {
      b408Controls, {"foldScaleSlip", "foldNotchUnsmoothed", "foldOctaveNarrow"}},
     {"B408 colouring flag: stereo mode, 0 < |tL - tR| < 40 ms (whole us); stereo offsets comb, ping-pong and mid/side offsets do not", b408Zone,
      {"zoneAnyMode", "zoneAtEqual"}},
+    // ---- M3 B4, T-022 ----
+    {"ADR-203: every key has a display name and a normalised law mapping [0, 1] onto its range and back (ends exact, io centre 0 dB, stepped index/(n-1))",
+     paramLaws, {"paramNoLaw", "paramNoName", "normRoundTripOff", "logLawLinear", "stepFloors", "shapeStepLawLin", "shapeLogMinZero",
+      "shapeIoRange", "shapeEmptyRange", "shapeStepFraction"}},
 };
 
 #ifdef ECHO_PLANTS
@@ -3236,6 +3360,9 @@ bool* plantFlag(std::string_view n) {
       {"pingpongInvertsR", &pingpongInvertsR},
       {"presetStateOversized", &presetStateOversized}, {"presetPatchOfDropsKey", &presetPatchOfDropsKey}, {"factoryHomeOffset", &factoryHomeOffset},
       {"factoryLabelTypo", &factoryLabelTypo},
+      {"paramNoLaw", &paramNoLaw}, {"paramNoName", &paramNoName}, {"normRoundTripOff", &normRoundTripOff},
+      {"logLawLinear", &logLawLinear}, {"stepFloors", &stepFloors}, {"shapeStepLawLin", &shapeStepLawLin}, {"shapeLogMinZero", &shapeLogMinZero},
+      {"shapeIoRange", &shapeIoRange}, {"shapeEmptyRange", &shapeEmptyRange}, {"shapeStepFraction", &shapeStepFraction},
   };
   for (const auto& p : table)
     if (n == p.n) return p.f;
@@ -3404,7 +3531,9 @@ int main(int argc, char** argv) {
                         "presetResolveMutates", "presetLogModifyAccepted",
                         "resetKeepsModPhase", "dryLate", "monoSum", "selfStart", "b265HoodHalved",
                         "stereoInvertsR", "pingpongBothLines", "foldScaleSlip", "foldOctaveNarrow", "foldNotchUnsmoothed",
-                        "zoneAnyMode", "zoneAtEqual", "pingpongInvertsR", "presetStateOversized", "presetPatchOfDropsKey", "factoryHomeOffset", "factoryLabelTypo"}) {
+                        "zoneAnyMode", "zoneAtEqual", "pingpongInvertsR", "presetStateOversized", "presetPatchOfDropsKey", "factoryHomeOffset", "factoryLabelTypo",
+                        "paramNoLaw", "paramNoName", "normRoundTripOff", "logLawLinear", "stepFloors", "shapeStepLawLin", "shapeLogMinZero",
+                        "shapeIoRange", "shapeEmptyRange", "shapeStepFraction"}) {
     bool guarded = false;
     for (const auto& c : kChecks)
       for (const char* p : c.plants) guarded = guarded || std::string_view(p) == n;

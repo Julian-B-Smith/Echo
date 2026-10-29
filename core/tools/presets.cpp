@@ -17,8 +17,19 @@ int main(int argc, char** argv) {
     std::printf("%.17g\n", acc);
     return 0;
   }
+  // --norm: echo::toNorm / fromNorm, called OUT OF LINE (through volatile pointers, so the
+  // compiler keeps their symbols) over every key; the same probe for params.h's pragma (T-022).
+  if (argc > 1 && std::string_view(argv[1]) == "--norm") {
+    double (*volatile to)(int, double) = echo::toNorm;
+    double (*volatile from)(int, double) = echo::fromNorm;
+    double acc = 0.0;
+    for (int k = 0; k < echo::kNumParams; ++k)
+      for (int i = 0; i <= 100; ++i) acc = acc * 1.0000001 + from(k, i / 100.0) + to(k, echo::kParams[static_cast<std::size_t>(k)].max * i / 100.0);
+    std::printf("%.17g\n", acc);
+    return 0;
+  }
   if (argc < 2 || std::string_view(argv[1]) != "--json") {
-    std::fprintf(stderr, "usage: echo_presets --json | --resolve\n");
+    std::fprintf(stderr, "usage: echo_presets --json | --resolve | --norm\n");
     return 2;
   }
   const auto bank = echo::presets::factory();

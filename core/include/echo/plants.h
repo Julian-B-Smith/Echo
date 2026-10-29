@@ -186,6 +186,17 @@ ECHO_PLANT(presetStateOversized) // TEST-SIDE: one factory preset's saved text i
 ECHO_PLANT(presetPatchOfDropsKey) // patchOf leaves fb.amount out of the load: the engine keeps its default (critic T-021 M1)
 ECHO_PLANT(factoryHomeOffset)    // dub-loop's Wobble home is nudged off its exact 0.25: the preset no longer loads as its own values (critic T-021 M2)
 ECHO_PLANT(factoryLabelTypo)     // pingpong-dotted's division label is "3/16 ": step() answers -1 and validate() must refuse it (critic T-021 M2)
+// ---- M3, B4 (T-022: the face and the normalised laws, ADR-203) ----
+ECHO_PLANT(paramNoLaw)           // time.xfadeMs's law reads as empty: a key with no normalised law (read at params.h lawOf)
+ECHO_PLANT(paramNoName)          // filt.out.lpHz's display name reads as empty (read at params.h nameOf)
+ECHO_PLANT(normRoundTripOff)     // fromNorm's log law nudges its exponent by 0.1 %: toNorm(fromNorm(v)) != v
+ECHO_PLANT(logLawLinear)         // the log law is computed as lin in BOTH directions: the round trip still passes (critic T-022 H1)
+ECHO_PLANT(stepFloors)           // a stepped key's fromNorm floors (+1e-9) instead of rounding (critic T-022 H1)
+ECHO_PLANT(shapeStepLawLin)      // TEST-SIDE: a stepped key (time.sync) in a tampered copy of the table has law lin (critic T-022 M3)
+ECHO_PLANT(shapeLogMinZero)      // TEST-SIDE: a log key (time.ms) has min 0
+ECHO_PLANT(shapeIoRange)         // TEST-SIDE: an io key (io.inGain) runs -12 ... 12 dB
+ECHO_PLANT(shapeEmptyRange)      // TEST-SIDE: a key (mix) has min == max
+ECHO_PLANT(shapeStepFraction)    // TEST-SIDE: a stepped key (time.div) has a fractional max
 }  // namespace echo::plant
 
 #undef ECHO_PLANT

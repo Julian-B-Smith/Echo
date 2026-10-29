@@ -116,16 +116,9 @@ std::vector<Cell> cells() {
 }
 
 // Corner B for the morph row: every continuous (morphing) key three quarters of
-// the way along its own law (lin, or geometric for log), stepped and Device keys
-// left alone, so the row is pure blending with no flips (D-045).
-double alongLaw(const echo::ParamDef& p, double x) {
-  if (p.law == "log") return p.min * std::pow(p.max / p.min, x);
-  return p.min + (p.max - p.min) * x;
-}
-double lawPos(const echo::ParamDef& p, double v) {
-  if (p.law == "log") return std::log(v / p.min) / std::log(p.max / p.min);
-  return (v - p.min) / (p.max - p.min);
-}
+// the way along its own law (echo::fromNorm / toNorm, the one implementation:
+// T-022), stepped and Device keys left alone, so the row is pure blending with no
+// flips (D-045).
 
 struct Stim {
   const char* name;
@@ -173,7 +166,7 @@ double runCell(const Cell& c, const Stim& st, double sr, long warm, long timed, 
     for (int i = 0; i < echo::kNumParams; ++i) {
       const auto& p = echo::kParams[static_cast<std::size_t>(i)];
       if (p.morph != echo::Morph::Continuous || p.stepped || (c.move == Move::RepitchSineMorph && i == hT)) continue;
-      morph.push_back({i, lawPos(p, e->getParam(i))});
+      morph.push_back({i, echo::toNorm(i, e->getParam(i))});
     }
   std::vector<int> watched;  // the keys this row moves: their stored values are the evidence
   if (c.move == Move::RepitchSine || c.move == Move::XfadeRetarget || c.move == Move::TimeFullRange || c.move == Move::RepitchSineMorph)
@@ -213,7 +206,7 @@ double runCell(const Cell& c, const Stim& st, double sr, long warm, long timed, 
     }
     if (!morph.empty()) {
       const double x = 0.5 - 0.5 * std::cos(2 * kPi * t);
-      for (const auto& [h, a] : morph) e->setParam(h, alongLaw(echo::kParams[static_cast<std::size_t>(h)], a + x * (0.75 - a)));
+      for (const auto& [h, a] : morph) e->setParam(h, echo::fromNorm(h, a + x * (0.75 - a)));
     }
     e->process(st.L.data() + pos, st.R.data() + pos, oL.data(), oR.data(), n, 120.0);
     if (pos >= warm) {
