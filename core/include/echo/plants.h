@@ -181,6 +181,11 @@ ECHO_PLANT(foldOctaveNarrow)     // TEST-SIDE: the octave bands are half an octa
 ECHO_PLANT(foldNotchUnsmoothed)  // TEST-SIDE: the notch search reads one raw bin, not the 1/3 octave (D-010's rejected raw minimum)
 ECHO_PLANT(zoneAnyMode)          // TEST-SIDE: the colouring flag is raised in every mode (the rule before D-044)
 ECHO_PLANT(zoneAtEqual)          // TEST-SIDE: the colouring flag is raised at equal times too
+// ---- M3, B4 (T-021: the factory bank) ----
+ECHO_PLANT(presetStateOversized) // TEST-SIDE: one factory preset's saved text is padded past 2 KiB (A19 over the bank)
+ECHO_PLANT(presetPatchOfDropsKey) // patchOf leaves fb.amount out of the load: the engine keeps its default (critic T-021 M1)
+ECHO_PLANT(factoryHomeOffset)    // dub-loop's Wobble home is nudged off its exact 0.25: the preset no longer loads as its own values (critic T-021 M2)
+ECHO_PLANT(factoryLabelTypo)     // pingpong-dotted's division label is "3/16 ": step() answers -1 and validate() must refuse it (critic T-021 M2)
 }  // namespace echo::plant
 
 #undef ECHO_PLANT

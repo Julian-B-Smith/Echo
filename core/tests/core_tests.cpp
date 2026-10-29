@@ -2346,7 +2346,7 @@ bool clearA23(Detail& d) {
 namespace P = echo::presets;
 P::Binding bnd(const char* key, double lo, double hi, P::Curve c = P::Curve::Lin) { return {*echo::paramIndex(key), lo, hi, c}; }
 
-// Fixtures exercising the whole model (T-021 adds the factory seven): a full
+// Fixtures exercising the whole model (the factory seven are checked in presetFactoryBank): a full
 // 8-slot modify preset with exp curves, two slots on one key (contributions add)
 // and Hz keys (octaves); and a set-law preset with a log curve and a falling range.
 P::ModulePreset richModify() {
@@ -2574,9 +2574,110 @@ bool presetA13(Detail& d) {
   return true;
 }
 
+// The factory bank (T-021, D-028): exactly the init plus seven, in this order. The ids
+// are the contract a dropped preset breaks.
+const char* const kFactoryIds[] = {"init", "slap", "pingpong-dotted", "dub-loop", "chorus-line", "wide-ms", "tape-throw", "runaway"};
+
+// A preset loaded into a prepared engine the way a host loads it (patchOf of its
+// resolve at the homes), and the state that engine then saves (SPEC §16.2).
+struct FactoryLoad {
+  echo::state::Values at{};
+  std::string text;
+  bool loaded = false;
+};
+FactoryLoad loadFactory(const P::ModulePreset& p) {
+  FactoryLoad f;
+  f.at = P::resolve(p, {});
+  auto e = mk({});
+  const auto kv = P::patchOf(f.at);
+  f.loaded = e->loadState(std::span<const echo::KeyValue>(kv.data(), kv.size()));
+  f.text = saveText(*e);
+  return f;
+}
+
+// A12 over the bank: each factory preset is valid, has its homes at offset exactly 0, and
+// a host that loads it at those homes gets the preset's OWN values (read back from the
+// engine's saved state, not from the resolver the load started from).
+bool presetFactoryBank(Detail& d) {
+  const auto bank = P::factory();
+  REQUIRE(bank.size() == 8, "the factory bank holds %zu presets, not the init plus seven", bank.size());
+  std::string why;
+  for (std::size_t i = 0; i < bank.size(); ++i) {
+    const auto& p = bank[i];
+    REQUIRE(p.id == kFactoryIds[i], "factory preset %zu is `%s`, not `%s`", i, p.id.c_str(), kFactoryIds[i]);
+    REQUIRE(P::validate(p, &why), "%s was refused: %s", p.id.c_str(), why.c_str());
+    REQUIRE(p.law == P::Law::Modify && p.slots.size() <= static_cast<std::size_t>(P::kMaxSlots) && (i == 0) == p.slots.empty(),
+            "%s: the init has no macros, the seven are modify with 1 - 8", p.id.c_str());
+    // The voicing's rule: every home puts its offset at exactly 0. Per binding, so an offset
+    // that the key's range would clamp away at the resolve cannot hide behind the clamp.
+    for (const auto& s : p.slots)
+      for (const auto& b : s.bind)
+        REQUIRE(P::shape(b.curve, b.lo, b.hi, s.home) == 0.0, "%s, slot `%s`: the offset at its home is %.17g, not 0", p.id.c_str(), s.label.c_str(),
+                P::shape(b.curve, b.lo, b.hi, s.home));
+    const auto f = loadFactory(p);
+    REQUIRE(f.loaded, "%s: the engine refused the load", p.id.c_str());
+    for (int k = 0; k < echo::kNumParams; ++k) {
+      const auto u = static_cast<std::size_t>(k);
+      REQUIRE(f.at[u] == p.defaults[u], "%s: at its homes %s resolves to %.17g, its internal value is %.17g", p.id.c_str(), echo::kParams[u].key.data(), f.at[u],
+              p.defaults[u]);
+    }
+    echo::state::Values saved{};
+    const char* swhy = "";
+    REQUIRE(echo::state::parse(f.text, saved, &swhy), "%s: the engine's saved state does not parse (%s)", p.id.c_str(), swhy);
+    for (int k = 0; k < echo::kNumParams; ++k) {
+      const auto u = static_cast<std::size_t>(k);
+      if (echo::kParams[u].morph == echo::Morph::Device) continue;  // the Device keys are the host's, not the preset's (RS-4.5)
+      REQUIRE(saved[u] == p.defaults[u], "%s: the saved state's %s is %.17g, the preset's is %.17g", p.id.c_str(), echo::kParams[u].key.data(), saved[u],
+              p.defaults[u]);
+    }
+  }
+  return true;
+}
+
+// A19 over the bank (D-039): every factory preset's saved state fits 2 KiB. The sizes vary
+// with the value text (bounded, not fixed-width); stateSize's worst case bounds any preset.
+bool presetFactoryStateSize(Detail& d) {
+  const auto bank = P::factory();
+  std::size_t largest = 0;
+  std::string sizes;
+  for (std::size_t i = 0; i < bank.size(); ++i) {
+    const auto& p = bank[i];
+    auto f = loadFactory(p);
+    REQUIRE(f.loaded, "%s: the engine refused the load", p.id.c_str());
+    // TEST-SIDE plant: the saved text grows past the budget, as a preset whose state outgrew it would.
+    if (echo::plant::presetStateOversized && i + 1 == bank.size()) f.text.resize(echo::state::kMaxBytes + 1, ' ');
+    REQUIRE(!f.text.empty() && f.text.size() <= echo::state::kMaxBytes, "%s: the saved state is %zu bytes (budget %zu)", p.id.c_str(), f.text.size(),
+            echo::state::kMaxBytes);
+    largest = std::max(largest, f.text.size());
+    sizes += (i ? ", " : "") + p.id + " " + std::to_string(f.text.size());
+  }
+  std::printf("  REPORT factory state sizes (B, budget 2048): %s; largest %zu\n", sizes.c_str(), largest);
+  return true;
+}
+
+// B408 for the bank, STATED not gated (M5): each preset's two line times as loaded, the
+// colouring flag (D-044) and the fold's worst 1/3-octave point on a centred (mono)
+// source, through the same renderer and metric the stereo report uses (fold.h).
+bool presetFactoryStereo(Detail& d) {
+  for (const auto& p : P::factory()) {
+    echo::IrPatch patch{};
+    const auto at = P::resolve(p, {});
+    for (std::size_t k = 0; k < patch.size(); ++k) patch[k] = at[k];
+    const auto t = fold::take(patch, echo::IrInput::Mono, kSr, -1, std::int64_t{1} << 19);
+    REQUIRE(t.ok, "%s: the renderer refused the patch", p.id.c_str());
+    const int mode = static_cast<int>(at[echo::kRoute]);
+    const auto w = fold::worstNotch(fold::spectra(t.L, t.R, kSr, t.info.restAt > 0 ? static_cast<std::size_t>(t.info.restAt) : 0));
+    std::printf("  REPORT B408 %-15s %-8s tL %.4f s tR %.4f s colouring %-3s worst 1/3 oct %.2f dB at %.0f Hz (centred source%s)\n", p.id.c_str(),
+                echo::labels::kRoute[static_cast<std::size_t>(mode)].data(), t.info.times[0], t.info.times[1],
+                fold::colouringZone(mode, t.info.times[0], t.info.times[1]) ? "YES" : "no", fold::db(w.rho), w.hz,
+                t.info.tail >= echo::kInfiniteTail ? ", tail capped at 2^19 samples" : "");
+  }
+  return true;
+}
+
 // ---- M3 B3, T-018: the admission self-test's new checks (contract §2.2 rows; D-043) ----
 
-// A stress patch (no factory stress preset exists yet; T-021): past-unity
+// A stress patch, harsher than the factory's edge patch `runaway` (deep fast mod, every filter on): past-unity
 // feedback, ping-pong, the tape law, deep fast SINE modulation (its phase is
 // the running state rest holds, so A2 can see a reset that skips it), every
 // filter on.
@@ -3060,6 +3161,11 @@ const std::vector<Check> kChecks = {
      {"presetReordersSlots"}},
     {"presets A13: one engine through all four corners and back, mid-play, equals a fresh load; restored, it renders the same (L and R)", presetA13,
      {"presetResolveMutates"}},
+    // ---- M3 B4, T-021 ----
+    {"presets A12: the factory bank is the init plus seven (ids, order), each valid, homes at offset 0; loaded, its saved state is the preset's own values",
+     presetFactoryBank, {"presetPatchOfDropsKey", "factoryHomeOffset", "factoryLabelTypo"}},
+    {"presets A19: every factory preset's saved state is within 2 KiB (reported)", presetFactoryStateSize, {"presetStateOversized"}},
+    {"B408 for the bank: each preset's line times, colouring flag and worst 1/3-octave fold, REPORTED never judged", presetFactoryStereo, {}},
     // ---- M3 B3, T-018 ----
     {"A2 reset identity: 2 s of seeded noise at the defaults and a stress patch; reset() mid-ramp, mid-modulation = fresh", a2ResetIdentity, {"resetKeepsModPhase"}},
     {"A4 latency truth: an impulse and a swept sine pass the dry path at the declared 0 samples", a4Latency, {"dryLate"}},
@@ -3128,6 +3234,8 @@ bool* plantFlag(std::string_view n) {
       {"stereoInvertsR", &stereoInvertsR}, {"pingpongBothLines", &pingpongBothLines}, {"foldScaleSlip", &foldScaleSlip},
       {"foldOctaveNarrow", &foldOctaveNarrow}, {"foldNotchUnsmoothed", &foldNotchUnsmoothed}, {"zoneAnyMode", &zoneAnyMode}, {"zoneAtEqual", &zoneAtEqual},
       {"pingpongInvertsR", &pingpongInvertsR},
+      {"presetStateOversized", &presetStateOversized}, {"presetPatchOfDropsKey", &presetPatchOfDropsKey}, {"factoryHomeOffset", &factoryHomeOffset},
+      {"factoryLabelTypo", &factoryLabelTypo},
   };
   for (const auto& p : table)
     if (n == p.n) return p.f;
@@ -3184,14 +3292,14 @@ const std::vector<AdmissionRow>& admissionRows() {
       {"A11", "Parameter classes",
        {switchesClickFree, crossfadeEqualGain, jumpIsShortFade, deferral, modSeeded, clickSweep, loadLeavesDevice, presetValidate, b265Port},
        "structural: every flip key's switch declaration in params.json (`check_manifest.py`, with planted bare and length-less switches); the B265 reading REPORTED, never judged (`.harness/b265-report.txt`)"},
-      {"A12", "Macros", {presetA12, presetCurves, presetValidate}, "the factory seven are T-021's"},
+      {"A12", "Macros", {presetA12, presetCurves, presetValidate, presetFactoryBank}, "the factory bank: the init plus seven, each valid, loading as its own values (T-021); B408 for the bank is stated in the run's REPORT lines"},
       {"A13", "Corner presets", {presetA13}, "the horde preset's own save and reload is horde's"},
       {"A14", "Feedback", {a14Cycle}, "refusing a min_block > 1 module is the slot's; Echo declares 1"},
       {"A15", "Determinism", {determinism}, ""},
       {"A16", "Sleep and wake", {sleepTwin, floorAndWake}, ""},
       {"A17", "State completeness", {stateComplete}, ""},
       {"A18", "Restore exactness", {stateExact}, ""},
-      {"A19", "State size", {stateSize}, "every factory preset's state: T-021"},
+      {"A19", "State size", {stateSize, presetFactoryStateSize}, "every factory preset's saved state within 2 KiB (T-021)"},
       {"A20", "Live-state exclusion", {stateLiveExcluded}, ""},
       {"A21", "Morph position", {}, "not declared (RS-4.10; SPEC §16.6)"},
       {"A22", "Note context", {}, "not declared (RS-4.11; SPEC §16.6, D-034)"},
@@ -3296,7 +3404,7 @@ int main(int argc, char** argv) {
                         "presetResolveMutates", "presetLogModifyAccepted",
                         "resetKeepsModPhase", "dryLate", "monoSum", "selfStart", "b265HoodHalved",
                         "stereoInvertsR", "pingpongBothLines", "foldScaleSlip", "foldOctaveNarrow", "foldNotchUnsmoothed",
-                        "zoneAnyMode", "zoneAtEqual", "pingpongInvertsR"}) {
+                        "zoneAnyMode", "zoneAtEqual", "pingpongInvertsR", "presetStateOversized", "presetPatchOfDropsKey", "factoryHomeOffset", "factoryLabelTypo"}) {
     bool guarded = false;
     for (const auto& c : kChecks)
       for (const char* p : c.plants) guarded = guarded || std::string_view(p) == n;

@@ -628,14 +628,21 @@ filings need the human's go-ahead each time.
   over budget does not cut a module).
 
 ### T-021 — M3: The factory bank: an init plus a small set
-- **Status:** open (init + 7, D-028; needs T-017).
-- **Scope:** `presets/echo-factory.json`.
+- **Status:** done 2026-10-28 as a proposal (D-047; critic FIX-THEN-SHIP, all fixed or ruled; trace
+  `traces/2026-10-28-t021-factory-bank.md`). The set is final only after the human's listen, T-023.
+- **Scope:** `presets/echo-factory.json`. As built after D-042 (C++ is the one source): the bank
+  is `factory()` in `core/include/echo/presets.h` and the JSON is generated from it; A19's check
+  and its plant add to `core/tests/core_tests.cpp` and `plants.h`.
 - **Acceptance criteria:** an init (the manifest defaults, no macros) and seven presets (D-028),
   chosen to show the range: a slap, a synced dotted ping-pong, a dark dub loop near
   unity, a modulated chorus-like line, a mid/side wide, a tape-repitch throw, a past-unity
   edge patch. Each passes T-017's validator and T-015's size check and carries up to 8
   labelled macros. **A19 (carried from T-015, D-039):** a suite check saves every factory
   preset's state and requires each to be at most 2 KiB, with a planted oversized preset. The human picks the final set by listening (T-023).
+  **Read 2026-10-28 (critic T-021 L4):** no reachable preset can outgrow 2 KiB (`stateSize` bounds any
+  state at 616 B), so "a planted oversized preset" is met by a test-side plant that pads one preset's
+  saved text past the budget: it proves the comparator and the loop, and A19 over the bank rests on
+  `stateSize`'s worst case.
 - **Out of scope:** horde's presets lab and its library size (B395/B409).
 
 ### T-022 — M3: The face and expanded view (bar row 16)
@@ -653,6 +660,10 @@ filings need the human's go-ahead each time.
 - **Status:** open (after T-021).
 - **Scope:** `core/tools/render_presets.cpp` (WAVs from the C++ engine, never the lab), a
   small listening page in `lab/` or `docs/`, ROADMAP.
+- **Ruled by poll 2026-10-28:** the source set is **synthetic and seeded**, generated in C++
+  with no audio files (a drum-like transient loop, horde's B265 chord stab, a plucked melodic
+  line, a noise burst), so T-024's goldens can reuse it. The human listens on **a local page in
+  `docs/` beside WAVs written to a gitignored folder**; no audio is committed.
 - **Acceptance criteria:** renders of every factory preset and of the stress cases (120 %
   feedback; 12 s at 1 ms flips; full-depth drift; a tape throw across the cap) on a fixed
   seeded source set; the human's sign-off recorded here, with any preset they reject
