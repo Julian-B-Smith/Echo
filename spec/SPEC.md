@@ -14,6 +14,9 @@ action, Clear (§16). The 29 keys' ranges, defaults and classes are unchanged.
 **Amended 2026-10-27 by D-044** (§3.2, §4.1: the mono-fold law per routing mode in ρ's own scale, gated on exact
 impulses with noise reported, and the colouring flag raised in stereo mode only as a stated convention), from T-019's
 measurements and its critic review.
+**Revision 4, ratified 2026-10-29 by poll (D-048):** a 30th key, `time.scale` (§3.1, §3.4, §3.5, §9), appended so no
+other key moves, and the fixed row is three: Time Scale, Feedback and Mix (§16.4). The other 29 keys' ranges, defaults
+and classes are unchanged.
 
 **What this is.** The behaviour Echo must have, stated so the C++ core (M1–M3) can be built and tested against it.
 The machine-readable half is [`params.json`](params.json): every key, unit, range, default, morph class, rate
@@ -84,6 +87,11 @@ in L,R ─► io.inGain ─┬────────────────�
 The 22 division names are horde's list, slow to fast, `2/1` to `1/64`; aliases (`1/1D` for `3/2`, …) are accepted
 on load and stored as the canonical name. bpm ≤ 1 falls back to 120; re-sending an unchanged tempo is a no-op.
 
+**Time Scale** (`time.scale`, D-048) multiplies the base time: ×¼ to ×4 on a log law, default ×1, so the knob's centre
+is the preset as saved. Free, it is the value itself and scales continuously. Synced, it is the **nearest octave**,
+2^round(log2 scale), so the repeats stay on the grid: ×¼, ½, 1, 2 or 4 exactly (the snap boundaries are ×2^(k + ½),
+0.354, 0.707, 1.414 and 2.828). A re-sent scale, or a synced one moving inside a single octave's band, moves no time.
+
 ### 3.2 Left and right offsets (ruled by poll, D-015)
 
 Each side's time is `base × (1 + offset/100)`, with `time.offL` and `time.offR` in −50 … +50 %. A ratio, not
@@ -109,7 +117,8 @@ or a wake starts on the host's tempo rather than gliding from a stale or default
 
 ### 3.4 The 12 s line and its clamp
 
-The line holds 12 s plus the modulation ceiling (20 ms) plus the kernel's margin (§11). After the offsets:
+The line holds 12 s plus the modulation ceiling (20 ms) plus the kernel's margin (§11). Each time is the base
+time × `time.scale` (§3.1) × (1 + offset); the scale comes **before** this clamp, never after it. Then:
 - **synced** times longer than 12 s are **halved until the longer of the two fits** — both lines together, so the
   L/R ratio is kept and both stay on the grid (the screen marks them folded);
 - a **free** time longer than 12 s is clamped to 12 s (only reachable through a positive offset);
@@ -120,8 +129,8 @@ Example: `2/1` at 30 bpm is 16 s, which plays at 8 s; `2/1` at 40 bpm with a +50
 
 ### 3.5 What a moving time does: `time.change`
 
-A time moves when a knob, automation, a macro or a morph changes `time.ms`, `time.div`, `time.sync` or an offset
-(a **control move**), or when the host tempo changes a synced time (a **tempo move**, §3.8). For a control move,
+A time moves when a knob, automation, a macro or a morph changes `time.ms`, `time.div`, `time.sync`, `time.scale` or
+an offset (a **control move**), or when the host tempo changes a synced time (a **tempo move**, §3.8). For a control move,
 `time.change` decides:
 
 | mode | what the read head does |
@@ -323,7 +332,7 @@ A modulation offset is added to every read head of a line (both heads mid-crossf
 
 ## 9. The parameter manifest and switch declarations
 
-Authoritative: [`params.json`](params.json) (29 keys). Morph classes use the local enum mapped one to one onto
+Authoritative: [`params.json`](params.json) (30 keys). Morph classes use the local enum mapped one to one onto
 OQ #33 (RS-2.2): **continuous** = `continuous` + `morphs`; **jump** (flip) = `stepped` + `morphs`; **device** =
 `excluded`. Rate class is FOUNDATIONS' `ReadCadence`: every key is `kContinuous`. Every key has a display name and
 a normalised law (ADR-203): `lin`, `log` (geometric between min and max), `io` (B435), `step`.
@@ -359,6 +368,7 @@ a normalised law (ADR-203): `lin`, `log` (geometric between min and max), `io` (
 | `mod.shape` | Mod Shape | sine / drift | — | sine | flip | step | seeded jump of the offset (below) |
 | `mod.spread` | Mod Spread | % | 0 … 100 | 0 | continuous | lin | 250 ms ramp (§7) |
 | `mod.seed` | Mod Seed | integer | 0 … 65535 | 1 | flip | step | seeded jump (§7) |
+| `time.scale` | Time Scale | × | 0.25 … 4 | 1 | continuous | log | moves the time (§3.5); synced, snaps to octaves (§3.1) |
 
 **Switch declarations, in A11's vocabulary as amended** (§12.1: an equal-gain crossfade of a stated length, or
 `gate`; §12.2: a seeded jump — the state that starts running is seeded from the value being applied, so the value
@@ -432,7 +442,7 @@ storage; the loop state is double):
 (The manifest's 17.58 MiB is the bare 12 s; the 20 ms modulation margin adds 0.03 MiB. The drift clamp, §7, keeps
 every read inside it.) **The tape law's position history**: one double per sample per line would be 35.2 MiB at
 192 kHz, so the C++ keeps it at control rate (one value per 32 samples, interpolated: 1.1 MiB at 192 kHz) — a design
-target, measured at M1 with the rest of the per-instance figure. **State size**: 29 keys, well inside the 2 KiB
+target, measured at M1 with the rest of the per-instance figure. **State size**: 30 keys, well inside the 2 KiB
 budget per corner (RS-6.12).
 
 ## 12. Macros
@@ -551,7 +561,7 @@ io.outGain 0
 - **At most 2 KiB** (2048 bytes, the whole text). A larger text is **refused before anything is allocated** (A19).
 - **Loading is all or nothing:** an unknown, missing, duplicated or out-of-range key, a label that is neither the key's
   label nor a division alias, or a different version refuses the whole text and changes nothing. Out of range is refused, never clamped.
-- Nothing outside the saved state and `reset()` shapes the sound (A17): the 29 keys are the whole patch.
+- Nothing outside the saved state and `reset()` shapes the sound (A17): the 30 keys are the whole patch.
 
 ### 16.3 Module presets and macros (SPEC-MODULE-MACROS §4, ADR-251; RS-5.1 – 5.6)
 
@@ -568,18 +578,18 @@ io.outGain 0
 
 ### 16.4 Fixed controls (RS-5.8)
 
-Echo declares **four**, in this order (also `params.json` → `fixedControls`):
+Echo declares **three**, in this order (also `params.json` → `fixedControls`):
 
 | k | label | key |
 |---|---|---|
-| 1 | Feedback | `fb.amount` |
-| 2 | Tone | `filt.loop.lpHz` |
-| 3 | Mod Depth | `mod.depthMs` |
-| 4 | Mix | `mix` |
+| 1 | Time | `time.scale` |
+| 2 | Feedback | `fb.amount` |
+| 3 | Mix | `mix` |
 
-All four are always live. Time is not in the row: `time.ms` does nothing while synced and `time.div` is stepped; it
-stays on the face and in the macros. A fixed control is an ordinary parameter: saved in the state (§16.2), present in
-every preset, and in A12's round trip.
+Each is always live, Time up to the 12 s line (§3.4): Time Scale scales the time whether free or synced
+(continuously, or by octaves, §3.1), where `time.ms` does nothing while synced and `time.div` is stepped. A fixed control is an ordinary parameter: saved in the
+state (§16.2), present in every preset, and in A12's round trip. Tone and Mod Depth are ordinary keys a preset's macros
+may bind (D-048).
 
 ### 16.5 The tail declaration's mapping
 

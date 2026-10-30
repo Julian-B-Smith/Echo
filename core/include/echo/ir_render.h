@@ -84,7 +84,7 @@ inline const double* volatile g_irPlantSink = nullptr;
 inline constexpr double kIrLevelDb = -20.0;  // the display's stated input level
 inline constexpr int kIrBlock = 512;          // render block (any block renders bit-identically)
 
-// Every value the clone needs, copied from the host's parameter model: all 29
+// Every value the clone needs, copied from the host's parameter model: all 30
 // keys in params.h order, Device keys (the I/O gains) included.
 using IrPatch = std::array<double, kNumParams>;
 

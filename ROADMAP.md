@@ -22,7 +22,7 @@ with HIGH findings the author's own suite had passed.
   (D-037 – D-040), T-016 on its own PR (D-041): **batch 2 done**. Batch 3's four items done
   2026-10-28 (D-042 – D-045): T-017 on PR #24 (2975c34), T-018 on PR #25 (1a78af5), T-019 on
   PR #26 (2966256), T-020 on PR #27 (985c1d1); the T-021 bank draft B3 also plans is not
-  started (the bank holds the init only). Batch 4 (T-021 finished, T-022, T-023) next. **M4 (the IR
+  started (the bank holds the init only). Batch 4 (T-021 finished, T-022, T-023) next; D-048 (2026-10-29) adds T-038 and T-039 ahead of T-022's face; D-049 adds T-040 before T-023. **M4 (the IR
   display and Echo's screen) is under way beside it** (D-027, D-030): T-030 – T-032 done (PR #15,
   PR #16); T-033 open (T-014 is on main, PR #20); T-036 (gate 4's flicker) done 2026-10-28 (D-046).
 - **Oracle:** `./verify fast` = kit integrity, leak gate, private-name gate,
@@ -705,6 +705,8 @@ filings need the human's go-ahead each time.
   report, the stereo report, the cost rows, the sign-offs), Echo's known differences (the
   shim's `process()` and state entry; anything FOUNDATIONS has not answered), and T-004's
   three notices folded in; filed by 2026-12-04.
+  It also tells horde the fixed row is now three, Time Scale, Feedback and Mix (D-048), not the
+  four the spin-up notice named.
 - **Out of scope:** hosting Echo in horde (horde's work).
 
 ### T-030 — M4: the offline IR renderer (B4-1)
@@ -920,6 +922,79 @@ filings need the human's go-ahead each time.
      that writes the saved state.
 - **Out of scope:** horde's action delivery and FOUNDATIONS' entry (the shim follows them
   when they are ruled); any other action.
+
+### T-038 — M3: `time.scale` and the fixed row of three (D-048)
+- **Status:** done 2026-10-29 (D-048, D-048 A1; critic FIX-THEN-SHIP, all fixed; its H2 became
+  T-040, D-049; trace `traces/2026-10-29-t038-time-scale.md`).
+- **Scope:** `spec/SPEC.md` (revision 4: §3.1, §3.4, §3.5, §16.4 and the status header),
+  `spec/params.json`, `lab/echo-lab.html` (its mirror of the manifest, and the scale in its
+  engine), `core/include/echo/` (the parameter table, the engine's time resolution, plants),
+  `core/tests/core_tests.cpp`, `core/manifest.lock.json` and `module_version.h` (regenerated
+  only by `tools/manifest_lock.py write --decision D-048`), the generated files that move with
+  them (`presets/echo-factory.json`, `docs/admission.md`), `README.md`'s key counts.
+- **Acceptance criteria:**
+  1. `time.scale` is the 30th key, **appended** to the table so no existing key's index or
+     identity moves: name "Time Scale", unit ×, scalar, 0.25 to 4, default 1, law log, morph
+     and rate continuous, smoothing as `time.ms`'s. `params.json`, the C++ table, the lab and
+     the lock agree (the existing manifest gates pass on 30 keys).
+  2. **Resolution (SPEC §3):** base = `time.ms` (free) or the division's time (synced), times
+     the scale: the value itself when free; when synced, the nearest octave
+     2^round(log2 scale), so ×¼, ½, 1, 2, 4 exactly. Then the offsets, then §3.4's clamp
+     unchanged (synced: halve both until the longer fits; free: 12 s; 1 ms below). Tested at
+     both modes, at every octave and on both sides of each snap boundary, at 44.1 and 96 kHz.
+  3. **At ×1 nothing changes:** every existing check passes untouched, and a fixed set of
+     renders (each routing mode, free and synced, a moving time under each `time.change` mode)
+     is bit-identical to the same renders with the key absent from the patch.
+  4. **A scale move is a control move (§3.5):** it follows `time.change` and is latched like
+     any time move; under the click metric, scale sweeps (free) and octave steps (synced) stay
+     within the existing bounds under repitch, crossfade and jump, with zero backstop hits.
+  5. The tail declaration, the rest gate and the IR renderer use the scaled times (a scaled
+     patch's declared tail covers its scaled repeats).
+  6. State: saved and loaded by name like every key; a saved text with no `time.scale` is
+     refused like any missing key (§16.2, all or nothing; amended 2026-10-29 by poll, D-048 A1:
+     nothing has shipped, so no saved text predates the key). Every factory preset carries
+     `time.scale` = 1 and sounds as before.
+  7. **The fixed row is [Time `time.scale`, Feedback `fb.amount`, Mix `mix`]** in
+     `params.json`, SPEC §16.4 (which also says each is always live) and the lock; A12's round
+     trip covers it.
+  8. Plants, each failing its own check for its own reason: the scale ignored while synced;
+     the scale not snapped while synced; a scale move that bypasses `time.change` (a bare
+     jump); the scale applied after the §3.4 clamp instead of before.
+  9. Real time, determinism, SR and block independence hold (the existing probes cover the
+     new key); `./verify fast` green.
+- **Out of scope:** macros that bind `time.scale` (T-039 rules them); the face (T-022);
+  horde's notice (T-027).
+
+### T-039 — M3: no macro only drives a fixed control; the bank revoiced (D-048)
+- **Status:** open (after T-038).
+- **Scope:** `core/include/echo/presets.h` (`validate()` or the bank check, and `factory()`),
+  `plants.h`, `core/tests/core_tests.cpp`, the generated `presets/echo-factory.json`.
+- **Acceptance criteria:**
+  1. A preset whose slot binds only fixed-control keys is refused, with a message naming the
+     preset, the slot and the key; a plant (a factory slot bound to `fb.amount` alone) makes
+     the check fail for that reason. A slot binding a fixed control together with another key
+     is allowed.
+  2. The seven are revoiced so every slot passes, each preset keeping 1 – 4 slots and its
+     character as described; homes at offset 0 as before (A12 unchanged).
+  3. B408 and A19 are re-reported for the revoiced bank; `./verify fast` green.
+- **Out of scope:** the final set (the human's listen, T-023).
+
+### T-040 — M3: the exponential law's mid-glide reversal clicks (D-049)
+- **Status:** open (ruled 2026-10-29, D-049; after T-038, before T-023).
+- **Scope:** `core/include/echo/engine.h` (the exponential repitch law, SPEC §3.6),
+  `plants.h`, `core/tests/core_tests.cpp`'s click cases, the lab's same law if it shares
+  the defect; a SPEC §3.6 note if the law's statement changes (a protected path: a poll).
+- **Acceptance criteria:**
+  1. Reversal cases join the click gate under every `time.change` = repitch law and both
+     time keys, plus `time.scale`: a move reversed at 100, 200 and 400 ms into its glide, of
+     one and two octaves, free and synced. On main they read up to 4.829 against 2.5; that
+     failure is recorded as their planted control (the unfixed law kept as a plant).
+  2. The exponential law is changed so every reversal case reads under 2.5 with zero
+     backstop hits, the threshold untouched, and every existing click case still passes.
+  3. The fix keeps the law's character as SPEC §3.6 states it (a one-pole on ln D, its
+     time constant `time.glide`), or the change to its statement is put to the human first.
+  4. The tape law's readings are unchanged; `./verify fast` green.
+- **Out of scope:** the tape law; the threshold; the listen (T-023 hears the result).
 
 ## Open questions (blocking — ask the human)
 

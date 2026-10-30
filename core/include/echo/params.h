@@ -65,11 +65,12 @@ struct ParamDef {
   std::string_view smoothing;
 };
 
-// Handles, in table order.
+// Handles, in table order. kTimeScale is APPENDED (T-038, D-048): the state text,
+// the lock and every other key's handle keep their place.
 enum P : int {
   kInGain, kOutGain, kMix, kSync, kTimeMs, kDiv, kOffL, kOffR, kChange, kLaw, kTempoMode,
   kGlide, kXfadeMs, kFb, kRoute, kInOn, kInHp, kInLp, kLoopOn, kLoopHp, kLoopLp, kOutOn,
-  kOutHp, kOutLp, kModDepth, kModRate, kModShape, kModSpread, kModSeed, kNumParams
+  kOutHp, kOutLp, kModDepth, kModRate, kModShape, kModSpread, kModSeed, kTimeScale, kNumParams
 };
 
 // horde's division list (intake/tempo-divisions.md), slow to fast: name,
@@ -138,6 +139,7 @@ inline constexpr std::array<ParamDef, kNumParams> kParams{{
     {"mod.shape", "Mod Shape", "", true, 0, 1, 0, Morph::Jump, "step", labels::kShape, "continuous", "mod"},
     {"mod.spread", "Mod Spread", "%", false, 0, 100, 0, Morph::Continuous, "lin", {}, "continuous", "mod"},
     {"mod.seed", "Mod Seed", "", true, 0, 65535, 1, Morph::Jump, "step", {}, "continuous", "mod"},
+    {"time.scale", "Time Scale", "×", false, 0.25, 4, 1, Morph::Continuous, "log", {}, "continuous", "time"},
 }};
 
 // The declared actions (SPEC §16.7, params.json `actions`), by index = action id.

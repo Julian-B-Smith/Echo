@@ -396,5 +396,48 @@ function generations(params, sr, lab) {
   plant(!pair(runs), "sleep check detects a modulation that keeps running at rest");
 }
 
+// ---- 20. time.scale (T-038, D-048): the synced snap and what counts as a move. The lab mirrors the C++
+// (engine.h timeScale / applied): the octave snap is exact at the doubles nearest the boundaries, and a scale
+// send is a control move only if it moves a resolved time.
+{
+  const nextDown = x => { const f = new Float64Array([x]); new BigUint64Array(f.buffer)[0] -= 1n; return f[0]; };
+  // 1/4 at 120 bpm is 0.5 s; a synced scale s resolves to 0.5 x its octave.
+  const syncedTime = (Xm, s) => { const e = new Xm.EchoLab(SR, {}); e.setParam("time.sync", 1); e.setParam("time.div", 9); e.setParam("time.scale", s); e._resolveBoth(120); return e.Tt[0] / SR; };
+  function snapBad(Xm) {
+    const bad = [];
+    for (let k = -2; k <= 2; k++) { const t = syncedTime(Xm, Math.pow(2, k)); if (t !== 0.5 * Math.pow(2, k)) bad.push(`x2^${k} -> ${t}`); }
+    for (let k = -2; k <= 1; k++) {
+      const edge = Math.pow(2, k) * Math.SQRT2;   // the double nearest 2^(k + 1/2): just above it, so up
+      for (const [what, s, want] of [["one ulp under", nextDown(edge), Math.pow(2, k)], ["the double nearest", edge, Math.pow(2, k + 1)]]) {
+        const t = syncedTime(Xm, s); if (t !== 0.5 * want) bad.push(`${what} the 2^${k + 0.5} boundary (${s}) -> ${t} s, expected ${0.5 * want}`);
+      }
+    }
+    return bad;
+  }
+  const bad = snapBad(X);
+  check(bad.length === 0, "time.scale: synced it snaps to the nearest octave: every octave, the double nearest each boundary (up) and one ulp under it (down)" + (bad.length ? " — " + bad.slice(0, 3).join("; ") : ""));
+  const rounds = build(subst("return Math.pow(2, s / Math.pow(2, e) >= Math.SQRT2 ? e + 1 : e);", "const l = Math.log2(s); return Math.pow(2, Math.sign(l) * Math.round(Math.abs(l)));"));
+  plant(snapBad(rounds).length > 0, "time.scale snap check detects round(log2 s) with halves away from zero (C's lround), wrong at the doubles nearest a boundary");
+  const free = (() => { const e = new X.EchoLab(SR, {}); e.setParam("time.sync", 0); e.setParam("time.ms", 100); e.setParam("time.scale", 3.1); e._resolveBoth(120); return e.Tt[0] / SR; })();
+  check(Math.abs(free - 0.31) < 1e-12, `time.scale: free it is the value itself (100 ms x 3.1 = ${(free * 1000).toFixed(6)} ms)`);
+
+  // What counts as a move: flags first, then a render.
+  function moveFlags(Xm) {
+    const e = new Xm.EchoLab(SR, {});
+    e.setParam("time.sync", 1); e.setParam("time.div", 9); e._resolveBoth(120);
+    const sent = v => {
+      e.paramMoved = false; e.setParam("time.scale", v);
+      const moved = e.paramMoved;
+      if (e.timeDirty) { e._resolveBoth(120); e.timeDirty = false; }   // the next block resolves, and consumes the move
+      return moved;
+    };
+    return [sent(1), sent(1.2), sent(0.8), sent(1.5), sent(1.6), sent(0.5)];   // resend, in band, in band, x2, still x2, x1/2
+  }
+  const flags = moveFlags(X).join();
+  check(flags === "false,false,false,true,false,true", `time.scale: a re-sent or in-band synced scale moves nothing; an octave step moves (${flags})`);
+  const always = build(subst("if (t[0] !== this.Tt[0] || t[1] !== this.Tt[1]) { this.timeDirty = true; this.paramMoved = true; }", "this.timeDirty = true; this.paramMoved = true;"));
+  plant(moveFlags(always).join() !== flags, "time.scale move check detects every scale send counted as a move");
+}
+
 console.log(fail ? "lab_smoke: RED" : "lab_smoke: OK");
 process.exit(fail);

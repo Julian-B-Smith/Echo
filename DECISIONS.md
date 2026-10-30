@@ -1302,3 +1302,47 @@ reports B408 for the bank and never gates it. Plants:
 repeat) were voicing aims, not gates, and are not met. Rather than tune further by number, the two descriptions now
 say what the presets do, and the listen decides. L6 (chorus-line's coherent +3.2 dB peak, legal, as the dry path is
 never limited) is noted for gain staging at the listen.
+
+## D-048 — The fixed row is three, Time Scale, Feedback and Mix; a new key `time.scale`; no macro only drives a fixed control (2026-10-29, the human, by poll; amends D-035 ruling 4, supersedes D-041's fixed row)
+
+**Why.** The human doubted Echo needs D-035's four fixed controls, and asked how Sluice and Shriek handle their two
+kinds of control. Both split them the same way: up to four fixed controls (the same meaning on every preset), and
+per-preset macros for what the sound needs. Both forbid the overlap: Sluice's factory macros never repeat a global
+knob (its D-114), and Shriek's `macro_check` refuses a slot that only drives a fixed control (its D-077). Read
+against that rule, 16 of Echo's 25 factory macros (T-021) only drove a fixed control (every Feedback macro, most Tone
+and every Mod Depth macro), and under the four, two presets would keep no macro at all. Sluice also puts Time in its
+row, as a scale centred on the sound's own time, which answers D-035's reason for leaving Time out (`time.ms` does
+nothing while synced, and `time.div` is stepped).
+
+**Ruled (five polls, 2026-10-29):**
+1. **The fixed row is Time, Feedback, Mix, in that order** (k = 1, 2, 3): `time.scale`, `fb.amount`, `mix`. Tone
+   (`filt.loop.lpHz`) and Mod Depth (`mod.depthMs`) leave the row and become ordinary keys a preset's macros may use.
+   This settles T-022's critic M4 (Tone was not "always live": it does nothing while the loop filter is off).
+2. **A new key, `time.scale`** ("Time Scale"): a multiplier on the base time, **×¼ to ×4, log law, default ×1**, so
+   the knob's centre is exactly the preset as saved. In free time it scales continuously; **while synced it snaps to
+   octaves** (×¼, ½, 1, 2, 4), so the repeats stay on the grid. **A change moves the time like a Time move**: it
+   follows `time.change` (repitch, crossfade or jump) and is judged by the same click metric. Each channel's time is
+   then clamped by SPEC §3.4 as before.
+3. **No macro only drives a fixed control**, gated by a check with a planted fault (as Shriek's is), and T-021's bank
+   is revoiced to match before the T-023 listen.
+4. **The protected edits are authorised:** SPEC revision 4 (§3, §16.4), `spec/params.json`, the lab's mirror of it
+   (`lab_smoke` requires equality), and the manifest lock, regenerated with `--decision D-048`. `module_version`
+   moves, and so does the generated presets file.
+5. **Order of work:** T-038 (the key, the row and the lock) first, then T-039 (the macro rule and the revoice), then
+   T-022's face on 30 keys. horde was told "four" at spin-up; T-027's readiness notice carries the change.
+
+**D-048 A1 — Loading stays all or nothing (2026-10-29, the human, by poll).** T-038's criterion 6 as the lead first
+wrote it asked that a saved text without `time.scale` load as ×1, which would have carved a one-key exception into
+SPEC §16.2's rule that any missing key refuses the whole text. Nothing has shipped, so no saved Echo state predates
+the key. **Ruled: no exception.** A text without `time.scale` is refused like any other missing key, and criterion 6
+is amended to say so.
+
+## D-049 — The exponential law's mid-glide reversal clicks; gate it and fix it before the listen (2026-10-29, the human, by poll)
+
+**Found by the T-038 critic, on main before T-038.** Under the exponential repitch law (SPEC §3.6), a time move
+reversed mid-glide reads past the click metric's 2.5 bar: `time.ms` 500 → 125 → 500 ms with the second move 200 ms
+after the first reads 4.829, the same move through `time.div` or `time.scale` reads the same, and 500 → 250 → 500 ms
+at 100 ms reads 2.849. The tape law reads 0.789 on the same move. The suite never rendered a reversal. With Time
+now on the fixed row (D-048), turning it down and back up is a main gesture. **Ruled: gate and fix before T-023.**
+Reversal cases join the click gate (they fail today, which is their planted control), then the exponential law is
+fixed so they pass, without moving the threshold. ROADMAP T-040.

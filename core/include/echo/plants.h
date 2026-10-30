@@ -99,7 +99,7 @@ ECHO_PLANT(wakeOffsetFromZero)   // after a wake the offset slews in from 0
 ECHO_PLANT(tapeLinearHistory)    // the tape history is linearly interpolated (the pre-critic form)
 ECHO_PLANT(glideFixedRate)       // the repitch laws' time constant is counted in 48 kHz samples
 // ---- M4 (core/tests/ir_tests.cpp guards these; echo_ir_plants) ----
-ECHO_PLANT(irHashSkipsKey)       // the IR cache hash skips the last key: a changed mod.seed serves a stale drawing
+ECHO_PLANT(irHashSkipsKey)       // the IR cache hash skips the last key (mod.seed before T-038, time.scale since): a change to it serves a stale drawing
 ECHO_PLANT(irReusesState)        // the renderer's clone is not reset between renders: the last patch's repeats leak in
 ECHO_PLANT(irDropsDevice)        // the renderer never sends the Device keys: the drawing ignores the I/O gains
 ECHO_PLANT(irLevelIgnored)       // the renderer's impulse is always 0 dBFS, whatever the stated level
@@ -186,6 +186,17 @@ ECHO_PLANT(presetStateOversized) // TEST-SIDE: one factory preset's saved text i
 ECHO_PLANT(presetPatchOfDropsKey) // patchOf leaves fb.amount out of the load: the engine keeps its default (critic T-021 M1)
 ECHO_PLANT(factoryHomeOffset)    // dub-loop's Wobble home is nudged off its exact 0.25: the preset no longer loads as its own values (critic T-021 M2)
 ECHO_PLANT(factoryLabelTypo)     // pingpong-dotted's division label is "3/16 ": step() answers -1 and validate() must refuse it (critic T-021 M2)
+// ---- M3, B4 (T-038: time.scale, D-048) ----
+ECHO_PLANT(scaleIgnoredSynced)   // time.scale is ignored while synced (it scales free time only)
+ECHO_PLANT(scaleNotSnapped)      // while synced the scale is applied as set, not snapped to the nearest octave
+ECHO_PLANT(scaleBypassesChange)  // a scale move lands the heads at once: a bare jump that ignores time.change (SPEC §3.5)
+ECHO_PLANT(scaleAfterClamp)      // the scale multiplies the times AFTER the §3.4 fold / clamp / floor, not before
+ECHO_PLANT(scaleResendIsMove)    // any time.scale send counts as a control move, even one that moves no time (it re-latches a tempo move)
+ECHO_PLANT(scaleTailUnscaled)    // the declared tail is built from the unscaled times (a scale above 1 under-declares it)
+ECHO_PLANT(scaleMoveSwallowed)   // a scale send that moves a time is not marked a control move: a tempo move in flight keeps its tempoMode (critic T-038 H1)
+ECHO_PLANT(scaleSnapRounds)      // the synced snap is round(log2 s): the double nearest 2^-1.5 has log2 exactly -1.5 and snaps to the wrong octave (critic T-038 L1)
+ECHO_PLANT(scaleOffsetRewrite)   // the offset is applied as scaled + scaled * off, not scaled * (1 + off): another rounding even at x1 (critic T-038 L2)
+ECHO_PLANT(stateMissingScaleDefaults) // the reader takes a missing time.scale as its default instead of refusing the text (critic T-038 L4; D-048 A1)
 }  // namespace echo::plant
 
 #undef ECHO_PLANT
