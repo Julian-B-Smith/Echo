@@ -372,6 +372,33 @@ function generations(params, sr, lab) {
   plant(raw > 5, `M2 flags a bare jump (${raw.toFixed(1)})`);
 }
 
+// ---- 18b. The exponential law's mid-glide reversal (T-040, D-049 A1): a move reversed 200 ms into its glide
+// (500 -> 125 -> 500 ms, glide 0.3 s) reads under the click bar at every probe phase tried. The unbounded law
+// steps its speed from -1 to +0.5 in one sample and reads up to 5; the lab's bound (one unit of speed per
+// 0.1 ms) is the fix, and its removal is the planted control. A speed step reads in proportion to
+// |cos(phase)| of the probe where it lands, so the case is rendered at 4 probe phases an eighth of a cycle apart
+// (|cos| has a half-cycle period: the worst of these reads at least 0.92 of the worst phase) and the worst gated.
+// 48 kHz, not the smoke's 16 kHz: a step reads in proportion to the sample rate, and at 16 kHz an unbounded step
+// would read under the bar, so the control could not fire.
+{
+  const SR48 = 48000, secs = 2.2, n = blocks(secs * SR48);
+  const worst = lab => {
+    let w = 0;
+    for (let j = 0; j < 4; j++) {
+      const src = new Float32Array(n), nf = Math.round(0.01 * SR48);
+      for (let i = 0; i < n; i++) src[i] = 0.5 * Math.sin(2 * Math.PI * (X.ECHO_PROBE_HZ * i / SR48 + j / 8)) * (i < nf ? 0.5 - 0.5 * Math.cos(Math.PI * i / nf) : 1);
+      const r = X.echoRender({ sr: SR48, seconds: secs, srcL: src, lab,
+        params: { "time.sync": 0, "time.ms": 500, "time.change": 0, "time.law": 1, "time.glide": 0.3, "fb.amount": 0, "filt.loop.on": 0, mix: 100 },
+        events: [{ t: 1, key: "time.ms", v: 125 }, { t: 1.2, key: "time.ms", v: 500 }] });
+      w = Math.max(w, X.echoClickM2(r.L, Math.round(0.2 * SR48), r.L.length, 0.5, X.ECHO_PROBE_HZ, SR48, 2.25));
+    }
+    return w;
+  };
+  const bounded = worst({ fallback: true }), unbounded = worst({ fallback: true, plant: "expSlewOff" });
+  check(bounded < 2.5, `M2: the exponential law's 500 -> 125 -> 500 ms move reversed at 200 ms reads clean at every probe phase tried (${bounded.toFixed(2)} < 2.5)`);
+  plant(unbounded > 2.5, `M2 flags the exponential law without its speed-step bound (${unbounded.toFixed(2)})`);
+}
+
 // ---- 19. Sleep and wake (RS-7.6, A16 as amended): an instance horde stopped
 // calling at rest matches its never-slept twin from the wake on, with the
 // parameters changed during sleep at their targets.

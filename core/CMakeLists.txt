@@ -35,9 +35,13 @@ endif()
 # out-of-bounds read the critic found (H1) is what these exist to catch.
 option(ECHO_SANITIZE "Build echo_tests with ASan + UBSan" OFF)
 
+# The click gates render their cases on a small thread pool (core_tests.cpp parallelFor): link the platform's
+# thread library (a no-op on macOS, -pthread on Linux/GCC).
+find_package(Threads REQUIRED)
+
 # echo_tests: the clean suite, exactly the code horde links (no plants).
 add_executable(echo_tests tests/core_tests.cpp)
-target_link_libraries(echo_tests PRIVATE echocore)
+target_link_libraries(echo_tests PRIVATE echocore Threads::Threads)
 target_compile_options(echo_tests PRIVATE ${ECHO_WARN})
 if(ECHO_SANITIZE)
   target_compile_options(echo_tests PRIVATE -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer)
@@ -47,7 +51,7 @@ endif()
 # echo_plants: the same suite with every planted fault switchable; each check
 # must FAIL under each fault it guards (core/include/echo/plants.h).
 add_executable(echo_plants tests/core_tests.cpp)
-target_link_libraries(echo_plants PRIVATE echocore)
+target_link_libraries(echo_plants PRIVATE echocore Threads::Threads)
 target_compile_definitions(echo_plants PRIVATE ECHO_PLANTS=1)
 target_compile_options(echo_plants PRIVATE ${ECHO_WARN})
 
@@ -125,7 +129,6 @@ target_compile_options(echo_hash_nopragma PRIVATE ${ECHO_WARN} ${ECHO_FPC_ISA} $
 # echo_ir_tests clean, echo_ir_plants with every M4 plant switchable.
 # The render service (ir_service.h) runs a worker thread: link the platform's
 # thread library (a no-op on macOS, -pthread on Linux/GCC).
-find_package(Threads REQUIRED)
 add_executable(echo_ir_tests tests/ir_tests.cpp)
 target_link_libraries(echo_ir_tests PRIVATE echocore Threads::Threads)
 target_compile_options(echo_ir_tests PRIVATE ${ECHO_WARN})

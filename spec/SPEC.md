@@ -17,6 +17,9 @@ measurements and its critic review.
 **Revision 4, ratified 2026-10-29 by poll (D-048):** a 30th key, `time.scale` (§3.1, §3.4, §3.5, §9), appended so no
 other key moves, and the fixed row is three: Time Scale, Feedback and Mix (§16.4). The other 29 keys' ranges, defaults
 and classes are unchanged.
+**Amended 2026-10-30 by D-049 A1 and A2** (§3.6: the exponential law's rate is bounded to one unit of speed per 0.1 ms,
+so a retarget, an onset, a `time.glide` change or a move reversed mid-glide no longer steps it in one sample and no
+longer clicks), from T-040's measurements and its critic review.
 
 **What this is.** The behaviour Echo must have, stated so the C++ core (M1–M3) can be built and tested against it.
 The machine-readable half is [`params.json`](params.json): every key, unit, range, default, morph class, rate
@@ -154,10 +157,10 @@ Reading at a moving delay D(t) plays at speed s = 1 − dD/dt, a pitch ratio of 
 
 **`time.law`** chooses the law; `time.glide` is its time constant:
 
-| `time.law` | law | character, measured on the lab (0.5 ↔ 0.25 s, glide 0.3 s, 48 kHz) |
+| `time.law` | law | character (tape: measured on the lab, 0.5 ↔ 0.25 s, glide 0.3 s, 48 kHz; exponential: measured on the C++ core, `core/tests`, D-049) |
 |---|---|---|
 | **tape** (default) | varispeed: the tape speed lags its target with time constant `time.glide`; the heads stay put, and a repeat recorded at speed v(t−D) plays at v(t) | each repeat carries the speed history it was recorded under; peak +9.1 / −6.7 st; M2 0.72 |
-| **exponential** | a one-pole on ln D with time constant `time.glide` | the rate steps at onset, then relaxes; reaches the cap; M2 4.1 (the onset kink) |
+| **exponential** | a one-pole on ln D with time constant `time.glide`, under the rate-step safety bound below (not part of the law) | the rate rises to its onset value within 0.1 ms per unit of speed and then relaxes; a move reversed mid-glide turns the rate over within 0.15 ms and not in one sample; reaches the cap. Gated at 44.1 and 48 kHz, worst of 8 probe phases: M2 ≤ 1.009 on every reversal and ≤ 0.964 on every plain onset (an unbounded step read up to 3.5 at an onset and 5.1 at a reversal, depending on the probe's phase). Not gated: 96 and 192 kHz reversals read 1.029 and 1.044 (the critic's census, D-049 A2); through the fallback crossfade below the exponential law reads about 3.5 and 7.0 at those rates, T-041's item |
 
 The other two candidates (asymmetric slew, critically damped 2nd order) stay in the lab as references only.
 
@@ -166,6 +169,16 @@ The other two candidates (asymmetric slew, critically damped 2nd order) stay in 
 (D-006): s ∈ [0.25, 4] for the sounding head at every sample**. The read never reverses and never runs faster than
 4×; a clamp at the bound is kept as a backstop and its hits are counted (the lab's gate requires zero hits across
 every law, move and modulation extreme, so the backstop never acts).
+
+**The exponential law's slew bound (D-049 A1).** Its rate is a function of D and the target alone, so a new target
+would step the speed in one sample (by 1.0 at an onset, 1.5 at a reversal), which reads as a click. The law therefore
+carries a second safety bound beside the cap: per sample the speed changes by at most 1/(0.1 ms · fs). It is a
+safety bound, **not part of the law** (the law cell above refers to it): it binds only where the law's own rate would
+step (an onset, a retarget, a `time.glide` change), so it is active for at most 0.15 ms (the cap-to-cap turnover of
+1.5 units) after such an event, and never in a relaxation, where the one-pole on ln D is exact; the core's census
+(`expSlewBinds`, 44.1 – 192 kHz) gates that. It is applied after the cap, so the cap and the bound hold together by
+construction. The bound is per second, not per sample, because a step defect reads in proportion to the sample rate.
+Glide arrival is later by about 0.1 ms.
 
 **Fallback (D-006's hybrid).** If a move would take longer than **3 s** at the cap's rate, the head crossfades
 (§3.5) instead of gliding: a 12 s → 10 ms move crossfades rather than diving for 12 s.
@@ -508,7 +521,8 @@ probe reads such jumps as clean and would under-report Echo's time-flip clicks.
   the old repeats and leaves Device keys alone; mid/side folds to its M line; past unity the loop parks within its
   bound; the click reading separates the 3 ms jump from a bare one; a slept instance equals its twin.
 - **Finding on D-009's M2**: M2 reads ≤ 1 for smooth speed changes, but a **speed kink** (a slew law's corners, a log
-  one-pole's onset) reads a few (4.1 at 48 kHz on the 431.7 Hz probe), and a bare jump reads tens. M2 ranks clicks
+  one-pole's onset) reads a few (4.1 at 48 kHz on the 431.7 Hz probe; the exponential law is bounded since D-049 A1,
+  §3.6, and its onsets read under 1.0 at the rates gated), and a bare jump reads tens. M2 ranks clicks
   above kinks above smooth glides; its floor on a steady sine at s_max = 2 is 0.25. It is a measurement; no
   perceptual threshold is claimed (D-009).
 - **Finding on probes**: a 440 Hz probe is blind to a 0.5 → 0.25 s jump (exactly 110 cycles, the same phase). Click
