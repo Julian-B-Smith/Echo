@@ -155,6 +155,7 @@ inline constexpr double kModSlopeMax = 0.25;   // |d offset / dt|, samples per s
 inline constexpr double kSMin = 0.25, kSMax = 4.0;  // the HARD read-speed invariant (D-006)
 inline constexpr double kCapSt = 12.0;         // every repitch law's pitch cap, both ways
 inline constexpr double kFallbackS = 3.0;      // longer than this at the cap's rate: crossfade
+inline constexpr double kExpSlewS = 1e-4;      // the exponential law's safety bound: the speed moves at most 1 per this (SPEC §3.6, D-049 A1)
 inline constexpr double kTempoCapCents = 50.0; // tempo "follow": exact within this bend
 inline constexpr double kMinRead = 3.0;        // the 4-point kernel's distance from the write
 inline constexpr int kTapeGrid = 32;           // the tape history's control rate (SPEC §11)
@@ -309,6 +310,9 @@ class Echo {
       return;
     }
     const FtzScope ftz;
+    // The planted block-state hazard (T-040): the exponential law's bound reads the speed as of the block's first
+    // sample, so what it does depends on where the host cut the blocks.
+    if (plant::expSlewBlockStart) blockV_[0] = head_[0].V, blockV_[1] = head_[1].V;
     // The planted in-place hazard (T-013): outputs cleared at the top of the
     // block, before the input is read. Out of place it changes nothing; in place
     // (inL == outL) it silences the input. The real loop reads sample i's input
@@ -673,6 +677,10 @@ class Echo {
   struct SpeedStats {
     double sMin = 1e300, sMax = -1e300;
     std::uint64_t reverse = 0, clamps = 0, fallbacks = 0, overruns = 0, floors = 0;
+    // The exponential law's 0.1 ms bound (SPEC §3.6, D-049 A1): how many samples it cut, and the sample index of the
+    // last one. A test reads them to see that the bound binds only just after a retarget, never in a relaxation.
+    std::uint64_t slewBinds = 0;
+    std::int64_t lastSlewBind = -1;
   };
   SpeedStats speedStats(int k) const { return stats_[k]; }
   void resetStats() {
@@ -1102,7 +1110,10 @@ class Echo {
   // Advance one head by one sample (§3.5-3.8).
   void stepHead(int k, int cls) {
     Head& h = head_[k];
-    const double T = tT_[k], Tprev = h.T;
+    // The planted spurious retarget (T-040): for 100 samples early on, the target drops to a quarter, then returns: a
+    // move nobody asked for, whose bound-binding the census must see as "a bind before any move".
+    const double T = (plant::expSpuriousRetarget && n_ >= 4800 && n_ < 4900) ? tT_[k] * 0.25 : tT_[k];
+    const double Tprev = h.T;
     const double D0 = h.D;
     bool tapeRan = false;
     if (T != Tprev) {  // a new move, or a retarget of the one in flight
@@ -1177,15 +1188,30 @@ class Echo {
       return;
     }
     const double tau = std::max(1.0, p_[kGlide] * (plant::glideFixedRate ? 48000.0 : sr_));
+    const double vPrev = plant::expSlewBlockStart ? blockV_[k] : h.V;
+    bool expLaw = false;
     if (h.law == 1 || plant::expLawLinear) {
       // "exponential" (§3.6): a one-pole on ln D, time constant time.glide.
       h.V = plant::expLawLinear ? gap / tau : h.D * (h.lnT - std::log(h.D)) / tau;
+      expLaw = !plant::expLawLinear;
     } else {
       h.V = tapeStep(k, T, tau) - h.D;  // "tape": the varispeed model's read delay
       tapeRan = true;
     }
     // The law's pitch cap (|pitch| <= 12 st, so dD/dt in [-1, +0.5]).
     if (!plant::noLawCap && !plant::expLawLinear) h.V = std::clamp(h.V, -up_, dn_);
+    // The exponential law's safety bound (D-049 A1): its V is a memoryless function of (D, T), so a
+    // retarget (an onset, or a move reversed mid-glide) steps the speed by up to 1.5 in one sample, which
+    // reads as a click (M2 up to 5.1). Bound the step per second, not per sample, so it holds at any
+    // host rate (a step defect reads in proportion to the rate). It binds only where the law's V jumps;
+    // elsewhere the one-pole on ln D is exact. Applied after the cap: both bounds hold together, since
+    // the result lies between two values the cap already allowed.
+    if (expLaw && !plant::expSlewOff) {
+      const double a = 1.0 / ((plant::expSlewLong ? 0.010 : k::kExpSlewS) * sr_);
+      const double bound = std::clamp(h.V, vPrev - a, vPrev + a);
+      if (bound != h.V) { ++stats_[k].slewBinds; stats_[k].lastSlewBind = n_; }
+      h.V = bound;
+    }
     if (std::fabs(T - (h.D + h.V)) < 1e-9 && std::fabs(h.V) <= std::fabs(gap)) { h.D = T; h.V = 0; }
     else h.D += h.V;
     if (tapeRan) tape_[k].c = static_cast<double>(n_) - h.D;  // the cursor follows a capped head
@@ -1769,6 +1795,7 @@ class Echo {
   std::array<std::vector<double>, 2> tapeRing_;
   int tapeCap_ = 0;
   SpeedStats stats_[2];
+  double blockV_[2] = {0.0, 0.0};  // expSlewBlockStart plant only: each head's speed at the block's first sample
   Ramp rDepth_, rSpread_;
   int modRampN_ = 12000;
   double rateA_ = 0.0, rateL2_ = 0.0, rateTargetL2_ = 0.0, rateF_ = 1.0;

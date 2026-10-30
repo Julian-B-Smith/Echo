@@ -50,8 +50,11 @@ inline std::atomic<bool> g_armed{false};
 // A new-family call also reaches malloc_logger: count it once. A plain global,
 // NOT thread_local: malloc_logger runs inside malloc, and touching a
 // thread_local there can recurse into TLS setup (it crashed, and it double-
-// counted every allocation). The suite is single-threaded.
-inline volatile bool t_inNew = false;
+// counted every allocation). An atomic (relaxed), because the click gates render
+// on worker threads (core_tests.cpp parallelFor) whose allocations call take():
+// nothing is armed then, so the count is unaffected, but the flag must not be a
+// data race. The checks that COUNT allocations run on one thread.
+inline std::atomic<bool> t_inNew{false};
 
 inline void note(std::size_t n) {
   if (g_armed.load(std::memory_order_relaxed)) {

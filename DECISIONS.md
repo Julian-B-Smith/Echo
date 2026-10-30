@@ -1346,3 +1346,41 @@ at 100 ms reads 2.849. The tape law reads 0.789 on the same move. The suite neve
 now on the fixed row (D-048), turning it down and back up is a main gesture. **Ruled: gate and fix before T-023.**
 Reversal cases join the click gate (they fail today, which is their planted control), then the exponential law is
 fixed so they pass, without moving the threshold. ROADMAP T-040.
+
+**D-049 A1 — The fix: a 0.1 ms bound on the exponential law's rate; the gate takes the worst of 8 phases; the lab too (2026-10-30, the human, four polls on T-040's phase-1 measurements).** Mechanism, measured: the exponential
+law's speed is a memoryless function of D and T, so a retarget steps it in one sample. An onset steps it by 1.0 and
+reads up to 3.509 at the worst probe phase; a reversal flips it cap to cap, a step of 1.5, and reads up to 5.091. The
+existing gate's onset cases passed 2.5 by phase luck (2.410, 2.226 at the suite's fixed event times). Ruled:
+1. **A safety bound of one unit of speed per 0.1 ms** (`1/(1e-4 · fs)` per sample), stated in SPEC §3.6 beside the
+   12 st cap: it binds only where the law's rate would step, so the one-pole on ln D with time constant `time.glide`
+   stays exact elsewhere. Measured: every reversal case ≤ 1.008, glide arrival +0.1 ms, the whole suite green with no
+   test edited. A 0.5 – 20 ms bound gains nothing on M2 (its floor is 0.789 from 0.5 ms on) and breaks `expLaw`;
+   from 2 ms on it also breaks the 1-cent repitch gate. A second pole on V moved the glide 19 – 83 ms (criterion 3).
+   The unbounded law stays as the planted control.
+2. **The reversal gate renders each case at 8 probe phases, at 48 and 44.1 kHz, and gates the worst**, and the
+   exponential onset cases do too.
+3. **The lab gets the same bound** (a protected edit, authorised), with a `lab_smoke` reversal case and its plant.
+4. **The tape law's sample-rate-dependent cap kink is its own item, T-041:** its 500 → 125 ms move reads 2.412 at
+   48 kHz, 5.2 at 96 kHz and 11.6 at 192 kHz, before and after T-040.
+
+**D-049 A2 — The reversal gate's shape: 8 phases over half a cycle, and the full matrix (2026-10-30, the human, by poll).** The T-040 critic (FIX-THEN-SHIP) found the first build trimmed below criterion 1 and
+A1.2 to save runtime (the tape law and 44.1 kHz ran `time.ms` only), without a ruling, and found that a speed step
+reads ∝ |cos φ|, so its 8 phases over a full probe cycle gave only 4 distinct readings (a worst-case error of 8 %).
+Ruled: the 8 phases are spread over half a cycle (an error of 2 %), and the gate runs the full matrix: both laws ×
+`time.ms`, `time.div` and `time.scale` free and synced × 48 and 44.1 kHz, with the exponential onsets at both rates.
+About +17 s on `./verify fast`, accepted.
+
+**D-049 A3 — The speed-step finds, the diagnostics fields and the runtime (2026-10-30, the human, three polls on the
+T-040 critic's re-check).**
+1. **Approved:** `Echo::SpeedStats` (the engine's public diagnostics struct, beside the backstop and fallback counters)
+   gains `slewBinds` and `lastSlewBind`, written on the audio thread without allocation; `sizeof(Echo)` 2584 → 2616 B.
+2. **T-041 is widened to every one-sample speed step, and it blocks T-023.** The half-period sweep showed two existing
+   `clickSweep` cases passing 2.5 only at their fixed phase: the default tape law's free scale sweep reads 4.081 at its
+   worst phase at 48 kHz (its cap kink, a speed jump 2.0 → 0.83 in one sample), and the full tape sweep 3.470 through
+   the D-006 fallback, whose outgoing head stops dead (speed 2.0 or 0.5 → 1.0 in one sample, under both laws: the
+   exponential scale sweeps read 1.73 at 48 kHz, ~3.5 at 96 kHz, ~7.0 at 192 kHz). T-041 owns both, phase-swept at
+   44.1 – 192 kHz, with `clickSweep` itself phase-swept; it lands before the listen. SPEC §3.6's 96/192 kHz figures
+   are narrowed to reversals now.
+3. **The new checks are made cheaper without losing coverage:** their renders run on threads (`std::thread`, results
+   checked in a fixed order, so the output stays deterministic), the exponential law runs first so its plant fails
+   early, and the phase-sweep detector runs once.

@@ -197,6 +197,12 @@ ECHO_PLANT(scaleMoveSwallowed)   // a scale send that moves a time is not marked
 ECHO_PLANT(scaleSnapRounds)      // the synced snap is round(log2 s): the double nearest 2^-1.5 has log2 exactly -1.5 and snaps to the wrong octave (critic T-038 L1)
 ECHO_PLANT(scaleOffsetRewrite)   // the offset is applied as scaled + scaled * off, not scaled * (1 + off): another rounding even at x1 (critic T-038 L2)
 ECHO_PLANT(stateMissingScaleDefaults) // the reader takes a missing time.scale as its default instead of refusing the text (critic T-038 L4; D-048 A1)
+// ---- M3, B4 (T-040: the exponential law's mid-glide reversal, D-049) ----
+ECHO_PLANT(expSlewOff)           // the exponential law's 0.1 ms speed-step bound is removed: a retarget steps the speed in one sample (an onset reads 3.5, a reversal 5.1)
+ECHO_PLANT(expSlewLong)          // the exponential law's speed-step bound is 10 ms, not 0.1 ms: it binds all through a relaxation (the bound must bind only just after a retarget)
+ECHO_PLANT(phaseSweepCollapsed)  // TEST-SIDE: every probe phase of the click gate's sweep is the same phase (shift 0): the gate would read one lucky phase
+ECHO_PLANT(expSlewBlockStart)    // the exponential law's bound takes the previous speed from the block's first sample, not the previous sample: it depends on the host's block size
+ECHO_PLANT(expSpuriousRetarget)  // the target drops to a quarter for 100 samples early on: a move nobody asked for (the bind census must flag a bind before any move)
 }  // namespace echo::plant
 
 #undef ECHO_PLANT

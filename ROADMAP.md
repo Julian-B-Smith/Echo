@@ -657,7 +657,7 @@ filings need the human's go-ahead each time.
 - **Out of scope:** Echo's own screen (M4, D-027).
 
 ### T-023 — M3: Listening renders and the human's sign-off (bar row 20)
-- **Status:** open (after T-021).
+- **Status:** blocked (on T-040 and T-041, D-049 A3; T-021 is done).
 - **Scope:** `core/tools/render_presets.cpp` (WAVs from the C++ engine, never the lab), a
   small listening page in `lab/` or `docs/`, ROADMAP.
 - **Ruled by poll 2026-10-28:** the source set is **synthetic and seeded**, generated in C++
@@ -980,7 +980,8 @@ filings need the human's go-ahead each time.
 - **Out of scope:** the final set (the human's listen, T-023).
 
 ### T-040 — M3: the exponential law's mid-glide reversal clicks (D-049)
-- **Status:** open (ruled 2026-10-29, D-049; after T-038, before T-023).
+- **Status:** done 2026-10-30 (D-049, A1 – A3; critic FIX-THEN-SHIP twice, all fixed; its
+  speed-step finds widened T-041; trace `traces/2026-10-30-t040-exp-reversal.md`).
 - **Scope:** `core/include/echo/engine.h` (the exponential repitch law, SPEC §3.6),
   `plants.h`, `core/tests/core_tests.cpp`'s click cases, the lab's same law if it shares
   the defect; a SPEC §3.6 note if the law's statement changes (a protected path: a poll).
@@ -994,7 +995,34 @@ filings need the human's go-ahead each time.
   3. The fix keeps the law's character as SPEC §3.6 states it (a one-pole on ln D, its
      time constant `time.glide`), or the change to its statement is put to the human first.
   4. The tape law's readings are unchanged; `./verify fast` green.
+  5. As ruled (D-049 A1, A2): the fix is a 0.1 ms bound on the rate, stated in SPEC §3.6 as a
+     safety bound; each reversal and exponential onset case renders at 8 probe phases spread
+     over half a cycle, at 48 and 44.1 kHz, over the full matrix of criterion 1, and the worst
+     is gated; the phase sweep has its own planted control; the lab gets the same bound with a
+     `lab_smoke` case and its plant.
 - **Out of scope:** the tape law; the threshold; the listen (T-023 hears the result).
+
+### T-041 — M3: every one-sample speed step: the tape cap kink and the fallback's frozen head (D-049 A1, A3)
+- **Status:** open (found 2026-10-30 by T-040; widened by D-049 A3; blocks T-023).
+- **Scope:** `core/include/echo/engine.h` (the tape law, SPEC §3.6, and the D-006 fallback's
+  crossfade start), `plants.h`, the click cases in `core/tests/core_tests.cpp`, SPEC §3.6 and
+  the lab if their statements change (a poll first).
+- **Acceptance criteria:**
+  1. The mechanisms are found and stated:
+     - the tape law's cap kink: its plain 500 → 125 ms move reads 2.412 at 48 kHz, 5.2 at
+       96 kHz and 11.6 at 192 kHz, and its free scale sweep reads 4.081 at its worst phase at
+       48 kHz (a speed jump 2.0 → 0.83 in one sample);
+     - the fallback's frozen head: when D-006's fallback starts a crossfade, the outgoing head's
+       speed goes from 2.0 or 0.5 to 1.0 in one sample, under both laws (the full tape sweep
+       3.470 at 48 kHz; the exponential scale sweeps ~3.5 at 96 kHz, ~7.0 at 192 kHz).
+     At 48 kHz the tape 2-octave reversal at 400 ms already gates at 2.440 (2.465 at 64 phases),
+     so any tape change before this lands sits within 2 % of the bar.
+  2. The click cases, `clickSweep` included, run at 44.1, 48, 96 and 192 kHz, worst of 8 phases
+     over half a cycle, and every case reads under 2.5 with zero backstop hits, the threshold
+     untouched; each unfixed behaviour is a planted control.
+  3. A change to SPEC §3.6's statement of either law or of §3.6's fallback goes to the human
+     first; `./verify fast` green.
+- **Out of scope:** the exponential law's reversal bound (T-040).
 
 ## Open questions (blocking — ask the human)
 

@@ -20,6 +20,9 @@
 #include <cstdio>
 #include <functional>
 #include <string_view>
+#include <tuple>
+#include <atomic>
+#include <thread>
 #include <cstring>
 #include <clocale>
 #include <limits>
@@ -410,6 +413,11 @@ bool blockIndependence(Detail& d) {
                               set(40000, "time.change", 2), set(40001, "time.ms", 180), set(50000, "route.mode", 2),
                               set(52000, "filt.loop.hpHz", 400), set(60000, "io.outGain", -6), set(61000, "io.inGain", 3),
                               set(64000, "mod.shape", 1), set(66000, "mod.seed", 42), set(68000, "time.law", 1), set(68001, "time.ms", 300),
+                              // The 0.1 ms bound of the exponential law (k::kExpSlewS) must bind INSIDE a block pattern's block.
+                              // From the live exponential move above: time.ms 1500 pulls the speed to the 0.5 cap, then 21 ms later
+                              // (blocks are cut at every event, so the event itself starts a block) time.ms 20 turns it over cap to
+                              // cap, 1.5 units = ~7 bound samples at 48 kHz: patterns 1 and 7 cut inside that span, the random ones too.
+                              set(68600, "time.ms", 1500), set(69300, "time.ms", 20),
                               // time.scale (T-038): moves while free, then while synced (x2.2 snaps to x2, x0.45 to x1/2)
                               set(14000, "time.scale", 1.7), set(36000, "time.scale", 0.6), set(56000, "time.sync", 1),
                               set(57000, "time.scale", 2.2), set(62500, "time.scale", 0.45),
@@ -1039,6 +1047,12 @@ bool expLaw(Detail& d) {
     auto e = mk({{"time.sync", 0}, {"time.ms", 500}, {"time.law", 1}, {"time.glide", 0.3}, {"fb.amount", 0}, {"filt.loop.on", 0}});
     const long n = S(2.0), at = S(0.5);
     const Vec in(n, 0.1);
+    // The recurrence is EXACT here only because this move's first speed step (|V| = 0.176 per sample) is under the
+    // law's 0.1 ms safety bound (k::kExpSlewS: 1/(1e-4 * 48000) = 0.208 per sample, SPEC §3.6, D-049 A1), which
+    // therefore never binds. That is specific to 48 kHz: the bound is per second, so at 96 kHz it is 0.104 per
+    // sample and the same move binds (it departs from the bare recurrence by 0.071 samples there). A bigger move
+    // binds for its first few samples by design (reversalClick and onsetClick gate those); a smaller bound would
+    // need this reference to carry it.
     const double T = 0.45 * kSr, tau = 0.3 * kSr;
     double D = 0.5 * kSr, worst = 0;
     runEach(*e, in, in, {set(at, "time.ms", 450)}, [](long) { return 120.0; }, [&](long i, Echo& x) {
@@ -1404,12 +1418,14 @@ bool movingTimeSr(Detail& d) {
 // M2-H3: normalising by the render's own measured top speed let a speed fault
 // hide itself). A smooth sine read at any speed up to 2.25 reads <= 1.
 constexpr double kSDecl = 2.25;
-double clickM2(const Vec& y, long a, long b, double A) {
-  const double w = 2 * kPi * kProbeHz / kSr * kSDecl;
+// At another sample rate the same normalisation holds with the probe's phase increment taken at that rate.
+double clickM2At(const Vec& y, long a, long b, double A, double sr) {
+  const double w = 2 * kPi * kProbeHz / sr * kSDecl;
   double m = 0;
   for (long i = std::max(a, 1L); i < b - 1; ++i) m = std::max(m, std::fabs(y[i + 1] - 2 * y[i] + y[i - 1]));
   return m / (A * w * w);
 }
+double clickM2(const Vec& y, long a, long b, double A) { return clickM2At(y, a, b, A, kSr); }
 // The smallest single-sample click the metric sees at threshold th, in dBFS
 // (an impulse of size a reads |d2y| = 2a).
 double clickFloorDbfs(double th, double A) {
@@ -1435,11 +1451,12 @@ struct ClickRun { double m2; SpeedStatsView st; };
 // writes a slope break into the line at its first sample, and any head that
 // later reads across it plays that break back as a "click" the engine never
 // made (it read 10.2 in the crossfade tempo mode before this ramp).
-Vec clickProbe(long n) {
-  Vec in = sine(n, kProbeHz, 0.5);
-  for (long i = 0; i < S(0.05); ++i) in[i] *= 0.5 - 0.5 * std::cos(kPi * i / S(0.05));
+Vec clickProbeAt(long n, double sr) {
+  Vec in = sine(n, kProbeHz, 0.5, sr);
+  for (long i = 0; i < S(0.05, sr); ++i) in[i] *= 0.5 - 0.5 * std::cos(kPi * i / S(0.05, sr));
   return in;
 }
+Vec clickProbe(long n) { return clickProbeAt(n, kSr); }
 
 struct ClickCase {
   const char* name;
@@ -1450,19 +1467,27 @@ struct ClickCase {
   double seconds;
 };
 
-ClickRun clickRun(const ClickCase& c) {
-  const long n = S(c.seconds);
-  const Vec in = clickProbe(n);
-  auto e = mk({});
+// `shift` moves every event later by that many samples: the click reading depends on the probe's phase at
+// a speed step (up to 3.49 x the step), so a gate that must not pass by luck renders a case at several
+// shifts and takes the worst (reversalClick and onsetClick, D-049 A1/A2). `sr` runs the case at another
+// rate: the case is defined in seconds at 48 kHz, so its events are placed at the same instants.
+ClickRun clickRun(const ClickCase& c, long shift = 0, double sr = kSr) {
+  // A case's tempo function (c.bpm) takes a 48 kHz sample index; only the events are rescaled to another rate.
+  if (c.bpm && sr != kSr) { std::fprintf(stderr, "click case %s: a tempo function cannot run at %g Hz (it is indexed in 48 kHz samples)\n", c.name, sr); std::abort(); }
+  const long n = S(c.seconds, sr);
+  const Vec in = clickProbeAt(n, sr);
+  auto e = mk({}, sr);
   for (const auto& [key, v] : c.kv)
     if (!e->setParam(key, v)) { std::fprintf(stderr, "click case %s: setParam(%s) refused\n", c.name, key); std::abort(); }
   e->resetStats();
   Out o;
-  if (c.bpm) o = runEach(*e, in, in, c.events ? c.events(n) : std::vector<Event>{}, c.bpm, [](long, Echo&) {});
-  else o = run(*e, in, in, c.events ? c.events(n) : std::vector<Event>{}, 120.0, [](long) { return 512; });
+  std::vector<Event> ev = c.events ? c.events(S(c.seconds)) : std::vector<Event>{};
+  for (auto& x : ev) x.at = std::lround(static_cast<double>(x.at) * sr / kSr) + shift;
+  if (c.bpm) o = runEach(*e, in, in, ev, c.bpm, [](long, Echo&) {});
+  else o = run(*e, in, in, ev, 120.0, [](long) { return 512; });
   const auto st = e->speedStats(0), st1 = e->speedStats(1);
   SpeedStatsView v{std::min(st.sMin, st1.sMin), std::max(st.sMax, st1.sMax), st.clamps + st1.clamps, st.floors + st1.floors + st.overruns + st1.overruns};
-  return {clickM2(o.L, S(0.2), n, 0.5), v};
+  return {clickM2At(o.L, S(0.2, sr), n, 0.5, sr), v};
 }
 
 Vec clickProbeUntil(long n, long until) {
@@ -1552,6 +1577,339 @@ bool clickSweep(Detail& d) {
     std::printf("  REPORT click M2 planted 0.02 click (control): %.3f; at the threshold %.2f the floor is a %.1f dBFS single-sample click\n", c,
                 kClickProposed, clickFloorDbfs(kClickProposed, 0.5));
   REQUIRE(c > std::min(kClickMax, kClickProposed), "a planted 0.02 click reads only M2 %.3f: the metric cannot see clicks", c);
+  return true;
+}
+
+// ---- M3 B4, T-040: the exponential law's onset and mid-glide reversal (SPEC §3.6; D-049, D-049 A1, A2) ----
+
+// The click reading of a speed STEP depends on the probe's phase where it lands (M2 = 3.49 x step x |cos
+// phase|, at 48 kHz): the exponential law's plain onset read 2.299 at the suite's fixed event time and 3.509
+// at the worst phase, so the first gate passed it by luck. The gates therefore render every case at kPhases
+// shifts and take the worst. |cos| has a HALF-cycle period, so the shifts span half a probe period: spread over
+// a whole period, 8 shifts would give only 4 distinct readings (critic T-040 M1; D-049 A2). A step reading also
+// grows in proportion to the sample rate, which is why the bound the law carries is per second
+// (k::kExpSlewS) and why the gates run at 48 and 44.1 kHz. 96 and 192 kHz are the tape law's own item (T-041:
+// its cap kink reads 5.2 and 11.6 there, before and after T-040), so they are not gated here.
+constexpr int kPhases = 8;
+long phaseShift(int j, double sr) {
+  if (echo::plant::phaseSweepCollapsed) return 0;  // the planted control: a sweep that does not sweep
+  return std::lround(j * (sr / kProbeHz) / (2 * kPhases));
+}
+
+// One reversal gesture: a time move from A to B, reversed `revMs` into its glide (B back to A), through one
+// of the four ways a time moves. Octaves are exact (500 / 250 / 125 ms at 120 bpm: divisions 1/4, 1/8, 1/16).
+enum class RevKey { Ms, Div, ScaleFree, ScaleSync };
+const char* revKeyName(RevKey k) {
+  return k == RevKey::Ms ? "time.ms" : k == RevKey::Div ? "time.div" : k == RevKey::ScaleFree ? "time.scale free" : "time.scale synced";
+}
+struct RevCase { int law; RevKey key; int oct; bool up; double revMs; double sr; };
+
+ClickRun reversalRun(const RevCase& c, long shift) {
+  const double sr = c.sr, ratio = std::ldexp(1.0, c.oct);
+  constexpr int kDiv[] = {9, 12, 15};  // 1/4, 1/8, 1/16
+  std::vector<std::pair<const char*, double>> kv = {{"time.change", 0}, {"time.law", static_cast<double>(c.law)}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}};
+  const char* key = "time.ms";
+  double first = 0, back = 0;  // the key's value for the move, and for the reversal
+  switch (c.key) {
+    case RevKey::Ms: {
+      const double A = c.up ? 500.0 / ratio : 500.0, B = c.up ? 500.0 : 500.0 / ratio;
+      kv.insert(kv.end(), {{"time.sync", 0}, {"time.ms", A}});
+      key = "time.ms"; first = B; back = A;
+      break;
+    }
+    case RevKey::Div: {
+      const int ia = c.up ? kDiv[c.oct] : kDiv[0], ib = c.up ? kDiv[0] : kDiv[c.oct];
+      kv.insert(kv.end(), {{"time.sync", 1}, {"time.div", static_cast<double>(ia)}});
+      key = "time.div"; first = ib; back = ia;
+      break;
+    }
+    case RevKey::ScaleFree: {  // the same times as Ms, but moved by the scale from a base of A
+      const double A = c.up ? 500.0 / ratio : 500.0;
+      kv.insert(kv.end(), {{"time.sync", 0}, {"time.ms", A}, {"time.scale", 1}});
+      key = "time.scale"; first = c.up ? ratio : 1.0 / ratio; back = 1;
+      break;
+    }
+    case RevKey::ScaleSync: {  // an exact octave of the synced division
+      kv.insert(kv.end(), {{"time.sync", 1}, {"time.div", static_cast<double>(c.up ? kDiv[c.oct] : kDiv[0])}, {"time.scale", 1}});
+      key = "time.scale"; first = c.up ? ratio : 1.0 / ratio; back = 1;
+      break;
+    }
+  }
+  // The first move waits 0.7 s: the line holds the probe by then even at 500 ms (output starts at 0.5 s),
+  // and 0.5 s after the reversal covers its cap entries and the settling. Shorter than the suite's older
+  // cases on purpose: this check renders 1536 cases (runtime).
+  const long n = S(0.7 + c.revMs / 1000.0 + 0.5, sr);
+  const long t0 = S(0.7, sr) + shift, t1 = t0 + S(c.revMs / 1000.0, sr);
+  const Vec in = clickProbeAt(n, sr);
+  auto e = mk({}, sr);
+  for (const auto& [k, v] : kv)
+    if (!e->setParam(k, v)) { std::fprintf(stderr, "reversal case: setParam(%s) refused\n", k); std::abort(); }
+  e->resetStats();
+  const Out o = run(*e, in, in, {set(t0, key, first), set(t1, key, back)});
+  const auto st = e->speedStats(0), st1 = e->speedStats(1);
+  SpeedStatsView v{std::min(st.sMin, st1.sMin), std::max(st.sMax, st1.sMax), st.clamps + st1.clamps, st.floors + st1.floors + st.overruns + st1.overruns};
+  return {clickM2At(o.L, S(0.2, sr), n, 0.5, sr), v};
+}
+
+// Folds the worst reading and the speed invariants over the phases of one case.
+struct PhaseWorst { double m2 = 0; SpeedStatsView st{1e300, -1e300, 0, 0}; };
+void foldPhase(PhaseWorst& w, const ClickRun& r) {
+  w.m2 = std::max(w.m2, r.m2);
+  w.st.sMin = std::min(w.st.sMin, r.st.sMin);
+  w.st.sMax = std::max(w.st.sMax, r.st.sMax);
+  w.st.clamps += r.st.clamps;
+  w.st.floors += r.st.floors;
+}
+
+// The pool the click gates render on (D-049 A3). Each work item owns its engine and buffers and writes only its
+// own result slot; the REQUIREs then run on the main thread in the fixed case order, so the verdict and every
+// message are byte-identical to a serial run (`--click-report --threads 1` against `--threads N` is diffed).
+// Fixed size: at most hardware_concurrency() and at least 1; `--threads N` lowers it (never above the hardware).
+int g_threads = 0;  // 0: the hardware's
+template <class F>
+void parallelFor(std::size_t n, F&& f) {
+  const std::size_t hw = std::max<std::size_t>(1, std::thread::hardware_concurrency());
+  const std::size_t want = g_threads > 0 ? std::min<std::size_t>(static_cast<std::size_t>(g_threads), hw) : hw;
+  const std::size_t nt = std::max<std::size_t>(1, std::min(want, n));
+  if (nt == 1) {
+    for (std::size_t i = 0; i < n; ++i) f(i);
+    return;
+  }
+  std::atomic<std::size_t> next{0};  // the only shared mutable state: which item to take
+  auto worker = [&] {
+    for (;;) {
+      const std::size_t i = next.fetch_add(1, std::memory_order_relaxed);
+      if (i >= n) return;
+      f(i);
+    }
+  };
+  std::vector<std::thread> pool;
+  for (std::size_t t = 1; t < nt; ++t) pool.emplace_back(worker);
+  worker();
+  for (auto& t : pool) t.join();  // join() orders every slot write before the reads that follow
+}
+
+// The existing click cases that run the exponential law (sweeps, single moves, octave steps): the ones the
+// phase gate re-renders. Selected by their key, not their name.
+bool usesExpLaw(const ClickCase& c) {
+  for (const auto& [key, v] : c.kv)
+    if (std::string_view(key) == "time.law" && v == 1.0) return true;
+  return false;
+}
+
+// The phase sweep's own control (critic T-040 H1, L1): a sweep that renders every case at one phase (the planted
+// phaseSweepCollapsed) would pass every gate by luck, again. Its own check, called once. Three detectors (the
+// plant is caught by the first, the structural one; the other two guard the shift paths of clickRun and reversalRun):
+//  1. STRUCTURE: the 8 shifts are distinct and increasing, and the last is 7/16 of a probe period (within one
+//     sample): spread over half a period, so a whole-period spacing (4 distinct readings) cannot come back unseen.
+//  2. clickRun's shift path: the exponential 250 -> 500 ms move steps the speed by 0.5 (bounded to 0.208 per
+//     sample, so the fix does not hide it): 0.197 .. 0.741 over the 8 shifts (spread 0.543); required > 0.3.
+//  3. reversalRun's shift path (its own code): the tape law's 2 octave down move reversed at 400 ms, time.ms, 48 kHz:
+//     0.789 .. 2.440 (spread 1.65); required > 1.0. A collapsed sweep spreads by exactly 0 in both.
+// The margins are about half the measured spreads: far above rounding, far below a working sweep.
+constexpr double kSweepSpreadMin = 0.3, kReversalSpreadMin = 1.0;
+bool phaseSweepWorks(Detail& d) {
+  for (const double sr : {48000.0, 44100.0}) {
+    const double period = sr / kProbeHz;
+    for (int j = 1; j < kPhases; ++j)
+      REQUIRE(phaseShift(j, sr) > phaseShift(j - 1, sr), "the probe-phase sweep is not distinct: shift %d is %ld samples, shift %d is %ld at %g Hz (every phase is the same phase)",
+              j - 1, phaseShift(j - 1, sr), j, phaseShift(j, sr), sr);
+    REQUIRE(std::fabs(phaseShift(kPhases - 1, sr) - (kPhases - 1) * period / (2.0 * kPhases)) <= 1.0,
+            "the last probe-phase shift is %ld samples at %g Hz, expected %.1f (7/16 of a probe period: the sweep spans half a period)", phaseShift(kPhases - 1, sr), sr,
+            (kPhases - 1) * period / (2.0 * kPhases));
+  }
+  const auto cases = clickCases();
+  const ClickCase* probe = nullptr;
+  for (const auto& c : cases)
+    if (std::string_view(c.name) == "move 250 -> 500 ms, exponential") probe = &c;
+  REQUIRE(probe != nullptr, "the phase-sweep control case (move 250 -> 500 ms, exponential) is gone from the click cases");
+  const RevCase tape{0, RevKey::Ms, 2, false, 400.0, kSr};
+  for (const double sr : {48000.0, 44100.0}) {
+    std::vector<double> viaClick(kPhases);
+    parallelFor(kPhases, [&](std::size_t j) { viaClick[j] = clickRun(*probe, phaseShift(static_cast<int>(j), sr), sr).m2; });
+    double lo = 1e300, hi = -1e300;
+    for (const double m : viaClick) { lo = std::min(lo, m); hi = std::max(hi, m); }
+    if (g_report) std::printf("  REPORT phase-sweep control, 250 -> 500 ms exponential at %g Hz: readings %.3f .. %.3f over %d phases (spread %.3f, needs > %.2f)\n", sr, lo, hi, kPhases, hi - lo, kSweepSpreadMin);
+    REQUIRE(hi - lo > kSweepSpreadMin, "the probe-phase sweep does not move the reading: the 250 -> 500 ms exponential move reads %.3f .. %.3f over %d phases at %g Hz (spread %.3f, needs > %.2f): every phase is the same phase",
+            lo, hi, kPhases, sr, hi - lo, kSweepSpreadMin);
+  }
+  std::vector<double> viaRev(kPhases);
+  parallelFor(kPhases, [&](std::size_t j) { RevCase c = tape; viaRev[j] = reversalRun(c, phaseShift(static_cast<int>(j), kSr)).m2; });
+  double lo = 1e300, hi = -1e300;
+  for (const double m : viaRev) { lo = std::min(lo, m); hi = std::max(hi, m); }
+  if (g_report) std::printf("  REPORT phase-sweep control, tape 2 oct down reversed at 400 ms at 48000 Hz: readings %.3f .. %.3f over %d phases (spread %.3f, needs > %.2f)\n", lo, hi, kPhases, hi - lo, kReversalSpreadMin);
+  REQUIRE(hi - lo > kReversalSpreadMin, "the probe-phase sweep does not move a reversal's reading: the tape 2 oct down move reversed at 400 ms reads %.3f .. %.3f over %d phases (spread %.3f, needs > %.2f): every phase is the same phase",
+          lo, hi, kPhases, hi - lo, kReversalSpreadMin);
+  return true;
+}
+
+// SPEC §3.6 (D-049): a move reversed mid-glide reads under the click bar at EVERY probe phase (worst of
+// kPhases), with zero backstop hits and the speed invariants. The unfixed exponential law steps its speed by
+// 1.5 in one sample at a reversal and reads up to 5.1; the unbounded law is the plant expSlewOff. The FULL
+// matrix (D-049 A2): both laws x time.ms / time.div / time.scale free / time.scale synced x 1 and 2 octaves x
+// down and up x reversed at 100 / 200 / 400 ms x 48 and 44.1 kHz = 192 cases x 8 phases (the tape law is
+// untouched by T-040 but its reversals are gated, so a tape change that breaks them is seen). The exponential
+// law goes first, so the plant expSlewOff fails after one law's renders, not both.
+constexpr int kReversalCases = 2 * 4 * 2 * 2 * 3 * 2;
+bool reversalClick(Detail& d) {
+  int cases = 0;
+  for (const int law : {1, 0}) {
+    std::vector<RevCase> cs;
+    for (const double sr : {48000.0, 44100.0})
+      for (const RevKey key : {RevKey::Ms, RevKey::Div, RevKey::ScaleFree, RevKey::ScaleSync})
+        for (const int oct : {1, 2})
+          for (const bool up : {false, true})
+            for (const double rv : {100.0, 200.0, 400.0}) cs.push_back(RevCase{law, key, oct, up, rv, sr});
+    std::vector<ClickRun> res(cs.size() * kPhases);  // slot = case * kPhases + phase; each worker writes only its own
+    parallelFor(res.size(), [&](std::size_t i) {
+      const RevCase& c = cs[i / kPhases];
+      res[i] = reversalRun(c, phaseShift(static_cast<int>(i % kPhases), c.sr));
+    });
+    for (std::size_t ci = 0; ci < cs.size(); ++ci) {
+      const RevCase& c = cs[ci];
+      PhaseWorst w;
+      for (int j = 0; j < kPhases; ++j) foldPhase(w, res[ci * kPhases + static_cast<std::size_t>(j)]);
+      ++cases;
+      char nm[128];
+      std::snprintf(nm, sizeof nm, "%s law, %s, %d oct %s, reversed at %g ms, %g Hz", law ? "exponential" : "tape", revKeyName(c.key), c.oct, c.up ? "up" : "down", c.revMs, c.sr);
+      if (g_report)
+        std::printf("  REPORT reversal M2 %-78s %6.3f  (speed %.3f..%.3f, %llu backstop, %llu floor/overrun)\n", nm, w.m2, w.st.sMin, w.st.sMax,
+                    static_cast<unsigned long long>(w.st.clamps), static_cast<unsigned long long>(w.st.floors));
+      REQUIRE(w.st.clamps == 0 && w.st.floors == 0 && w.st.sMax <= kSDecl + 1e-9 && w.st.sMin >= 0.25 - 1e-12,
+              "%s: speed %.3f..%.3f, %llu backstop hits, %llu floor/overrun reads", nm, w.st.sMin, w.st.sMax,
+              static_cast<unsigned long long>(w.st.clamps), static_cast<unsigned long long>(w.st.floors));
+      REQUIRE(w.m2 <= kClickMax, "%s reads M2 %.3f at its worst of %d probe phases (threshold %.3f)", nm, w.m2, kPhases, kClickMax);
+    }
+  }
+  REQUIRE(cases == kReversalCases, "the reversal matrix ran %d cases, expected %d: a loop went empty", cases, kReversalCases);
+  return true;
+}
+
+// The exponential law's onsets (D-049 A2): every existing click case that runs the law, and two plain onsets
+// (500 -> 250 ms down, 125 -> 500 ms up; the other glides and sizes read identically to 500 -> 250), each at
+// 8 half-period phases and at 48 and 44.1 kHz. A separate check from the reversals so that the plant
+// expSlewOff fails it for ITS OWN reason too, and a count guard so an emptied selection cannot pass.
+constexpr int kExpClickCases = 7, kPlainOnsets = 2;
+bool onsetClick(Detail& d) {
+  struct Onset { double from, to, glide; };
+  std::vector<ClickCase> cases;
+  for (const auto& c : clickCases())
+    if (usesExpLaw(c)) cases.push_back(c);
+  REQUIRE(static_cast<int>(cases.size()) == kExpClickCases, "%zu exponential-law click cases selected, expected %d", cases.size(), kExpClickCases);
+  for (const Onset m : {Onset{500, 250, 0.3}, Onset{125, 500, 0.3}})
+    cases.push_back(ClickCase{m.from == 500 ? "plain onset 500 -> 250 ms" : "plain onset 125 -> 500 ms", false,
+                              {{"time.sync", 0}, {"time.ms", m.from}, {"time.law", 1}, {"time.glide", m.glide}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}},
+                              [m](long) { return std::vector<Event>{set(S(1.0), "time.ms", m.to)}; }, nullptr, 3.0});
+  REQUIRE(static_cast<int>(cases.size()) == kExpClickCases + kPlainOnsets, "%zu onset cases built", cases.size());
+  const double rates[2] = {48000.0, 44100.0};
+  const std::size_t nCases = cases.size();
+  std::vector<ClickRun> res(2 * nCases * kPhases);  // slot = (rate * nCases + case) * kPhases + phase
+  parallelFor(res.size(), [&](std::size_t i) {
+    const std::size_t ci = i / kPhases, rate = ci / nCases;
+    res[i] = clickRun(cases[ci % nCases], phaseShift(static_cast<int>(i % kPhases), rates[rate]), rates[rate]);
+  });
+  int ran = 0;
+  for (std::size_t ri = 0; ri < 2; ++ri)
+    for (std::size_t k = 0; k < nCases; ++k) {
+      const ClickCase& c = cases[k];
+      PhaseWorst w;
+      for (int j = 0; j < kPhases; ++j) foldPhase(w, res[(ri * nCases + k) * kPhases + static_cast<std::size_t>(j)]);
+      ++ran;
+      char nm[128];
+      std::snprintf(nm, sizeof nm, "%s, %g Hz", c.name, rates[ri]);
+      if (g_report)
+        std::printf("  REPORT onset M2 %-75s %6.3f  (speed %.3f..%.3f, %llu backstop, %llu floor/overrun)\n", nm, w.m2, w.st.sMin, w.st.sMax,
+                    static_cast<unsigned long long>(w.st.clamps), static_cast<unsigned long long>(w.st.floors));
+      REQUIRE(w.st.clamps == 0 && w.st.floors == 0 && w.st.sMax <= kSDecl + 1e-9 && w.st.sMin >= 0.25 - 1e-12,
+              "%s: speed %.3f..%.3f, %llu backstop hits, %llu floor/overrun reads", nm, w.st.sMin, w.st.sMax,
+              static_cast<unsigned long long>(w.st.clamps), static_cast<unsigned long long>(w.st.floors));
+      REQUIRE(w.m2 <= kClickMax, "exponential onset %s reads M2 %.3f at its worst of %d probe phases (threshold %.3f)", nm, w.m2, kPhases, kClickMax);
+    }
+  REQUIRE(ran == 2 * (kExpClickCases + kPlainOnsets), "the onset gate ran %d cases, expected %d", ran, 2 * (kExpClickCases + kPlainOnsets));
+  return true;
+}
+
+// SPEC §3.6: "the bound binds only where the law's rate would step" (an onset, a retarget, a time.glide change)
+// and "never in a relaxation". The engine counts its binds and the sample of the last one; a render is cut at
+// every event, and after each segment the last bind must lie within 0.15 ms (1.5 x k::kExpSlewS) of the segment's
+// first sample (or there be none in it); before the first event there must be none. Across 44.1, 48, 96 and
+// 192 kHz, glides 0.01 / 0.3 / 1.0 s, onsets down and up, a move reversed 20 and 100 ms in, 1 and 2 ms targets, a
+// time.glide change mid-move, with and without 20 ms / 10 Hz modulation. Three planted controls, one per guard:
+// expSlewLong (a 10 ms bound keeps binding for ~10 ms after an event: "binds in a relaxation"),
+// expSpuriousRetarget (a move nobody asked for before the first event: "a bind before any move"), and
+// expSlewOff (no bound, so no bind anywhere: "no run bound at all", the census's vacuity guard).
+//
+// The longest a bound of one speed unit per 0.1 ms can honestly bind after a move: the speed turning over from one
+// cap to the other (s = 2 to s = 0.5) is 1.5 units = 0.15 ms (SPEC §3.6). A tighter limit of 0.1 ms flags a
+// reversal that is simply doing its job (measured 0.104 ms at 48 kHz, glide 0.01, reversed 20 ms in).
+constexpr double kCapToCap = 1.5;
+struct BindScn { const char* what; double startMs; std::vector<std::tuple<double, const char*, double>> ev; };
+struct BindJob { double sr, glide; bool mod; BindScn scn; };
+struct BindSeg { long start, last; };  // a segment's first sample (-1: before any event) and the engine's last bind so far
+struct BindRun { std::vector<BindSeg> segs; };
+
+BindRun renderBinds(const BindJob& j) {
+  auto e = mk({{"time.sync", 0}, {"time.ms", j.scn.startMs}, {"time.change", 0}, {"time.law", 1}, {"time.glide", j.glide}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100},
+               {"mod.depthMs", j.mod ? 20 : 0}, {"mod.rateHz", 10}}, j.sr);
+  const long n = S(1.6, j.sr);
+  const Vec in = clickProbeAt(n, j.sr);
+  Vec oL(512), oR(512);
+  e->resetStats();
+  BindRun r;
+  long segStart = -1, pos = 0;
+  for (std::size_t i = 0; i <= j.scn.ev.size(); ++i) {
+    const long end = i < j.scn.ev.size() ? S(std::get<0>(j.scn.ev[i]), j.sr) : n;
+    while (pos < end) {
+      const int len = static_cast<int>(std::min<long>(512, end - pos));
+      e->process(in.data() + pos, in.data() + pos, oL.data(), oR.data(), len, 120.0);
+      pos += len;
+    }
+    r.segs.push_back({segStart, std::max(e->speedStats(0).lastSlewBind, e->speedStats(1).lastSlewBind)});
+    if (i < j.scn.ev.size()) {
+      e->setParam(std::get<1>(j.scn.ev[i]), std::get<2>(j.scn.ev[i]));
+      segStart = end;
+    }
+  }
+  return r;
+}
+
+bool expSlewBinds(Detail& d) {
+  std::vector<BindJob> jobs;
+  for (const double sr : {44100.0, 48000.0, 96000.0, 192000.0})
+    for (const double glide : {0.01, 0.3, 1.0})
+      for (const bool mod : {false, true}) {
+        const double otherGlide = glide == 0.01 ? 0.3 : 0.01;
+        for (const BindScn& sc : std::vector<BindScn>{
+                 {"onset down 500 -> 125 ms", 500, {{0.3, "time.ms", 125}}},
+                 {"onset up 125 -> 500 ms", 125, {{0.3, "time.ms", 500}}},
+                 {"reversed 20 ms in", 500, {{0.3, "time.ms", 125}, {0.32, "time.ms", 500}}},
+                 {"reversed 100 ms in, twice", 500, {{0.3, "time.ms", 125}, {0.4, "time.ms", 500}, {0.5, "time.ms", 125}}},
+                 {"targets 2 ms and 1 ms, then back", 500, {{0.3, "time.ms", 2}, {0.34, "time.ms", 1}, {0.6, "time.ms", 500}}},
+                 {"time.glide changed mid-move", 500, {{0.3, "time.ms", 125}, {0.34, "time.glide", otherGlide}, {0.4, "time.glide", glide}}},
+             })
+          jobs.push_back({sr, glide, mod, sc});
+      }
+  std::vector<BindRun> res(jobs.size());
+  parallelFor(jobs.size(), [&](std::size_t i) { res[i] = renderBinds(jobs[i]); });
+  double maxLateMs = 0;
+  int binding = 0;
+  for (std::size_t ji = 0; ji < jobs.size(); ++ji) {
+    const BindJob& j = jobs[ji];
+    for (const BindSeg& g : res[ji].segs) {
+      const long late = g.last - g.start;
+      if (g.start < 0) {
+        REQUIRE(g.last < 0, "%s at %g Hz, glide %g, %s: a bind (sample %ld) before any move", j.scn.what, j.sr, j.glide, j.mod ? "modulated" : "unmodulated", g.last);
+      } else if (g.last >= g.start) {
+        maxLateMs = std::max(maxLateMs, 1000.0 * static_cast<double>(late) / j.sr);
+        ++binding;
+        REQUIRE(static_cast<double>(late) <= kCapToCap * echo::k::kExpSlewS * j.sr,
+                "%s at %g Hz, glide %g, %s: the bound still binds %ld samples = %.3f ms after the last event (limit %.2f ms): it binds in a relaxation", j.scn.what, j.sr, j.glide,
+                j.mod ? "modulated" : "unmodulated", late, 1000.0 * static_cast<double>(late) / j.sr, 1000.0 * kCapToCap * echo::k::kExpSlewS);
+      }
+    }
+  }
+  if (g_report) std::printf("  REPORT expSlewBinds: %zu runs, %d segments with a bind, the latest %.4f ms after its event (limit %.2f ms)\n", jobs.size(), binding, maxLateMs, 1000.0 * kCapToCap * echo::k::kExpSlewS);
+  REQUIRE(binding > 0, "no run bound at all: the census sees nothing (vacuous)");
   return true;
 }
 
@@ -3402,7 +3760,7 @@ const std::vector<Check> kChecks = {
     {"true bypass: settled-off filters are bit-identical whatever their cutoffs", trueBypass, {"loopFilterInCircuit"}},
     {"loop bound: measured |H_loop| <= 1 at 4 rates x 7 loop settings (D-005)", loopBound, {"loopGainOverOne", "dcTextbook"}},
     {"sample-rate independence: time exact, loop filter within 0.5 dB at 44.1-192 kHz", srIndependence, {"fixedCoefRate"}},
-    {"block-size independence: blocks 1, 7, 64, 256, 333, 4096 and random render bit-identically", blockIndependence, {"rampPerBlock", "blockSteppedD"}},
+    {"block-size independence: blocks 1, 7, 64, 256, 333, 4096 and random render bit-identically", blockIndependence, {"rampPerBlock", "blockSteppedD", "expSlewBlockStart"}},
     {"determinism: interleaved instances = solo; reset() = fresh", determinism, {"sharedState", "resetKeepsLine"}},
     {"silence: exact zero in, exact zero out (9 routing x change modes at 120 %; awake engine)", silence, {"antiDenormalDc"}},
     {"tail: exact zero from the declared tail on; kInfiniteTail at g >= 1", tailExactZero, {"noTailGate"}},
@@ -3469,6 +3827,14 @@ const std::vector<Check> kChecks = {
      {"scaleTailUnscaled", "scaleIgnoredSynced"}},
     {"click metric (M2 gate, s fixed at 2.25): sweeps, tempo sweeps and single moves under 2.5 and inside the speed invariants; a planted click over",
      clickSweep, {"integerRead", "blockSteppedD", "bareJump", "noLawCap", "scaleBypassesChange"}},
+    {"click metric over the probe's phase: a move reversed mid-glide (both laws, time.ms / time.div / time.scale free and synced, 1 and 2 octaves, down and up, 100/200/400 ms; 48 and 44.1 kHz) reads under 2.5 at the worst of 8 half-period phases, zero backstop hits",
+     reversalClick, {"expSlewOff"}},
+    {"the click gates' probe-phase sweep sweeps: the 8 shifts are distinct and span half a probe period, and they move a step's reading (an onset's, and a reversal's)",
+     phaseSweepWorks, {"phaseSweepCollapsed"}},
+    {"click metric over the probe's phase: every exponential-law onset (sweeps, single moves, octave steps, plain onsets; 48 and 44.1 kHz) reads under 2.5 at the worst of 8 half-period phases, zero backstop hits",
+     onsetClick, {"expSlewOff"}},
+    {"the exponential law's 0.1 ms bound binds only just after a move (44.1 - 192 kHz; glides 0.01 - 1 s; onsets, reversals, 1 and 2 ms targets, a glide change; modulated): never in a relaxation",
+     expSlewBinds, {"expSlewLong", "expSpuriousRetarget", "expSlewOff"}},
     // ---- M3 B2, T-013 ----
     {"ABI: properties() validates after prepare at 44.1/48/96/192 kHz (latency 0, tail, min_block 1, load 20 ms) and is refused before",
      abiProperties, {"propsNoTail", "loadBoundShort"}},
@@ -3570,7 +3936,7 @@ bool* plantFlag(std::string_view n) {
       {"tailClockIgnoresMotion", &tailClockIgnoresMotion}, {"seedResendRestarts", &seedResendRestarts}, {"loadKeepsModState", &loadKeepsModState},
       {"tempoStealsKeyMove", &tempoStealsKeyMove}, {"followNoTrackInFade", &followNoTrackInFade}, {"followKeepsResidual", &followKeepsResidual},
       {"modNoFloorBound", &modNoFloorBound}, {"wakeOffsetFromZero", &wakeOffsetFromZero}, {"tapeLinearHistory", &tapeLinearHistory},
-      {"glideFixedRate", &glideFixedRate},
+      {"glideFixedRate", &glideFixedRate}, {"expSlewOff", &expSlewOff}, {"expSlewLong", &expSlewLong}, {"phaseSweepCollapsed", &phaseSweepCollapsed}, {"expSlewBlockStart", &expSlewBlockStart}, {"expSpuriousRetarget", &expSpuriousRetarget},
       {"propsNoTail", &propsNoTail}, {"tailWraps32", &tailWraps32}, {"paramNoClass", &paramNoClass},
       {"processReadsAfterWrite", &processReadsAfterWrite}, {"loadBoundShort", &loadBoundShort},
       {"latchClears", &latchClears}, {"tapBeforeGain", &tapBeforeGain}, {"prepareRampsIn", &prepareRampsIn},
@@ -3651,7 +4017,7 @@ const std::vector<AdmissionRow>& admissionRows() {
       {"A10", "Real-time", {noAlloc, a10Session, ftzSet, ftzRestored},
        "locks and syscalls by review only: no RealtimeSanitizer on this toolchain, and the engine calls nothing that locks"},
       {"A11", "Parameter classes",
-       {switchesClickFree, crossfadeEqualGain, jumpIsShortFade, deferral, modSeeded, clickSweep, scaleControlMove, loadLeavesDevice, presetValidate, b265Port},
+       {switchesClickFree, crossfadeEqualGain, jumpIsShortFade, deferral, modSeeded, clickSweep, reversalClick, onsetClick, phaseSweepWorks, expSlewBinds, scaleControlMove, loadLeavesDevice, presetValidate, b265Port},
        "structural: every flip key's switch declaration in params.json (`check_manifest.py`, with planted bare and length-less switches); the B265 reading REPORTED, never judged (`.harness/b265-report.txt`)"},
       {"A12", "Macros", {presetA12, presetCurves, presetValidate, presetFactoryBank}, "the factory bank: the init plus seven, each valid, loading as its own values (T-021); B408 for the bank is stated in the run's REPORT lines"},
       {"A13", "Corner presets", {presetA13}, "the horde preset's own save and reload is horde's"},
@@ -3710,7 +4076,7 @@ std::string admissionDoc(const std::vector<bool>& passed) {
                 "| block-size independence | bit-identical, blocks 1 … 4096 | blockIndependence |\n"
                 "| determinism, reset, state | bit-identical | determinism, a2ResetIdentity, stateComplete, stateExact |\n"
                 "| repitch | output pitch within %g cent; the tape model within %g sample and %g cents | repitchCents, tapeLaw |\n"
-                "| moving-time clicks | M2 metric <= %g at s = 2.25, zero backstop hits (D-023) | clickSweep |\n"
+                "| moving-time clicks | M2 metric <= %g at s = 2.25, zero backstop hits (D-023); reversals and exponential onsets at the worst of 8 probe phases (D-049) | clickSweep, reversalClick, onsetClick |\n"
                 "| macro curves | endpoints exact; closed form within %g (relative) | presetCurves |\n"
                 "| Clear's fade | within %g of the no-Clear output times the 20 ms ramp | clearFade, clearLiveWet |\n",
                 tol::kCentroidSamples, tol::kGen2Ratio, tol::kGenLater, tol::kLoopGainSlack, tol::kSrLoopDb, tol::kRepitchCents, tol::kTapeSamples,
@@ -3720,6 +4086,9 @@ std::string admissionDoc(const std::vector<bool>& passed) {
 }
 
 int main(int argc, char** argv) {
+  // --threads N: the click gates' render pool (at most the hardware's; 1 = serial). The results are the same for any N.
+  for (int a = 1; a + 1 < argc; ++a)
+    if (std::string_view(argv[a]) == "--threads") g_threads = std::atoi(argv[a + 1]);
   // --click-report: print every click reading (threshold lifted), clean and,
   // in echo_plants, under each click plant. The numbers the threshold is set on.
   if (argc > 1 && std::string_view(argv[1]) == "--click-report") {
@@ -3727,11 +4096,17 @@ int main(int argc, char** argv) {
     g_report = true;
     Detail d;
     clickSweep(d);
+    phaseSweepWorks(d);
+    reversalClick(d);
+    onsetClick(d);
+    expSlewBinds(d);
 #ifdef ECHO_PLANTS
-    for (const char* p : {"bareJump", "integerRead", "blockSteppedD", "noLawCap", "scaleBypassesChange"}) {
+    for (const char* p : {"bareJump", "integerRead", "blockSteppedD", "noLawCap", "scaleBypassesChange", "expSlewOff"}) {
       std::printf("  -- under plant %s\n", p);
       *plantFlag(p) = true;
       clickSweep(d);
+      reversalClick(d);
+      onsetClick(d);
       *plantFlag(p) = false;
     }
 #endif
@@ -3767,7 +4142,7 @@ int main(int argc, char** argv) {
                         "stereoInvertsR", "pingpongBothLines", "foldScaleSlip", "foldOctaveNarrow", "foldNotchUnsmoothed",
                         "zoneAnyMode", "zoneAtEqual", "pingpongInvertsR", "presetStateOversized", "presetPatchOfDropsKey", "factoryHomeOffset", "factoryLabelTypo",
                         "scaleIgnoredSynced", "scaleNotSnapped", "scaleBypassesChange", "scaleAfterClamp", "scaleResendIsMove", "scaleTailUnscaled",
-                        "scaleMoveSwallowed", "scaleSnapRounds", "scaleOffsetRewrite", "stateMissingScaleDefaults"}) {
+                        "scaleMoveSwallowed", "scaleSnapRounds", "scaleOffsetRewrite", "stateMissingScaleDefaults", "expSlewOff", "expSlewLong", "phaseSweepCollapsed", "expSlewBlockStart", "expSpuriousRetarget"}) {
     bool guarded = false;
     for (const auto& c : kChecks)
       for (const char* p : c.plants) guarded = guarded || std::string_view(p) == n;

@@ -269,6 +269,7 @@ const ECHO_K = {
   modRateGlideS: 0.1,   // mod rate glides in log-frequency
   filtGlideS: 0.010,    // cutoff glide time constant, log-frequency
   sMin: 0.25, sMax: 4,  // HARD read-speed invariant (D-006): never reversed, never past 4x
+  expSlewS: 1e-4,       // the exponential law's safety bound: its speed moves at most 1 per this (SPEC §3.6, D-049 A1)
   capSt: 12,            // every repitch law's pitch cap, both directions
   modSlopeMax: 0.25,    // |d(offset)/dt| of the modulation, enforced as a slew limit.
                         // With the cap: s >= 1 - (1 - 2^-1) - 0.25 = 0.25 and s <= 1 + 1 + 0.25, inside the bound by construction
@@ -675,7 +676,7 @@ class EchoLab {
     if (lab.fallback && h.law !== "onepoleD" && Math.abs(gap) / (gap < 0 ? up : dn) > ECHO_K.fallbackS * sr) {
       st.fallbacks++; this._startFade(h, h.D, T, this.p[EI["time.xfadeMs"]] / 1000, st); return;
     }
-    const tau = Math.max(1, this.p[EI["time.glide"]] * sr);
+    const tau = Math.max(1, this.p[EI["time.glide"]] * sr), vPrev = h.V;
     switch (h.law) {
       case "slew": h.V = gap; break;                              // reference (a): the cap below IS the law
       case "crit2": {                                             // reference (b)
@@ -707,6 +708,14 @@ class EchoLab {
     }
     // The law's pitch cap, then the hard invariant as a backstop.
     if (h.law !== "onepoleD") h.V = h.V < -up ? -up : h.V > dn ? dn : h.V;
+    // The exponential law's safety bound (D-049 A1): its V is a memoryless function of (D, T), so a new target
+    // (an onset, or a move reversed mid-glide) would step the speed by up to 1.5 in one sample, a click (M2 up to
+    // 5.1). Bound the step per second, not per sample, so it holds at any rate. It binds only where the law's V
+    // jumps and sits after the cap: the result lies between two values the cap already allowed.
+    if (h.law === "logpole" && this.lab.plant !== "expSlewOff") {
+      const a = 1 / (ECHO_K.expSlewS * sr);
+      h.V = h.V < vPrev - a ? vPrev - a : h.V > vPrev + a ? vPrev + a : h.V;
+    }
     if (Math.abs(T - (h.D + h.V)) < 1e-9 && Math.abs(h.V) <= Math.abs(gap)) { h.D = T; h.V = 0; }
     else h.D += h.V;
     if (h.law === "varispeed") h.c = this.n - h.D;
