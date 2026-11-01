@@ -399,6 +399,85 @@ function generations(params, sr, lab) {
   plant(unbounded > 2.5, `M2 flags the exponential law without its speed-step bound (${unbounded.toFixed(2)})`);
 }
 
+// ---- 18c - 18f. T-041 (D-049 A4, A5): the other one-sample speed steps, and the lab's twins of the core's fixes.
+// The core's census found three defects that read in proportion to the sample rate: the tape law's cap release
+// (the deadbeat catch-up steps the speed by 2 - s_model), a fade that stops its outgoing head dead (a step of 1.0),
+// and a linear fade weight (a kink). The lab carries the same three fixes (braking catch-up with the target term,
+// outgoing head slewed to rest, raised-cosine weights), each with its own planted control (`lab.plant`), and each case
+// below reads red when its fix is removed. Like 18b they render at a rate where the defect is readable (a step reads in
+// proportion to the rate) and at 4 probe phases an eighth of a cycle apart, the worst gated.
+{
+  const worstM2 = (SRx, secs, params, events, lab, sMax) => {
+    const n = blocks(secs * SRx);
+    let w = 0;
+    for (let j = 0; j < 4; j++) {
+      const src = new Float32Array(n), nf = Math.round(0.01 * SRx);
+      for (let i = 0; i < n; i++) src[i] = 0.5 * Math.sin(2 * Math.PI * (X.ECHO_PROBE_HZ * i / SRx + j / 8)) * (i < nf ? 0.5 - 0.5 * Math.cos(Math.PI * i / nf) : 1);
+      const r = X.echoRender({ sr: SRx, seconds: secs, srcL: src, lab, params, events });
+      w = Math.max(w, X.echoClickM2(r.L, Math.round(0.2 * SRx), r.L.length, 0.5, X.ECHO_PROBE_HZ, SRx, sMax));
+    }
+    return w;
+  };
+  const base = { "time.sync": 0, "time.change": 0, "fb.amount": 0, "filt.loop.on": 0, mix: 100 };
+  // 18c. The tape law's plain 500 -> 125 ms move holds the cap (speed 2.0) while the model runs ahead and lands on it:
+  // 2.4 at 48 kHz and 3.2 at 96 in the core, more at 192. The braking catch-up lands it without a step.
+  {
+    const run = lab => worstM2(96000, 2.2, Object.assign({}, base, { "time.ms": 500, "time.law": 0, "time.glide": 0.3 }), [{ t: 1, key: "time.ms", v: 125 }], lab, 2.25);
+    const fixed = run({ fallback: true }), kink = run({ fallback: true, plant: "tapeKinkUnbounded" });
+    check(fixed < 2.5, `M2: the tape law's 500 -> 125 ms move reads clean at 96 kHz, worst of 4 probe phases (${fixed.toFixed(2)} < 2.5)`);
+    plant(kink > 2.5, `M2 flags the tape law's cap release without the braking catch-up (${kink.toFixed(2)})`);
+  }
+  // 18c'. The catch-up gate M2 cannot replace (D-049 A5), read off the sounding position: after the cap lets go the
+  // speed does not ring (>= 0.9 shortening, <= 1.1 lengthening), and a lengthening move held at the lower cap does not
+  // pass its target (by more than 0.1 sample). A bound with no brake rings (speed 0.5, and past the target).
+  // The target term itself acts below 1e-5 sample in the lab's soft-landing model, so it has no control here; the core's gate carries it.
+  {
+    const SRt = 96000, secs = 3.2, n = blocks(secs * SRt);
+    const move = (from, to, glide, lab) => {
+      const r = X.echoRender({ sr: SRt, seconds: secs, srcL: new Float32Array(n).fill(0.1), trace: true, lab: Object.assign({ fallback: true }, lab),
+        params: Object.assign({}, base, { "time.ms": from, "time.law": 0, "time.glide": glide }), events: [{ t: 1, key: "time.ms", v: to }] });
+      const tr = r.trace, shorten = to < from, T = to / 1000 * SRt;
+      let run = 0, best = 0, end = -1;
+      for (let i = Math.round(1.0 * SRt) + 1; i < n; i++) {
+        const sp = 1 - (tr[i] - tr[i - 1]);
+        run = (shorten ? sp >= 2 - 1e-9 : sp <= 0.5 + 1e-9) ? run + 1 : 0;
+        if (run > best) { best = run; end = i; }
+      }
+      let speed = shorten ? Infinity : -Infinity, pass = 0;
+      for (let i = end + 1; best > 50 && i <= Math.min(n - 1, end + Math.round(0.02 * SRt)); i++) {
+        const sp = 1 - (tr[i] - tr[i - 1]);
+        speed = shorten ? Math.min(speed, sp) : Math.max(speed, sp);
+        pass = Math.max(pass, shorten ? T - tr[i] : tr[i] - T);
+      }
+      return { held: best, speed, pass };
+    };
+    const sh = lab => move(500, 60, 0.01, lab), lg = lab => move(125, 500, 0.01, lab);
+    const a = sh(), b = lg();
+    check(a.held > 50 && a.speed >= 0.9 && a.pass <= 0.1, `catch-up: after a 500 -> 60 ms move's cap releases the speed stays >= 0.9 (${a.speed.toFixed(3)}) and the head stays within 0.1 sample of the target (${a.pass.toFixed(3)}), 96 kHz`);
+    check(b.held > 50 && b.speed <= 1.1 && b.pass <= 0.1, `catch-up: after a 125 -> 500 ms move held at the lower cap releases the speed stays <= 1.1 (${b.speed.toFixed(3)}) and the head does not pass the target (${b.pass.toFixed(3)} sample, limit 0.1), 96 kHz`);
+    const nb = sh({ plant: "tapeNoBrake" }), nl = lg({ plant: "tapeNoBrake" });
+    plant(nb.speed < 0.9, `catch-up check detects a bound with no brake after a shortening move (the speed rings down to ${nb.speed.toFixed(3)})`);
+    plant(nl.speed > 1.1 && nl.pass > 0.1, `catch-up check detects a bound with no brake after a lengthening move (speed up to ${nl.speed.toFixed(3)}, ${nl.pass.toFixed(3)} sample past the target)`);
+  }
+  // 18d. A fade's outgoing head keeps its speed and slews it to rest: D-006's fallback taken from a head moving at speed 2.0
+  // (500 -> 125 ms, then 12 s 60 ms in) read 3.5 at 48 kHz in the core when the fade froze it.
+  {
+    const run = lab => worstM2(48000, 2.4, Object.assign({}, base, { "time.ms": 500, "time.law": 1, "time.glide": 0.3 }),
+      [{ t: 1, key: "time.ms", v: 125 }, { t: 1.06, key: "time.ms", v: 12000 }], lab, 2.25);
+    const fixed = run({ fallback: true }), frozen = run({ fallback: true, plant: "fbFrozenOutgoing" });
+    check(fixed < 2.5, `M2: a fallback fade taken from a head moving at speed 2.0 reads clean, worst of 4 probe phases (${fixed.toFixed(2)} < 2.5)`);
+    plant(frozen > 2.5, `M2 flags a fade that freezes its outgoing head (${frozen.toFixed(2)})`);
+  }
+  // 18e. Raised-cosine fade weights: a 3 ms jump between two copies a half probe period apart (500 -> 501.158 ms) reads
+  // its weight's kinks, in proportion to the rate: linear weights read about 3 at 192 kHz, raised-cosine ones far less.
+  {
+    const run = lab => worstM2(192000, 1.6, Object.assign({}, base, { "time.ms": 500, "time.change": 2, "time.law": 0 }), [{ t: 1, key: "time.ms", v: 500 + 0.5 * 1000 / X.ECHO_PROBE_HZ }], lab, 2.25);
+    const smooth = run({}), linear = run({ plant: "fadeLinear" });
+    check(smooth < 2.5, `M2: the 3 ms jump reads clean at 192 kHz, worst of 4 probe phases (${smooth.toFixed(2)} < 2.5): its weight is a raised cosine`);
+    plant(linear > 2.5, `M2 flags a linear fade weight (${linear.toFixed(2)})`);
+  }
+}
+
 // ---- 19. Sleep and wake (RS-7.6, A16 as amended): an instance horde stopped
 // calling at rest matches its never-slept twin from the wake on, with the
 // parameters changed during sleep at their targets.

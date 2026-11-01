@@ -130,7 +130,7 @@ human ratifies them; goldens once cut; `core/manifest.lock.json` and the
 `core/include/echo/module_version.h` it generates (D-041: only `tools/manifest_lock.py
 write --decision D-NNN` after the human's ruling).
 
-**Verify targets.** `fast` (~20 s warm, ~90 s from a cold build): kit integrity,
+**Verify targets.** `fast` (~2–3 min since T-041's four-rate click gates, D-049 A5): kit integrity,
 leak, private-name, structure, manifest, intake pin, legal gate, the lab smoke,
 and the core gate (`-Werror` Release build of `core/`; the M1 suite clean and
 under each of its planted faults; the C++ table against `spec/params.json`; the

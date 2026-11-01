@@ -514,7 +514,7 @@ int main(int argc, char** argv) {
   o += "| worst | the largest of worst-repitch, worst-crossfade and worst-morph, per input (D-045) |\n";
   o += "\n## Memory per instance (row 15; SPEC §11)\n\nEvery byte `prepare()` allocates, with a 4096-sample maximum block (the block size "
        "allocates nothing); nothing is allocated after it. A **high-water mark**: the lines are never shrunk, so an instance re-prepared at a "
-       "lower rate keeps the larger figure. Plus `sizeof(Echo)` (2.5 KiB).\n\n| rate | MiB | of which the two lines |\n|---|---|---|\n";
+       "lower rate keeps the larger figure. Plus `sizeof(Echo)` (2.6 KiB).\n\n| rate | MiB | of which the two lines |\n|---|---|---|\n";
   for (const auto& m : mem) {
     std::snprintf(t, sizeof t, "| %.1f kHz | %.2f | %.2f |\n", m.sr / 1000, m.mib, m.linesMib);
     o += t;

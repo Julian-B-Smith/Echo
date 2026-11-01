@@ -375,7 +375,8 @@ class EchoLab {
   _newHead() {
     return { D: 0, V: 0, T: 0, tc: 0, fade: false, dA: 0, dB: 0, fi: 0, fn: 1, pending: NaN,
              mode: 0, law: "varispeed", tempo: false, lastPos: 0, v: 1, c: 0, pNow: 0,
-             headId: 0, statId: 0, statPos: 0, tapeRun: false, init: true };
+             headId: 0, statId: 0, statPos: 0, tapeRun: false, init: true,
+             vA: 0, mD: 0, lastMod: 0 };  // vA: a fade's outgoing head's speed; mD: the tape model's delay one sample ago; lastMod: the modulation offset this sample
   }
 
   get(key) { return this.p[EI[key]]; }
@@ -491,7 +492,7 @@ class EchoLab {
     for (let k = 0; k < 2; k++) {
       const h = this.heads[k];
       Object.assign(h, this._newHead());
-      h.D = h.T = h.dA = h.dB = h.lastPos = h.statPos = this.Tt[k];
+      h.D = h.T = h.dA = h.dB = h.lastPos = h.statPos = this.Tt[k]; h.vA = 0;
       this._tapeRebuild(k, h);
     }
     // A fresh instance is AT REST (idle): nothing rings, so the first block
@@ -621,12 +622,27 @@ class EchoLab {
   _startFade(h, from, to, s, st) {
     h.fade = true; h.dA = from; h.dB = to; h.fi = 0; h.fn = Math.max(1, Math.round(s * this.sr));
     h.pending = NaN; st.fades++;
+    h.vA = h.V; h.V = 0;           // the outgoing head leaves at the speed it had (D-049 A4); a head at rest has none
+    this._slewOut(h);              // the fade's first sample moves the outgoing head too: its speed is continuous
+  }
+  // The outgoing head of a fade (D-049 A4). The fade used to freeze it where it stood, so a head moving at speed 2.0
+  // or 0.5 (a glide the fallback or a crossfade-mode retarget cut short) went to 1.0 in one sample: a step that reads
+  // 3.5 at 48 kHz, in proportion to the rate. It now keeps its speed and slews it to rest under the exponential law's
+  // per-second bound (ECHO_K.expSlewS): vA^2 / (2a) samples of travel at most (2.4 at 48 kHz), held inside the line.
+  _slewOut(h) {
+    if (this.lab.plant === "fbFrozenOutgoing" || h.vA === 0) return;
+    const a = 1 / (ECHO_K.expSlewS * this.sr);
+    h.vA = h.vA > 0 ? Math.max(0, h.vA - a) : Math.min(0, h.vA + a);
+    // The clamp is sign-aware, as the core's: the read is dA + the offset, so the floor on dA is minRead - offset (the |offset| form
+    // bound under a modulated fade from a shortening glide and stepped the speed, D-049 A6).
+    const lo = ECHO_K.minReadSamples - h.lastMod, hi = this.N - 8 - h.lastMod, d = h.dA + h.vA;
+    h.dA = d < lo ? lo : d > hi ? hi : d;
   }
   // Tape law: a steady tape at speed v = 1/D (head spacing L = 1 tape unit).
   _tapeRebuild(k, h) {
     const tp = this.tape[k], N = this.N; h.v = 1 / h.D;
     for (let a = 0; a < N; a++) { let i = (this.w - 1 - a) % N; if (i < 0) i += N; tp[i] = -a * h.v; }
-    h.pNow = 0; h.c = this.n - h.D;
+    h.pNow = 0; h.c = this.n - h.D; h.mD = h.D;   // the steady tape IS the head: the catch-up starts on the model
   }
   // The behaviour a NEW move gets: time.change for a knob, automation or morph
   // move; time.tempoMode for a move caused by the host tempo alone. Latched for
@@ -643,6 +659,7 @@ class EchoLab {
 
   _headStep(k, h, T, cls, mod, st) {
     const lab = this.lab, sr = this.sr;
+    h.lastMod = mod;
     const Tprev = h.T; h.T = T;
     if (T !== Tprev) {                                            // a new move (or a retarget)
       if (cls === 1) h.tempo = false; else if (cls === 2) h.tempo = true;
@@ -653,8 +670,9 @@ class EchoLab {
     const mode = h.mode, xf = mode === 3 ? ECHO_K.jumpS : this.p[EI["time.xfadeMs"]] / 1000;
 
     if (h.fade) {
+      this._slewOut(h);
       if (++h.fi < h.fn) { h.pending = T; return; }
-      h.fade = false; h.D = h.dB; h.V = 0; h.headId++;
+      h.fade = false; h.D = h.dB; h.V = 0; h.vA = 0; h.headId++;
       if (h.law === "varispeed") this._tapeRebuild(k, h);
       const tgt = h.pending === h.pending ? h.pending : T;
       // The queue (D-007's deterministic retrigger rule): a target that moved
@@ -677,6 +695,7 @@ class EchoLab {
       st.fallbacks++; this._startFade(h, h.D, T, this.p[EI["time.xfadeMs"]] / 1000, st); return;
     }
     const tau = Math.max(1, this.p[EI["time.glide"]] * sr), vPrev = h.V;
+    let tapeOff = false;                                          // the tape head is off its model this sample (D-049 A4)
     switch (h.law) {
       case "slew": h.V = gap; break;                              // reference (a): the cap below IS the law
       case "crit2": {                                             // reference (b)
@@ -700,14 +719,44 @@ class EchoLab {
         // tape model runs ahead of the cap, the head follows at the cap.
         for (let steps = 0; steps < 4 && j + 1 <= this.n && tp[a1] <= target; steps++) { j++; a0 = a1; a1 = a1 + 1 === N ? 0 : a1 + 1; }
         const p0 = tp[a0], p1 = tp[a1];
-        const c = j + (p1 > p0 ? (target - p0) / (p1 - p0) : 0);
+        // The fraction is held to 1 (D-049 A4): when the 4-step search runs out before it brackets the target (the head is
+        // capped far behind the model), the read position is the search's reach, not an extrapolation past it, so the catch-up's
+        // model delay is bounded and its error e with the head is real once the model slows into reach.
+        const c = j + (p1 > p0 ? Math.min(1, (target - p0) / (p1 - p0)) : 0);
         h.V = (this.n - c) - h.D;
+        // The braking catch-up (D-049 A4). The cap holds the head at speed 2.0 (or 0.5) while the model runs ahead of it,
+        // and the deadbeat V above then lands it on the model in two samples: a speed step of 2 - s_model that reads
+        // up to 4.1 at 48 kHz. So while the head is OFF the model, aim its speed at the model's slope plus the largest
+        // closing speed from which the bound a can still stop it on the model, sqrt(a^2/4 + 2a|e|) - a/2 (the discrete
+        // stopping speed), never more than |e|. The bound alone rings (the plant tapeNoBrake); on the model the law's
+        // own V stands.
+        const mD = h.D + h.V, slope = mD - h.mD, e = h.D - h.mD;
+        h.mD = mD;
+        if (lab.plant !== "tapeKinkUnbounded" && lab.plant !== "tapeNoBrake" && Math.abs(e) > 1e-9) {
+          const a = 1 / (ECHO_K.expSlewS * sr), r = Math.min(Math.abs(e), Math.sqrt(0.25 * a * a + 2 * a * Math.abs(e)) - 0.5 * a);
+          h.V = slope + (e > 0 ? -r : r); tapeOff = true;
+        }
         break;
       }
       case "onepoleD": h.V = gap / tau; break;                    // REJECTED (D-006): plant only
     }
     // The law's pitch cap, then the hard invariant as a backstop.
     if (h.law !== "onepoleD") h.V = h.V < -up ? -up : h.V > dn ? dn : h.V;
+    // The target brake (D-049 A5): the model can stop dead at its target T (a lengthening move held at the lower cap
+    // releases at the landing), and a head still closing on T would pass it. While off the model, its speed TOWARD T
+    // is limited to the discrete stopping speed from T's distance, so it can always stop on T under the bound below.
+    // Kept for PARITY with the core, where a lengthening move held at the lower cap has no model to brake on and this term is
+    // the brake (the core's plant tapeNoTargetBrake). In the lab the model's own landing is soft: over a 40-move grid the term moves the
+    // head by less than 1e-5 sample, so no honest must-fail case exists for it here and it has no planted control (D-049 A6).
+    if (tapeOff) {
+      const a = 1 / (ECHO_K.expSlewS * sr), g = T - h.D, stop = Math.sqrt(0.25 * a * a + 2 * a * Math.abs(g)) - 0.5 * a;
+      if (g > 0) { if (h.V > stop) h.V = stop; } else if (h.V < -stop) h.V = -stop;
+    }
+    // The tape law's catch-up bound (D-049 A4): the exponential law's bound, below, on the tape law's V too.
+    if (h.law === "varispeed" && lab.plant !== "tapeKinkUnbounded") {
+      const a = 1 / (ECHO_K.expSlewS * sr);
+      h.V = h.V < vPrev - a ? vPrev - a : h.V > vPrev + a ? vPrev + a : h.V;
+    }
     // The exponential law's safety bound (D-049 A1): its V is a memoryless function of (D, T), so a new target
     // (an onset, or a move reversed mid-glide) would step the speed by up to 1.5 in one sample, a click (M2 up to
     // 5.1). Bound the step per second, not per sample, so it holds at any rate. It binds only where the law's V
@@ -851,7 +900,7 @@ class EchoLab {
         lg = --this.loadLeft / this.rampN;
         if (this.loadLeft === 0) {
           this._clearLoop();
-          for (let k = 0; k < 2; k++) { const h = this.heads[k]; h.D = h.T = this.Tt[k]; h.V = 0; h.fade = false; h.headId++; this._latch(h); if (h.law === "varispeed") this._tapeRebuild(k, h); }
+          for (let k = 0; k < 2; k++) { const h = this.heads[k]; h.D = h.T = this.Tt[k]; h.V = 0; h.vA = 0; h.fade = false; h.headId++; this._latch(h); if (h.law === "varispeed") this._tapeRebuild(k, h); }
         }
       }
       let y0 = 0, y1 = 0;
@@ -862,7 +911,7 @@ class EchoLab {
         if (h.law === "varispeed" && !h.tapeRun) {
           // Outside the tape law's glide the tape still runs, steadily at 1/D,
           // so the law resumes from a consistent speed history.
-          h.v = 1 / h.D; h.pNow += h.v; this.tape[j][this.n % N] = h.pNow; h.c = this.n - h.D;
+          h.v = 1 / h.D; h.pNow += h.v; this.tape[j][this.n % N] = h.pNow; h.c = this.n - h.D; h.mD = h.D;
         }
         h.tapeRun = false;
         // Read. Mid-fade both heads sound, equal-gain (RS-3.6, D-007); the
@@ -870,9 +919,12 @@ class EchoLab {
         let yy, sp;
         if (h.fade) {
           const wF = (h.fi + 1) / h.fn, pa = this._pos(h.dA + md, st), pb = this._pos(h.dB + md, st);
+          // Raised-cosine weights (D-049 A4): w + (1 - w) = 1 still (equal-gain), but the slope is 0 at both ends. A linear
+          // weight kinks there, and a kink reads in proportion to the rate (the 3 ms jump: 1.9 / 3.6 / 7.0 at 48 / 96 / 192 kHz).
+          const w = lab.plant === "fadeLinear" ? wF : 0.5 - 0.5 * Math.cos(wF * Math.PI);
           yy = lab.plant === "equalPower"
             ? Math.cos(wF * Math.PI / 2) * this._read(buf, pa) + Math.sin(wF * Math.PI / 2) * this._read(buf, pb)
-            : (1 - wF) * this._read(buf, pa) + wF * this._read(buf, pb);
+            : (1 - w) * this._read(buf, pa) + w * this._read(buf, pb);
           sp = pa;
         } else {
           sp = this._pos(h.D + md, st);

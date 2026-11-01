@@ -20,6 +20,10 @@ and classes are unchanged.
 **Amended 2026-10-30 by D-049 A1 and A2** (§3.6: the exponential law's rate is bounded to one unit of speed per 0.1 ms,
 so a retarget, an onset, a `time.glide` change or a move reversed mid-glide no longer steps it in one sample and no
 longer clicks), from T-040's measurements and its critic review.
+**Amended 2026-10-30 by D-049 A4 and A5** (§3.5 – 3.7: the time crossfade's weight is a raised cosine, still summing to 1; the tape law's catch-up
+to its model after the cap is braked and bound by the same 0.1 ms safety bound; a fade's outgoing head keeps its speed and slews it to rest
+instead of stopping dead; the catch-up also brakes against its target, so a lengthening move held at the lower cap does not pass it; the click
+cases are gated at 44.1 – 192 kHz; the lab carries the same three fixes), from T-041's measurements.
 
 **What this is.** The behaviour Echo must have, stated so the C++ core (M1–M3) can be built and tested against it.
 The machine-readable half is [`params.json`](params.json): every key, unit, range, default, morph class, rate
@@ -142,7 +146,13 @@ an offset (a **control move**), or when the host tempo changes a synced time (a 
 | **crossfade** | a second head starts at the new time and the two are crossfaded, equal-gain, over `time.xfadeMs` |
 | **jump** | the same, over **3 ms**: an instant retime with no glide, no comb and no click (Q-A5, ruled, D-016) |
 
-**Crossfade** (D-007): equal-gain, never equal-power (correlated copies would sum to 1.41× mid-fade; RS-3.6).
+**Crossfade** (D-007): equal-gain, never equal-power (correlated copies would sum to 1.41× mid-fade; RS-3.6). The
+weight is a **raised cosine**, w = ½ − ½ cos(π x) for x from 0 to 1, with 1 − w on the outgoing head (D-049 A4): the
+two still sum to 1, but the weight's slope is zero at both ends. A linear weight kinks there, and a kink reads as a click in proportion to the
+sample rate (the 3 ms jump read 1.9, 3.6 and 7.0 at 48, 96 and 192 kHz); a smooth one reads the same at every rate.
+**The outgoing head** (D-049 A4) keeps the speed it had when the fade starts and slews it to rest under the §3.6 bound
+(below), so the speed is continuous. It used to stop where it stood, which stepped a head moving at speed 2.0 or 0.5 to
+1.0 in one sample (3.5 at 48 kHz, 14 at 192 kHz). It travels at most 2.4 samples at 48 kHz (9.6 at 192 kHz) and stays inside the line.
 **Retrigger rule: a queue, latest target wins** — a target that arrives mid-fade waits, and when the fade ends the
 head fades to the most recent target (intermediate ones are dropped). Two heads at most, deterministic. A move of
 less than half a sample starts no fade.
@@ -159,8 +169,8 @@ Reading at a moving delay D(t) plays at speed s = 1 − dD/dt, a pitch ratio of 
 
 | `time.law` | law | character (tape: measured on the lab, 0.5 ↔ 0.25 s, glide 0.3 s, 48 kHz; exponential: measured on the C++ core, `core/tests`, D-049) |
 |---|---|---|
-| **tape** (default) | varispeed: the tape speed lags its target with time constant `time.glide`; the heads stay put, and a repeat recorded at speed v(t−D) plays at v(t) | each repeat carries the speed history it was recorded under; peak +9.1 / −6.7 st; M2 0.72 |
-| **exponential** | a one-pole on ln D with time constant `time.glide`, under the rate-step safety bound below (not part of the law) | the rate rises to its onset value within 0.1 ms per unit of speed and then relaxes; a move reversed mid-glide turns the rate over within 0.15 ms and not in one sample; reaches the cap. Gated at 44.1 and 48 kHz, worst of 8 probe phases: M2 ≤ 1.009 on every reversal and ≤ 0.964 on every plain onset (an unbounded step read up to 3.5 at an onset and 5.1 at a reversal, depending on the probe's phase). Not gated: 96 and 192 kHz reversals read 1.029 and 1.044 (the critic's census, D-049 A2); through the fallback crossfade below the exponential law reads about 3.5 and 7.0 at those rates, T-041's item |
+| **tape** (default) | varispeed: the tape speed lags its target with time constant `time.glide`; the heads stay put, and a repeat recorded at speed v(t−D) plays at v(t) | each repeat carries the speed history it was recorded under; peak +9.1 / −6.7 st; M2 0.72. Gated at 44.1 – 192 kHz, worst of 8 probe phases: M2 ≤ 1.06 on every reversal, onset, `time.glide` change and fallback (the catch-up below, D-049 A4) |
+| **exponential** | a one-pole on ln D with time constant `time.glide`, under the rate-step safety bound below (not part of the law) | the rate rises to its onset value within 0.1 ms per unit of speed and then relaxes; a move reversed mid-glide turns the rate over within 0.15 ms and not in one sample; reaches the cap. Gated at 44.1, 48, 96 and 192 kHz, worst of 8 probe phases: M2 ≤ 1.043 on every reversal, ≤ 1.054 on every plain onset and ≤ 1.059 on every sweep, fallback and retarget (an unbounded step read up to 3.5 at an onset and 5.1 at a reversal at 48 kHz, in proportion to the rate: D-049 A4 closed the two defects that kept 96 and 192 kHz out of the gate, the fade's frozen head and the weight's kink) |
 
 The other two candidates (asymmetric slew, critically damped 2nd order) stay in the lab as references only.
 
@@ -180,8 +190,28 @@ step (an onset, a retarget, a `time.glide` change), so it is active for at most 
 construction. The bound is per second, not per sample, because a step defect reads in proportion to the sample rate.
 Glide arrival is later by about 0.1 ms.
 
+**The tape law's catch-up (D-049 A4).** The cap holds a head at speed 2.0 (or 0.5) while the tape model runs ahead of
+it, and a head that then landed on the model in one step would change its speed by up to 1.5 in a sample (the free scale
+sweep read 4.1 at 48 kHz and 18.4 at 192; a `time.glide` change mid-move is the same kink). So, **while the head is off the
+model**, its speed is aimed at the model's own speed plus the largest closing speed from which the bound above (the
+same 0.1 ms safety bound, a **safety bound, not part of the law**) can still stop it on the model, and the bound is then
+applied to the tape law's speed as it is to the exponential law's. **The head brakes against the target too** (D-049 A5): its
+speed toward the target is limited to the same discrete stopping speed from the target's distance, because a lengthening move held
+at the lower cap has no model to brake on (the tape search only moves forward, so while the head lags, the model's read is pinned to
+the head): the target term is the brake there, and without it the head passes the target. The head lands on the model and on
+its target without overshoot (at most 0.03 sample; the speed never below 0.975 after a shortening move's release, never above 1.03 after a
+lengthening move's, in the 20 ms after the cap lets go) in about 5 samples at 48 kHz. **On the model the
+law is untouched, sample for sample**: a move that stays inside the cap (the 0.5 ↔ 0.25 s move above) never engages it
+(`catchUps` is 0). The catch-up gate reads the head by direction. A shortening move: the speed stays ≥ 0.9 and the head passes neither the model nor the target
+by more than 0.1 sample. A lengthening move: the speed stays ≤ 1.1 and the head passes the target by at most 0.1 sample (the model half is
+shortening-only, since there the model is pinned to the head). M2 alone passes a bound with no brake, which rings (1.8 samples over
+the model, speed down to 0.5), and a brake without the target term passes a lengthening move's target by 0.03 – 1.7 samples (0.19 at 44.1 kHz,
+1.7 at 192). A fade's outgoing head changes speed by at most the bound a sample across a modulated retarget, its clamp to the line being
+the sign-aware one `modStep` uses.
+
 **Fallback (D-006's hybrid).** If a move would take longer than **3 s** at the cap's rate, the head crossfades
-(§3.5) instead of gliding: a 12 s → 10 ms move crossfades rather than diving for 12 s.
+(§3.5) instead of gliding: a 12 s → 10 ms move crossfades rather than diving for 12 s. The outgoing head of that crossfade
+(and of any crossfade started on a glide in flight) keeps its speed and slews it to rest under the bound above (§3.5, D-049 A4).
 
 **The tape law's real-time bound.** The tape model keeps a history of tape position; finding where the read sits
 is a forward search that may advance at most 4 samples a sample (the speed bound), so its work per sample is
@@ -193,7 +223,7 @@ D-007 ratified a jump mode whose test asserts that the click metric **flags** it
 horde cannot admit a bare jump (A11 as amended: no bare jump of signal-path state at a flip; no step of a morphed
 continuous key). Measured on the lab (probe 431.7 Hz, 48 kHz): a bare jump reads **M2 ≈ 37** on a 0.5 → 0.25 s
 move and ≈ 63 on a 1 Hz time sweep; a **3 ms equal-gain crossfade** reads 0.3 and 0.8. **Ruled: jump is a 3 ms
-equal-gain crossfade.** The bare jump survives only as the click metric's planted must-fail control. This amends
+equal-gain crossfade.** Its weight is §3.5's raised cosine (D-049 A4: a linear 3 ms weight read 3.6 and 7.0 at 96 and 192 kHz). The bare jump survives only as the click metric's planted must-fail control. This amends
 D-007's jump line (D-016).
 
 ### 3.8 Tempo moves (Q-A2, ruled: a key, D-016)

@@ -1384,3 +1384,65 @@ T-040 critic's re-check).**
 3. **The new checks are made cheaper without losing coverage:** their renders run on threads (`std::thread`, results
    checked in a fixed order, so the output stays deterministic), the exponential law runs first so its plant fails
    early, and the phase-sweep detector runs once.
+
+**D-049 A4 — T-041's fixes: a braking catch-up for the tape law, the outgoing head slewed to rest, raised-cosine time
+fades; the depth-20 report goes to T-042 (2026-10-30, the human, four polls on T-041's phase-1 census).** The phase-1
+census (145 cases × 44.1 / 48 / 96 / 192 kHz × 8 half-period phases, unfixed core) read 24 cases over 2.5, worst 18.35
+(the tape free scale sweep at 192 kHz), every one with zero backstop hits. Three mechanisms, each traced to a sample:
+1. **The tape law's cap kink.** The cap holds the head at speed 2.0 while the tape model runs ahead of it; the deadbeat
+   `V = modelD − D` lands the head on the model in two samples, a speed step of 2.0 − s_model (0.59 – 1.17).
+   `time.glide` changed mid-move is the same kink. **Ruled: B, a braking catch-up.** While the head is off the model it
+   aims at the model's slope plus sign(e)·√(2a|e|), with a the D-049 A1 bound (one unit of speed per 0.1 ms), and then
+   takes that bound; on the model it is the law, bit for bit. It is a safety bound, not part of the law, stated in
+   §3.6 beside the exponential law's. Rejected: A (the plain bound overshoots the model by up to 1.8 samples and rings
+   for up to 94, which M2 cannot see) and C (a cap-aware model, which slows the law: t90 438 → 595 ms on 500 → 125).
+2. **The frozen outgoing head.** `startFade` stops the outgoing head dead (a speed step of 1.0 in one sample) at both
+   of its sites: D-006's fallback, and a crossfade-mode move that retargets a glide in flight. **Ruled: D.** The
+   outgoing head keeps its speed and slews it to 1.0 under the same bound, clamped inside the line (at most 2.4 samples
+   of travel at 48 kHz, 9.6 at 192). Rejected: E (gliding on under the law, same M2 but carrying the law's state across
+   a fade).
+3. **The linear time-fade weight** (not a speed step: the 3 ms jump reads 3.6 and 7.0 at 96 and 192 kHz, because the
+   weight's slope kinks and a kink reads in proportion to the rate). **Ruled: folded into T-041.** Every time crossfade
+   (crossfade, jump, fallback, follow) takes raised-cosine weights that still sum to 1 (equal-gain, D-007), stated in
+   §3.5 and §3.7. With B, D and the raised cosine the census reads ≤ 1.06 at every rate.
+4. **A depth-20 report, unconfirmed:** the census's stress run had random `time.ms` gestures at `mod.depthMs` 20 (the
+   key's maximum) read a speed of −870 with reverse > 0, a D-006 breach if real; depth 0 was clean, and the unfixed
+   core did the same. It may be the harness's measurement. **Ruled: a new T-042 reproduces it with the engine's own
+   `SpeedStats` first**; if it is real it blocks T-023, and if it is an artifact that is recorded and the item closes.
+
+**D-049 A5 — T-041's phase-2 rulings: the two test reads, the brake against the target, the lab along, the runtime
+(2026-10-30, the human, four polls on T-041's phase-2 report).**
+1. **Approved:** `Echo` gains `tapeModelDelay(k)` (the tape model's delay, for the catch-up gate's overshoot read) and
+   `SpeedStats::catchUps` (samples where the brake or the bound changed V; 0 on every in-cap move, which is what proves
+   those moves bit-exact), both read-only, written on the audio thread without allocation.
+2. **The brake acts against the target too.** A lengthening move held at the lower cap passed its target by up to
+   1.7 samples at 192 kHz (0.14 at 48), because the model lands faster than the brake follows. The head also brakes
+   against T, so it cannot pass it; criterion 4's gate covers both directions at all four rates, with a plant.
+3. **The lab comes along** (as D-049 A1's did): raised-cosine time fades, the tape law's braking catch-up, the
+   outgoing head slewed to rest, each with a `lab_smoke` case.
+4. **The runtime is accepted:** `echo_tests` ~35 → 45–80 s on 8 threads, `./verify fast` ~2 → 2–3 min (measured under
+   load); re-timed on a quiet machine at the session close, the numbers recorded in the trace.
+
+**D-049 A6 — Criterion 4's lengthening half, and the outgoing head's signed clamp (2026-10-31, the human, two polls on
+the T-041 critic's FIX-THEN-SHIP).**
+1. **Criterion 4 reads by direction.** Shortening: after the cap releases the speed stays ≥ 0.9, and the head passes
+   neither the model nor the target by more than 0.1 sample. Lengthening: the speed stays ≤ 1.1 (a literal "≥ 0.9"
+   cannot hold, since the release starts at the 0.5 cap; the mirror catches the same defect, ringing past unity), and
+   the head passes the target by at most 0.1 sample. The model half is shortening-only, because during a lengthening
+   cap the tape search only moves forward and pins the model's read to the head (measured: `tapeModelDelay` equals
+   the head's delay + 1 for 35 688 samples), so it could never fire; there the target term is the brake. Stated in
+   SPEC §3.6 and the gate's comment.
+2. **The outgoing head's clamp is signed.** It clamped `dA` to `kMinRead + |m|`, tighter than the read floor needs
+   (`dA + m ≥ kMinRead`), so under deep modulation (time.ms 20, `mod.depthMs` 20, 192 kHz) it bound and stepped the
+   head's speed 0.132 in one sample, 2.5× the bound. Fixed with the sign-aware form `modStep` already uses, in the
+   core and the lab, and a modulated fade from a moving head joins `stepClick` at all four rates.
+
+**D-049 A7 — The modulated fade is gated by its own speed bound; modulation's slew stop goes to T-042 (2026-11-01, the
+human, by poll on T-041's phase-4 report).** D-049 A6 put a modulated fade from a moving head into `stepClick`. With the
+signed clamp that fade is clean, but the case still reads M2 2.28 / 4.55 at 96 / 192 kHz under both laws, and not
+because of the fade: the modulation's offset slews at its 0.25-a-sample limit and stops abruptly when the depth limit
+lifts after the retarget, a speed step that reads in proportion to the rate. **Ruled:** T-041 ships with
+`outgoingBound` (the outgoing head's speed changes by at most the bound per sample, at four rates, both laws, under 20 ms
+of modulation; the unsigned clamp, planted as `fbClampUnsigned`, reads up to 27.8× over). T-042 widens to deep
+modulation's speed steps (the depth-20 report and this slew stop, likely one family): the modulated case enters
+`stepClick` there, and T-042 blocks T-023.
