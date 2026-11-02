@@ -97,7 +97,7 @@ the time fades and D-006 fallbacks on line 0, and its read-speed range.
 
 ## Memory per instance (row 15; SPEC §11)
 
-Every byte `prepare()` allocates, with a 4096-sample maximum block (the block size allocates nothing); nothing is allocated after it. A **high-water mark**: the lines are never shrunk, so an instance re-prepared at a lower rate keeps the larger figure. Plus `sizeof(Echo)` (2.5 KiB).
+Every byte `prepare()` allocates, with a 4096-sample maximum block (the block size allocates nothing); nothing is allocated after it. A **high-water mark**: the lines are never shrunk, so an instance re-prepared at a lower rate keeps the larger figure. Plus `sizeof(Echo)` (2.6 KiB).
 
 | rate | MiB | of which the two lines |
 |---|---|---|

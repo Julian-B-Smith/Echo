@@ -203,6 +203,13 @@ ECHO_PLANT(expSlewLong)          // the exponential law's speed-step bound is 10
 ECHO_PLANT(phaseSweepCollapsed)  // TEST-SIDE: every probe phase of the click gate's sweep is the same phase (shift 0): the gate would read one lucky phase
 ECHO_PLANT(expSlewBlockStart)    // the exponential law's bound takes the previous speed from the block's first sample, not the previous sample: it depends on the host's block size
 ECHO_PLANT(expSpuriousRetarget)  // the target drops to a quarter for 100 samples early on: a move nobody asked for (the bind census must flag a bind before any move)
+// ---- M3, B4 (T-041: every one-sample speed step, D-049 A4) ----
+ECHO_PLANT(tapeKinkUnbounded)    // the tape law's catch-up has neither bound nor brake: the cap's release steps the speed by 2 - s_model (a plain 500 -> 125 ms move reads 2.4 at 48 kHz, 5.2 at 96, 11.6 at 192 on the reversals)
+ECHO_PLANT(tapeNoBrake)          // the catch-up has the 0.1 ms bound but no brake: M2 passes (<= 1.06), but the head overshoots the model by up to 1.8 samples and the speed dips to 0.5 (only the catch-up gate sees it)
+ECHO_PLANT(tapeNoTargetBrake)    // the catch-up brakes on the model but not on the target: a lengthening move held at the lower cap passes its target at the landing (0.19 sample at 44.1 kHz, 1.7 at 192; the catch-up gate's lengthening cases see it)
+ECHO_PLANT(fbFrozenOutgoing)     // a fade freezes its outgoing head (speed 2.0 or 0.5 to 1.0 in one sample): the fallback and a crossfade-mode retarget of a glide in flight read 3.5 at 48 kHz, 14 at 192
+ECHO_PLANT(fbClampUnsigned)       // the outgoing head's clamp to the line uses kMinRead + |offset| (too tight): under a modulated fade from a shortening glide it binds and steps the speed by 0.132 in one sample at 192 kHz
+ECHO_PLANT(fadeLinear)           // the time crossfade's weight is linear, not raised-cosine: its slope kinks at both ends and reads in proportion to the rate (the 3 ms jump: 3.6 at 96 kHz, 7.0 at 192)
 }  // namespace echo::plant
 
 #undef ECHO_PLANT

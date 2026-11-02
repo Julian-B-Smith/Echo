@@ -22,7 +22,7 @@ with HIGH findings the author's own suite had passed.
   (D-037 – D-040), T-016 on its own PR (D-041): **batch 2 done**. Batch 3's four items done
   2026-10-28 (D-042 – D-045): T-017 on PR #24 (2975c34), T-018 on PR #25 (1a78af5), T-019 on
   PR #26 (2966256), T-020 on PR #27 (985c1d1); the T-021 bank draft B3 also plans is not
-  started (the bank holds the init only). Batch 4 (T-021 finished, T-022, T-023) next; D-048 (2026-10-29) adds T-038 and T-039 ahead of T-022's face; D-049 adds T-040 before T-023. **M4 (the IR
+  started (the bank holds the init only). Batch 4 (T-021 finished, T-022, T-023) next; D-048 (2026-10-29) adds T-038 and T-039 ahead of T-022's face; D-049 adds T-040, T-041 and T-042 before T-023 (T-040 and T-041 done). **M4 (the IR
   display and Echo's screen) is under way beside it** (D-027, D-030): T-030 – T-032 done (PR #15,
   PR #16); T-033 open (T-014 is on main, PR #20); T-036 (gate 4's flicker) done 2026-10-28 (D-046).
 - **Oracle:** `./verify fast` = kit integrity, leak gate, private-name gate,
@@ -657,7 +657,7 @@ filings need the human's go-ahead each time.
 - **Out of scope:** Echo's own screen (M4, D-027).
 
 ### T-023 — M3: Listening renders and the human's sign-off (bar row 20)
-- **Status:** blocked (on T-040 and T-041, D-049 A3; T-021 is done).
+- **Status:** blocked (on T-042, D-049 A7; T-021, T-040 and T-041 are done).
 - **Scope:** `core/tools/render_presets.cpp` (WAVs from the C++ engine, never the lab), a
   small listening page in `lab/` or `docs/`, ROADMAP.
 - **Ruled by poll 2026-10-28:** the source set is **synthetic and seeded**, generated in C++
@@ -1002,27 +1002,57 @@ filings need the human's go-ahead each time.
      `lab_smoke` case and its plant.
 - **Out of scope:** the tape law; the threshold; the listen (T-023 hears the result).
 
-### T-041 — M3: every one-sample speed step: the tape cap kink and the fallback's frozen head (D-049 A1, A3)
-- **Status:** open (found 2026-10-30 by T-040; widened by D-049 A3; blocks T-023).
-- **Scope:** `core/include/echo/engine.h` (the tape law, SPEC §3.6, and the D-006 fallback's
-  crossfade start), `plants.h`, the click cases in `core/tests/core_tests.cpp`, SPEC §3.6 and
-  the lab if their statements change (a poll first).
+### T-041 — M3: every one-sample speed step: the tape cap kink and the fallback's frozen head (D-049 A1, A3, A4)
+- **Status:** done 2026-11-01 (found 2026-10-30 by T-040; widened by D-049 A3; fixes ruled D-049 A4 – A7; the critic's
+  SHIP after one FIX-THEN-SHIP round; every click case ≤ 1.059 at 44.1 – 192 kHz, worst of 8 phases; trace
+  `traces/2026-10-30-t041-speed-steps.md`).
+- **Scope:** `core/include/echo/engine.h` (the tape law's catch-up, `startFade`'s outgoing head, the time-fade
+  weights), `plants.h`, the click cases in `core/tests/core_tests.cpp`, SPEC §3.5 – 3.7 (the statements D-049 A4
+  authorises), and the README, CODEMAP and trace; `lab/echo-lab.html` and `tools/lab_smoke.mjs` for the same three fixes
+  (D-049 A5).
 - **Acceptance criteria:**
-  1. The mechanisms are found and stated:
-     - the tape law's cap kink: its plain 500 → 125 ms move reads 2.412 at 48 kHz, 5.2 at
-       96 kHz and 11.6 at 192 kHz, and its free scale sweep reads 4.081 at its worst phase at
-       48 kHz (a speed jump 2.0 → 0.83 in one sample);
-     - the fallback's frozen head: when D-006's fallback starts a crossfade, the outgoing head's
-       speed goes from 2.0 or 0.5 to 1.0 in one sample, under both laws (the full tape sweep
-       3.470 at 48 kHz; the exponential scale sweeps ~3.5 at 96 kHz, ~7.0 at 192 kHz).
-     At 48 kHz the tape 2-octave reversal at 400 ms already gates at 2.440 (2.465 at 64 phases),
-     so any tape change before this lands sits within 2 % of the bar.
-  2. The click cases, `clickSweep` included, run at 44.1, 48, 96 and 192 kHz, worst of 8 phases
-     over half a cycle, and every case reads under 2.5 with zero backstop hits, the threshold
-     untouched; each unfixed behaviour is a planted control.
-  3. A change to SPEC §3.6's statement of either law or of §3.6's fallback goes to the human
-     first; `./verify fast` green.
-- **Out of scope:** the exponential law's reversal bound (T-040).
+  1. The mechanisms are found and stated (done in phase 1, D-049 A4):
+     - the tape law's cap kink: the cap holds the head at speed 2.0 while the model runs ahead, and the deadbeat
+       catch-up lands it on the model in two samples (a step of 2.0 − s_model; the free scale sweep 4.08 at 48 kHz,
+       18.35 at 192 kHz; a `time.glide` change mid-move is the same kink);
+     - the frozen outgoing head: `startFade` stops it dead at D-006's fallback and at a crossfade-mode retarget of a
+       glide in flight (a step of 1.0; 3.5 at 48 kHz, 14 at 192 kHz, under both laws);
+     - the linear time-fade weight: the 3 ms jump reads 3.6 / 7.0 at 96 / 192 kHz (a weight kink, no speed step).
+  2. The fixes are those D-049 A4 ruled: the tape law's braking catch-up (B) under the 0.1 ms bound, bit-identical
+     to the law while the head is on the model; the outgoing head slewed to rest under the same bound, inside the
+     line (D), its clamp signed as `modStep`'s (D-049 A6); raised-cosine weights summing to 1 on every time
+     crossfade.
+  3. The click cases (`clickSweep`, the reversals, the onsets, and the phase-1 census's mid-glide fallbacks,
+     crossfade-flip retargets and tape `time.glide` changes), tempo cases included, run at 44.1, 48, 96 and 192 kHz,
+     worst of 8 phases over half a cycle, and every case reads under 2.5 with zero backstop hits, the threshold
+     untouched.
+  4. A catch-up gate M2 cannot replace (D-049 A5, A6), at all four rates: after a shortening move's cap (2.0)
+     releases, the speed stays ≥ 0.9 and the head passes neither the model nor the target by more than 0.1 sample;
+     after a lengthening move's cap (0.5) releases, the speed stays ≤ 1.1 and the head passes the target by at most
+     0.1 sample (the model's read is pinned to the head there, so the model half is shortening-only).
+  5. Each unfixed behaviour is a planted control that its own gate catches: `tapeKinkUnbounded`, `tapeNoBrake`
+     (caught by criterion 4's gate, not by M2), `fbFrozenOutgoing`, `fadeLinear`. `phaseSweepWorks` keeps a step
+     source for its reversal control (with the kink fixed, that control turns a plant on).
+  6. SPEC §3.5 – 3.7 state the catch-up (a safety bound, not part of the law), the outgoing head and the weight
+     shape; the exponential row's "not gated: 96 and 192 kHz" note goes; `./verify fast` green; the critic's SHIP.
+- **Out of scope:** the exponential law's reversal bound (T-040); deep modulation's speed steps, including the
+  modulated fade's M2 (T-042, D-049 A7; the fade itself is guarded here by `outgoingBound`).
+
+### T-042 — M3: deep modulation's speed steps: the depth-20 report and the slew stop (D-049 A4, A7)
+- **Status:** open (found 2026-10-30 by T-041's phase-1 stress run; widened 2026-11-01, D-049 A7; blocks T-023).
+- **Scope:** `core/include/echo/engine.h` (`modStep` and the modulation's depth limit), `plants.h`, `core_tests.cpp`
+  (`speedInvariant`, `stepClick`), SPEC §7 and the lab if their statements change (a poll first).
+- **Acceptance criteria:**
+  1. The depth-20 report (random `time.ms` / `time.change` / `time.law` / `time.glide` gestures at `mod.depthMs` 20 read
+     a speed of −870 with reverse > 0; depth 0 clean) is reproduced with the engine's own `SpeedStats`, or shown to be
+     the harness's measurement, with the evidence.
+  2. The slew stop is stated: under 20 ms of modulation at 1.25 Hz, a retarget of a 20 → 2 ms glide 1 – 12 ms in reads
+     M2 2.28 / 4.55 at 96 / 192 kHz (both laws), because the offset's 0.25-a-sample slew ends abruptly when the depth
+     limit lifts.
+  3. Whatever is real is fixed: the modulated case joins `stepClick` at 44.1, 48, 96 and 192 kHz, worst of 8 phases,
+     under 2.5 with zero backstop hits; any gestures that broke the speed invariant join `speedInvariant`; each
+     unfixed behaviour is a planted control its own gate catches; `./verify fast` green.
+- **Out of scope:** T-041's fixes (the fade's outgoing head is guarded by `outgoingBound`).
 
 ## Open questions (blocking — ask the human)
 

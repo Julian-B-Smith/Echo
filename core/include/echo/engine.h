@@ -155,7 +155,9 @@ inline constexpr double kModSlopeMax = 0.25;   // |d offset / dt|, samples per s
 inline constexpr double kSMin = 0.25, kSMax = 4.0;  // the HARD read-speed invariant (D-006)
 inline constexpr double kCapSt = 12.0;         // every repitch law's pitch cap, both ways
 inline constexpr double kFallbackS = 3.0;      // longer than this at the cap's rate: crossfade
-inline constexpr double kExpSlewS = 1e-4;      // the exponential law's safety bound: the speed moves at most 1 per this (SPEC §3.6, D-049 A1)
+// The speed-step safety bound (SPEC §3.6, D-049 A1, A4): the read speed moves at most 1 per this. Named for the exponential
+// law it was cut for; the tape law's catch-up and a fade's outgoing head now share it (one bound, one reading in the spec).
+inline constexpr double kExpSlewS = 1e-4;
 inline constexpr double kTempoCapCents = 50.0; // tempo "follow": exact within this bend
 inline constexpr double kMinRead = 3.0;        // the 4-point kernel's distance from the write
 inline constexpr int kTapeGrid = 32;           // the tape history's control rate (SPEC §11)
@@ -668,6 +670,9 @@ class Echo {
   std::uint64_t fadeCount(int k) const { return fadeCount_[k]; }
   // The sounding head's delay in samples when no fade runs (test read).
   double headDelay(int k) const { return head_[k].D; }
+  // The tape model's read delay at the last sample the tape law moved the head (test read, D-049 A4: the catch-up
+  // gate's reference). Meaningful only while a tape move runs.
+  double tapeModelDelay(int k) const { return tape_[k].mD; }
   // The read position the line sounds now, delay + modulation (test read).
   double readPosition(int k) const { return (head_[k].fade ? head_[k].dA : head_[k].D) + mods_[k]; }
   double modOffset(int k) const { return mods_[k]; }
@@ -681,6 +686,9 @@ class Echo {
     // last one. A test reads them to see that the bound binds only just after a retarget, never in a relaxation.
     std::uint64_t slewBinds = 0;
     std::int64_t lastSlewBind = -1;
+    // The tape law's catch-up (D-049 A4): how many samples it changed the law's own V (braked, or bound). On the model it
+    // never does, so a move that stays inside the cap reads 0 and is bit-identical to the unbraked law; a test reads it.
+    std::uint64_t catchUps = 0;
   };
   SpeedStats speedStats(int k) const { return stats_[k]; }
   void resetStats() {
@@ -1045,6 +1053,7 @@ class Echo {
     double lastPos = 0;          // the sounding read position one sample ago
     bool statsLive = false;      // false for one sample after a handover (no speed measured)
     double lnT = 0;              // ln T, cached per target (the exponential law)
+    double vA = 0;               // a fade's outgoing head: its speed (delay a sample) while it slews to rest (D-049 A4)
   };
 
   // The tape law's state (§3.6): a tape at speed v (tape units a sample), the
@@ -1063,12 +1072,14 @@ class Echo {
     std::int64_t g0 = 0;          // the grid index of the oldest recorded point
     int head = 0, count = 0;      // the ring of recorded points
     double c = 0;                 // the read cursor, a sample time
+    double mD = 0;                // the model's read delay at the last step (the catch-up's reference; test read)
   };
 
   void landHead(int k) {
     Head& h = head_[k];
     h.D = h.dA = h.dB = h.T = tT_[k];
     h.V = 0;
+    h.vA = 0;
     h.fade = false;
     h.fi = 0;
     h.fn = 1;
@@ -1090,8 +1101,32 @@ class Echo {
     h.fi = 0;
     h.fn = fadeLength(mode);
     h.fade = true;
+    h.vA = h.V;  // the outgoing head leaves at the speed it had (D-049 A4); a head at rest has none
     h.V = 0;
     ++fadeCount_[k];
+    outgoingSlew(k);  // the fade's first sample moves the outgoing head too: its speed is continuous from the move
+  }
+
+  // The outgoing head of a fade (D-049 A4). The fade used to freeze it where it stood, so a head moving at speed 2.0
+  // or 0.5 (a glide the fallback or a crossfade-mode retarget cut short) went to 1.0 in one sample: a step that
+  // reads 3.5 at 48 kHz, in proportion to the rate. It now keeps its speed and slews it to rest under the same
+  // per-second bound as the exponential law (k::kExpSlewS), so the speed is continuous. Rest takes vA / a samples
+  // and moves the head vA^2 / (2a) samples at most (2.4 at 48 kHz, 9.6 at 192 kHz), but a head that was gliding at
+  // speed 2 toward the read floor can still be within that distance of it, so the clamp to the line is a path, and it
+  // must not itself step the speed: it is the one `modStep` uses, SIGN-AWARE (the read is dA + the offset, so the
+  // floor on dA is kMinRead - offset, not kMinRead + |offset|; the tighter |offset| form bound under a modulated
+  // fade from a shortening glide and stepped the speed by 0.132 in one sample at 192 kHz, 2.5x the bound, D-049 A6).
+  // The offset is last sample's (modStep runs after the heads, and moves it by at most 0.25 and under its own floor
+  // bound), so the read itself is held by modStep. Nothing is allocated: it is one multiply-add on a field.
+  void outgoingSlew(int k) {
+    Head& h = head_[k];
+    if (plant::fbFrozenOutgoing || h.vA == 0.0) return;
+    const double a = 1.0 / (k::kExpSlewS * sr_);
+    h.vA = h.vA > 0.0 ? std::max(0.0, h.vA - a) : std::min(0.0, h.vA + a);
+    const double m = plant::fbClampUnsigned ? std::fabs(mods_[k]) : 0.0;
+    const double lo = plant::fbClampUnsigned ? k::kMinRead + m : k::kMinRead - mods_[k];
+    const double hi = static_cast<double>(lineLen_ - k::kKernelMargin) - (plant::fbClampUnsigned ? m : mods_[k]);
+    h.dA = std::clamp(h.dA + h.vA, lo, hi);
   }
 
   // The behaviour a NEW move gets (§3.5): time.change for a key move,
@@ -1136,11 +1171,13 @@ class Echo {
     }
     if (h.fade && plant::retargetMidFade && std::fabs(T - h.dB) >= 0.5) h.dB = T;
     if (h.fade) {
+      outgoingSlew(k);
       if (plant::deferralBroken) h.fn = std::min(h.fn, fadeLength(static_cast<int>(p_[kChange]) == 2 ? kJump : kCrossfade));
       if (++h.fi < h.fn) { finishStep(k, D0, false); return; }
       h.fade = false;  // the fade has sounded its last (weight-1) sample
       h.D = h.dB;
       h.V = 0;
+      h.vA = 0;
       h.statsLive = false;  // a handover: dA's position gives way to dB's
       tape_[k].active = false;
       // The queue (§3.5): a target that moved during the fade is faded to
@@ -1189,6 +1226,8 @@ class Echo {
     }
     const double tau = std::max(1.0, p_[kGlide] * (plant::glideFixedRate ? 48000.0 : sr_));
     const double vPrev = plant::expSlewBlockStart ? blockV_[k] : h.V;
+    bool tapeOff = false;     // the tape head is off its model this sample (the catch-up acts; D-049 A4)
+    bool tapeCaught = false;  // the catch-up changed the law's V this sample (counted once, whichever terms did)
     bool expLaw = false;
     if (h.law == 1 || plant::expLawLinear) {
       // "exponential" (§3.6): a one-pole on ln D, time constant time.glide.
@@ -1197,9 +1236,51 @@ class Echo {
     } else {
       h.V = tapeStep(k, T, tau) - h.D;  // "tape": the varispeed model's read delay
       tapeRan = true;
+      // The braking catch-up (D-049 A4). The cap holds the head at speed 2.0 (or 0.5) while the model runs ahead of
+      // it; the deadbeat V = modelD - D then lands the head on the model in two samples, a speed step of 2 - s_model
+      // that reads up to 4.1 at 48 kHz (18.4 at 192 kHz). So while the head is OFF the model, aim its speed at the
+      // model's own slope m plus the largest closing speed from which the bound a (below) can still stop it on the
+      // model without overshoot: r = sqrt(a^2/4 + 2 a |e|) - a/2, the discrete stopping speed (r_n = n a at
+      // |e| = a n (n + 1) / 2), never more than the deadbeat |e|. The bound a alone is NOT enough (the plant
+      // tapeNoBrake): it rings, overshooting the model by up to 1.8 samples and dipping to s = 0.5, and M2 cannot see
+      // that. ON the model (to rounding) the law's own deadbeat V stands, bit for bit.
+      Tape& tp = tape_[k];
+      const double mD = h.D + h.V, slope = mD - tp.mD, e = h.D - tp.mD;
+      tp.mD = mD;
+      if (!plant::tapeKinkUnbounded && !plant::tapeNoBrake && std::fabs(e) > 1e-9) {
+        const double a = 1.0 / (k::kExpSlewS * sr_);
+        const double r = std::min(std::fabs(e), std::sqrt(0.25 * a * a + 2.0 * a * std::fabs(e)) - 0.5 * a);
+        h.V = slope + (e > 0.0 ? -r : r);
+        tapeCaught = true;
+        tapeOff = true;
+      }
     }
     // The law's pitch cap (|pitch| <= 12 st, so dD/dt in [-1, +0.5]).
     if (!plant::noLawCap && !plant::expLawLinear) h.V = std::clamp(h.V, -up_, dn_);
+    // The target brake (D-049 A5, A6). The catch-up above stops the head on the MODEL, and for a SHORTENING move that is
+    // the whole job. A LENGTHENING move held at the lower cap (0.5) has no model to brake on: the tape search only moves
+    // forward from the head's own cursor, so while the head lags the model its read is pinned to the head
+    // (tapeModelDelay = D + 1, e = -1 for the whole hold, 35 688 samples in 125 -> 500 ms at 48 kHz). The head then
+    // reaches the target at speed 0.5 and passes it (0.19 sample at 44.1 kHz, 1.7 at 192: the bound cannot stop a speed
+    // of 0.5 in time from nothing). So the TARGET term is the brake there: while the head is off the model, its speed
+    // TOWARD T is limited to the same discrete stopping speed from the target's distance, sqrt(a^2/4 + 2 a |T - D|) - a/2,
+    // and it can always stop on T under the bound below. Far from T the limit exceeds the cap and never acts; on the
+    // model it is not applied at all.
+    if (tapeOff && !plant::tapeNoTargetBrake && !plant::noLawCap) {
+      const double a = 1.0 / (k::kExpSlewS * sr_), g = T - h.D;
+      const double stop = std::sqrt(0.25 * a * a + 2.0 * a * std::fabs(g)) - 0.5 * a;
+      const double lim = g > 0.0 ? std::min(h.V, stop) : std::max(h.V, -stop);
+      if (lim != h.V) { h.V = lim; tapeCaught = true; }
+    }
+    // The tape law's catch-up bound (D-049 A4): the same safety bound as the exponential law's, below. It binds
+    // only where the catch-up would step the speed (a cap release); on the model the speed moves far less than a.
+    if (tapeRan && !plant::tapeKinkUnbounded && !plant::noLawCap) {
+      const double a = 1.0 / (k::kExpSlewS * sr_);
+      const double bound = std::clamp(h.V, vPrev - a, vPrev + a);
+      if (bound != h.V) tapeCaught = true;
+      h.V = bound;
+    }
+    if (tapeCaught) ++stats_[k].catchUps;
     // The exponential law's safety bound (D-049 A1): its V is a memoryless function of (D, T), so a
     // retarget (an onset, or a move reversed mid-glide) steps the speed by up to 1.5 in one sample, which
     // reads as a click (M2 up to 5.1). Bound the step per second, not per sample, so it holds at any
@@ -1258,6 +1339,7 @@ class Echo {
     tp.g0 = n_ / k::kTapeGrid + 1;
     tp.head = tp.count = 0;
     tp.c = static_cast<double>(n_) - D;
+    tp.mD = D;  // the steady tape IS the head: the catch-up starts on the model
   }
 
   // One sample of tape travel: p moves by v; every 32 samples the write
@@ -1565,7 +1647,11 @@ class Echo {
     const double wF = static_cast<double>(h.fi + 1) / h.fn;
     const double a = readAt(k, pos(k, h.dA + m)), b = readAt(k, pos(k, h.dB + m));
     if (plant::equalPower) return std::cos(wF * k::kPi / 2) * a + std::sin(wF * k::kPi / 2) * b;
-    return (1.0 - wF) * a + wF * b;
+    // Raised-cosine weights (D-049 A4): w + (1 - w) = 1 still holds (equal-gain), but the weight's SLOPE is 0 at
+    // both ends. A linear weight kinks there, and a kink reads in proportion to the rate under the click metric
+    // (the 3 ms jump: 1.9 at 48 kHz, 3.6 at 96, 7.0 at 192); a smooth one reads the same at every rate.
+    const double w = plant::fadeLinear ? wF : 0.5 - 0.5 * std::cos(wF * k::kPi);
+    return (1.0 - w) * a + w * b;
   }
   // Every read position is held inside the line; an attempt past it is
   // counted (the suite requires zero: the depth limit and the clamp keep it in).

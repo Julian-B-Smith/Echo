@@ -21,10 +21,12 @@
 #include <functional>
 #include <string_view>
 #include <tuple>
+#include <array>
 #include <atomic>
 #include <thread>
 #include <cstring>
 #include <clocale>
+#include <deque>
 #include <limits>
 #include <memory>
 #include <numbers>
@@ -1463,17 +1465,18 @@ struct ClickCase {
   bool jump;                                       // judged against the jump threshold
   std::vector<std::pair<const char*, double>> kv;  // owned: an initializer_list here would dangle
   std::function<std::vector<Event>(long)> events;  // given n
-  std::function<double(long)> bpm;                 // per-sample tempo, or null
+  std::function<double(double)> bpm;               // tempo at a (fractional) 48 kHz sample index, or null
   double seconds;
 };
 
-// `shift` moves every event later by that many samples: the click reading depends on the probe's phase at
+// `shift` moves every event, and the tempo's clock, later by that many samples: the click reading depends on the probe's phase at
 // a speed step (up to 3.49 x the step), so a gate that must not pass by luck renders a case at several
 // shifts and takes the worst (reversalClick and onsetClick, D-049 A1/A2). `sr` runs the case at another
 // rate: the case is defined in seconds at 48 kHz, so its events are placed at the same instants.
 ClickRun clickRun(const ClickCase& c, long shift = 0, double sr = kSr) {
-  // A case's tempo function (c.bpm) takes a 48 kHz sample index; only the events are rescaled to another rate.
-  if (c.bpm && sr != kSr) { std::fprintf(stderr, "click case %s: a tempo function cannot run at %g Hz (it is indexed in 48 kHz samples)\n", c.name, sr); std::abort(); }
+  // A tempo case is defined in seconds like the rest: c.bpm takes a 48 kHz sample index, so at another rate it is
+  // asked at the SAME instant, (i - shift) * 48000 / sr, fractional (a rounded index would step the tempo every
+  // few samples at 192 kHz, a defect of the probe, not the engine). At 48 kHz and shift 0 this is bpm(i), exactly.
   const long n = S(c.seconds, sr);
   const Vec in = clickProbeAt(n, sr);
   auto e = mk({}, sr);
@@ -1483,7 +1486,7 @@ ClickRun clickRun(const ClickCase& c, long shift = 0, double sr = kSr) {
   Out o;
   std::vector<Event> ev = c.events ? c.events(S(c.seconds)) : std::vector<Event>{};
   for (auto& x : ev) x.at = std::lround(static_cast<double>(x.at) * sr / kSr) + shift;
-  if (c.bpm) o = runEach(*e, in, in, ev, c.bpm, [](long, Echo&) {});
+  if (c.bpm) o = runEach(*e, in, in, ev, [&](long i) { return c.bpm(static_cast<double>(i - shift) * kSr / sr); }, [](long, Echo&) {});
   else o = run(*e, in, in, ev, 120.0, [](long) { return 512; });
   const auto st = e->speedStats(0), st1 = e->speedStats(1);
   SpeedStatsView v{std::min(st.sMin, st1.sMin), std::max(st.sMax, st1.sMax), st.clamps + st1.clamps, st.floors + st1.floors + st.overruns + st1.overruns};
@@ -1508,7 +1511,7 @@ std::vector<ClickCase> clickCases() {
     };
   };
   auto move = [](double at, double ms) { return [at, ms](long) { return std::vector<Event>{set(S(at), "time.ms", ms)}; }; };
-  auto tempo = [](long i) { return 120.0 + 60.0 * std::sin(2 * kPi * i / kSr); };
+  auto tempo = [](double i) { return 120.0 + 60.0 * std::sin(2 * kPi * i / kSr); };
   // time.scale moves (T-038, D-048): a control move like any other, so judged by the same metric.
   // A 1 Hz log sweep of the whole x1/4 .. x4 range (free: a continuous scale; synced: it crosses the
   // snap boundaries, so the head takes octave steps) and single octave steps at fixed times.
@@ -1550,36 +1553,6 @@ std::vector<ClickCase> clickCases() {
   };
 }
 
-// The ROADMAP M2 gate: every time-change mode under a 1 Hz full-range time
-// sweep, the laws under a sweep they can follow, every tempo mode under a 1 Hz
-// tempo sweep, and Q-A1's single moves, each under its threshold AND inside the
-// speed invariants (no backstop hit, no floor or overrun, s <= 2.25: a bare
-// jump is caught here, where the backstop turns it into a counted glide). The
-// metric's own control: a planted click in a clean render must read over.
-bool clickSweep(Detail& d) {
-  for (const auto& c : clickCases()) {
-    const ClickRun r = clickRun(c);
-    if (g_report)
-      std::printf("  REPORT click M2 %-45s %6.3f  (speed %.3f..%.3f, %llu backstop, %llu floor/overrun)\n", c.name, r.m2, r.st.sMin, r.st.sMax,
-                  static_cast<unsigned long long>(r.st.clamps), static_cast<unsigned long long>(r.st.floors));
-    REQUIRE(r.st.clamps == 0 && r.st.floors == 0 && r.st.sMax <= kSDecl + 1e-9 && r.st.sMin >= 0.25 - 1e-12,
-            "%s: speed %.3f..%.3f, %llu backstop hits, %llu floor/overrun reads", c.name, r.st.sMin, r.st.sMax,
-            static_cast<unsigned long long>(r.st.clamps), static_cast<unsigned long long>(r.st.floors));
-    const double lim = c.jump ? kClickMaxJump : kClickMax;
-    REQUIRE(r.m2 <= lim, "%s reads M2 %.3f (threshold %.3f)", c.name, r.m2, lim);
-  }
-  auto e = mk({{"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}});
-  const long n = S(2.0);
-  auto o = run(*e, clickProbe(n), clickProbe(n));
-  o.L[S(1.0)] += 0.02;
-  const double c = clickM2(o.L, S(0.2), n, 0.5);
-  if (g_report)
-    std::printf("  REPORT click M2 planted 0.02 click (control): %.3f; at the threshold %.2f the floor is a %.1f dBFS single-sample click\n", c,
-                kClickProposed, clickFloorDbfs(kClickProposed, 0.5));
-  REQUIRE(c > std::min(kClickMax, kClickProposed), "a planted 0.02 click reads only M2 %.3f: the metric cannot see clicks", c);
-  return true;
-}
-
 // ---- M3 B4, T-040: the exponential law's onset and mid-glide reversal (SPEC §3.6; D-049, D-049 A1, A2) ----
 
 // The click reading of a speed STEP depends on the probe's phase where it lands (M2 = 3.49 x step x |cos
@@ -1588,8 +1561,8 @@ bool clickSweep(Detail& d) {
 // shifts and take the worst. |cos| has a HALF-cycle period, so the shifts span half a probe period: spread over
 // a whole period, 8 shifts would give only 4 distinct readings (critic T-040 M1; D-049 A2). A step reading also
 // grows in proportion to the sample rate, which is why the bound the law carries is per second
-// (k::kExpSlewS) and why the gates run at 48 and 44.1 kHz. 96 and 192 kHz are the tape law's own item (T-041:
-// its cap kink reads 5.2 and 11.6 there, before and after T-040), so they are not gated here.
+// (k::kExpSlewS) and why the gates run at 44.1, 48, 96 and 192 kHz (D-049 A4: T-041 fixed the tape law's cap kink and
+// the fade's frozen head, the two steps that kept 96 and 192 kHz out of the gates).
 constexpr int kPhases = 8;
 long phaseShift(int j, double sr) {
   if (echo::plant::phaseSweepCollapsed) return 0;  // the planted control: a sweep that does not sweep
@@ -1689,12 +1662,65 @@ void parallelFor(std::size_t n, F&& f) {
   for (auto& t : pool) t.join();  // join() orders every slot write before the reads that follow
 }
 
+// One case at the four rates and kPhases phases: 32 renders on the pool, folded to the worst of the phases per rate.
+// The gates render ONE CASE AT A TIME and judge it before the next, in a fixed order: the verdict and its message are
+// those of a serial run, and a planted fault stops the gate at its first reading over the bar instead of rendering the
+// whole matrix first (echo_plants runs every click gate under each plant that guards it).
+template <class F>
+std::array<PhaseWorst, 4> worstAtRates(F&& render) {  // render(rate index, phase) -> ClickRun
+  std::vector<ClickRun> res(4 * kPhases);
+  parallelFor(res.size(), [&](std::size_t i) { res[i] = render(i / kPhases, static_cast<int>(i % kPhases)); });
+  std::array<PhaseWorst, 4> w;
+  for (std::size_t ri = 0; ri < 4; ++ri)
+    for (int j = 0; j < kPhases; ++j) foldPhase(w[ri], res[ri * kPhases + static_cast<std::size_t>(j)]);
+  return w;
+}
+
 // The existing click cases that run the exponential law (sweeps, single moves, octave steps): the ones the
 // phase gate re-renders. Selected by their key, not their name.
 bool usesExpLaw(const ClickCase& c) {
   for (const auto& [key, v] : c.kv)
     if (std::string_view(key) == "time.law" && v == 1.0) return true;
   return false;
+}
+
+// The ROADMAP M2 gate: every time-change mode under a 1 Hz full-range time
+// sweep, the laws under a sweep they can follow, every tempo mode under a 1 Hz
+// tempo sweep, and Q-A1's single moves, each under its threshold AND inside the
+// speed invariants (no backstop hit, no floor or overrun, s <= 2.25: a bare
+// jump is caught here, where the backstop turns it into a counted glide). The
+// metric's own control: a planted click in a clean render must read over.
+// D-049 A4: every case at 44.1, 48, 96 and 192 kHz and the worst of kPhases probe phases (a speed step, or a fade
+// weight's kink, reads in proportion to the rate and to the probe's phase: the tape law's cap kink read 4.1 at
+// 48 kHz and 18.4 at 192; the 3 ms jump 1.9 and 7.0). Tempo cases run at every rate too (clickRun).
+constexpr double kClickRates[4] = {44100.0, 48000.0, 96000.0, 192000.0};
+bool clickSweep(Detail& d) {
+  for (const auto& c : clickCases()) {
+    const auto w4 = worstAtRates([&](std::size_t ri, int j) { return clickRun(c, phaseShift(j, kClickRates[ri]), kClickRates[ri]); });
+    for (std::size_t ri = 0; ri < 4; ++ri) {
+      const PhaseWorst& w = w4[ri];
+      char nm[160];
+      std::snprintf(nm, sizeof nm, "%s, %g Hz", c.name, kClickRates[ri]);
+      if (g_report)
+        std::printf("  REPORT click M2 %-60s %6.3f  (speed %.3f..%.3f, %llu backstop, %llu floor/overrun)\n", nm, w.m2, w.st.sMin, w.st.sMax,
+                    static_cast<unsigned long long>(w.st.clamps), static_cast<unsigned long long>(w.st.floors));
+      REQUIRE(w.st.clamps == 0 && w.st.floors == 0 && w.st.sMax <= kSDecl + 1e-9 && w.st.sMin >= 0.25 - 1e-12,
+              "%s: speed %.3f..%.3f, %llu backstop hits, %llu floor/overrun reads", nm, w.st.sMin, w.st.sMax,
+              static_cast<unsigned long long>(w.st.clamps), static_cast<unsigned long long>(w.st.floors));
+      const double lim = c.jump ? kClickMaxJump : kClickMax;
+      REQUIRE(w.m2 <= lim, "%s reads M2 %.3f at its worst of %d probe phases (threshold %.3f)", nm, w.m2, kPhases, lim);
+    }
+  }
+  auto e = mk({{"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}});
+  const long n = S(2.0);
+  auto o = run(*e, clickProbe(n), clickProbe(n));
+  o.L[S(1.0)] += 0.02;
+  const double c = clickM2(o.L, S(0.2), n, 0.5);
+  if (g_report)
+    std::printf("  REPORT click M2 planted 0.02 click (control): %.3f; at the threshold %.2f the floor is a %.1f dBFS single-sample click\n", c,
+                kClickProposed, clickFloorDbfs(kClickProposed, 0.5));
+  REQUIRE(c > std::min(kClickMax, kClickProposed), "a planted 0.02 click reads only M2 %.3f: the metric cannot see clicks", c);
+  return true;
 }
 
 // The phase sweep's own control (critic T-040 H1, L1): a sweep that renders every case at one phase (the planted
@@ -1704,10 +1730,15 @@ bool usesExpLaw(const ClickCase& c) {
 //     sample): spread over half a period, so a whole-period spacing (4 distinct readings) cannot come back unseen.
 //  2. clickRun's shift path: the exponential 250 -> 500 ms move steps the speed by 0.5 (bounded to 0.208 per
 //     sample, so the fix does not hide it): 0.197 .. 0.741 over the 8 shifts (spread 0.543); required > 0.3.
-//  3. reversalRun's shift path (its own code): the tape law's 2 octave down move reversed at 400 ms, time.ms, 48 kHz:
-//     0.789 .. 2.440 (spread 1.65); required > 1.0. A collapsed sweep spreads by exactly 0 in both.
+//  3. reversalRun's shift path (its own code): the tape law's 2 octave down move reversed at 400 ms, time.ms, 48 kHz,
+//     with the catch-up unbounded (the plant tapeKinkUnbounded, echo_plants only): 0.789 .. 2.440 (spread 1.65);
+//     required > 1.0. A collapsed sweep spreads by exactly 0 in both.
 // The margins are about half the measured spreads: far above rounding, far below a working sweep.
-constexpr double kSweepSpreadMin = 0.3, kReversalSpreadMin = 1.0;
+constexpr double kSweepSpreadMin = 0.3;
+[[maybe_unused]] constexpr double kReversalSpreadMin = 1.0;  // used by echo_plants only (the plant is the step source)
+#ifdef ECHO_PLANTS
+bool* plantFlag(std::string_view n);
+#endif
 bool phaseSweepWorks(Detail& d) {
   for (const double sr : {48000.0, 44100.0}) {
     const double period = sr / kProbeHz;
@@ -1723,7 +1754,7 @@ bool phaseSweepWorks(Detail& d) {
   for (const auto& c : cases)
     if (std::string_view(c.name) == "move 250 -> 500 ms, exponential") probe = &c;
   REQUIRE(probe != nullptr, "the phase-sweep control case (move 250 -> 500 ms, exponential) is gone from the click cases");
-  const RevCase tape{0, RevKey::Ms, 2, false, 400.0, kSr};
+  [[maybe_unused]] const RevCase tape{0, RevKey::Ms, 2, false, 400.0, kSr};
   for (const double sr : {48000.0, 44100.0}) {
     std::vector<double> viaClick(kPhases);
     parallelFor(kPhases, [&](std::size_t j) { viaClick[j] = clickRun(*probe, phaseShift(static_cast<int>(j), sr), sr).m2; });
@@ -1733,13 +1764,24 @@ bool phaseSweepWorks(Detail& d) {
     REQUIRE(hi - lo > kSweepSpreadMin, "the probe-phase sweep does not move the reading: the 250 -> 500 ms exponential move reads %.3f .. %.3f over %d phases at %g Hz (spread %.3f, needs > %.2f): every phase is the same phase",
             lo, hi, kPhases, sr, hi - lo, kSweepSpreadMin);
   }
+#ifdef ECHO_PLANTS
+  // Detector 3 needs a speed step to spread over the phases, and with T-041's braking catch-up the tape reversal has
+  // none (it reads 0.79 .. 1.0): the step source is the planted tapeKinkUnbounded, switched on for this render only
+  // and off again BEFORE any REQUIRE can return (a leaked plant would fail every later check). In the clean binary the
+  // flag is constexpr false, so reversalRun's shift path is proven by echo_plants alone.
   std::vector<double> viaRev(kPhases);
+  bool* const kink = plantFlag("tapeKinkUnbounded");
+  REQUIRE(kink != nullptr, "the plant tapeKinkUnbounded is not in the plant table: the reversal control has no step source");
+  const bool kinkWas = *kink;  // restored to what it was, not to false: a caller may have it on
+  *kink = true;
   parallelFor(kPhases, [&](std::size_t j) { RevCase c = tape; viaRev[j] = reversalRun(c, phaseShift(static_cast<int>(j), kSr)).m2; });
+  *kink = kinkWas;
   double lo = 1e300, hi = -1e300;
   for (const double m : viaRev) { lo = std::min(lo, m); hi = std::max(hi, m); }
-  if (g_report) std::printf("  REPORT phase-sweep control, tape 2 oct down reversed at 400 ms at 48000 Hz: readings %.3f .. %.3f over %d phases (spread %.3f, needs > %.2f)\n", lo, hi, kPhases, hi - lo, kReversalSpreadMin);
-  REQUIRE(hi - lo > kReversalSpreadMin, "the probe-phase sweep does not move a reversal's reading: the tape 2 oct down move reversed at 400 ms reads %.3f .. %.3f over %d phases (spread %.3f, needs > %.2f): every phase is the same phase",
+  if (g_report) std::printf("  REPORT phase-sweep control, tape 2 oct down reversed at 400 ms, unbounded catch-up, at 48000 Hz: readings %.3f .. %.3f over %d phases (spread %.3f, needs > %.2f)\n", lo, hi, kPhases, hi - lo, kReversalSpreadMin);
+  REQUIRE(hi - lo > kReversalSpreadMin, "the probe-phase sweep does not move a reversal's reading: the tape 2 oct down move reversed at 400 ms (unbounded catch-up) reads %.3f .. %.3f over %d phases (spread %.3f, needs > %.2f): every phase is the same phase",
           lo, hi, kPhases, hi - lo, kReversalSpreadMin);
+#endif
   return true;
 }
 
@@ -1747,47 +1789,39 @@ bool phaseSweepWorks(Detail& d) {
 // kPhases), with zero backstop hits and the speed invariants. The unfixed exponential law steps its speed by
 // 1.5 in one sample at a reversal and reads up to 5.1; the unbounded law is the plant expSlewOff. The FULL
 // matrix (D-049 A2): both laws x time.ms / time.div / time.scale free / time.scale synced x 1 and 2 octaves x
-// down and up x reversed at 100 / 200 / 400 ms x 48 and 44.1 kHz = 192 cases x 8 phases (the tape law is
-// untouched by T-040 but its reversals are gated, so a tape change that breaks them is seen). The exponential
+// down and up x reversed at 100 / 200 / 400 ms x 44.1, 48, 96 and 192 kHz (D-049 A4) = 384 cases x 8 phases (the tape
+// law's reversals are gated too: T-041's braking catch-up is what keeps them under the bar at 96 and 192 kHz). The exponential
 // law goes first, so the plant expSlewOff fails after one law's renders, not both.
-constexpr int kReversalCases = 2 * 4 * 2 * 2 * 3 * 2;
+constexpr int kReversalCases = 2 * 4 * 2 * 2 * 3 * 4;
 bool reversalClick(Detail& d) {
   int cases = 0;
-  for (const int law : {1, 0}) {
-    std::vector<RevCase> cs;
-    for (const double sr : {48000.0, 44100.0})
-      for (const RevKey key : {RevKey::Ms, RevKey::Div, RevKey::ScaleFree, RevKey::ScaleSync})
-        for (const int oct : {1, 2})
-          for (const bool up : {false, true})
-            for (const double rv : {100.0, 200.0, 400.0}) cs.push_back(RevCase{law, key, oct, up, rv, sr});
-    std::vector<ClickRun> res(cs.size() * kPhases);  // slot = case * kPhases + phase; each worker writes only its own
-    parallelFor(res.size(), [&](std::size_t i) {
-      const RevCase& c = cs[i / kPhases];
-      res[i] = reversalRun(c, phaseShift(static_cast<int>(i % kPhases), c.sr));
-    });
-    for (std::size_t ci = 0; ci < cs.size(); ++ci) {
-      const RevCase& c = cs[ci];
-      PhaseWorst w;
-      for (int j = 0; j < kPhases; ++j) foldPhase(w, res[ci * kPhases + static_cast<std::size_t>(j)]);
-      ++cases;
-      char nm[128];
-      std::snprintf(nm, sizeof nm, "%s law, %s, %d oct %s, reversed at %g ms, %g Hz", law ? "exponential" : "tape", revKeyName(c.key), c.oct, c.up ? "up" : "down", c.revMs, c.sr);
-      if (g_report)
-        std::printf("  REPORT reversal M2 %-78s %6.3f  (speed %.3f..%.3f, %llu backstop, %llu floor/overrun)\n", nm, w.m2, w.st.sMin, w.st.sMax,
-                    static_cast<unsigned long long>(w.st.clamps), static_cast<unsigned long long>(w.st.floors));
-      REQUIRE(w.st.clamps == 0 && w.st.floors == 0 && w.st.sMax <= kSDecl + 1e-9 && w.st.sMin >= 0.25 - 1e-12,
-              "%s: speed %.3f..%.3f, %llu backstop hits, %llu floor/overrun reads", nm, w.st.sMin, w.st.sMax,
-              static_cast<unsigned long long>(w.st.clamps), static_cast<unsigned long long>(w.st.floors));
-      REQUIRE(w.m2 <= kClickMax, "%s reads M2 %.3f at its worst of %d probe phases (threshold %.3f)", nm, w.m2, kPhases, kClickMax);
-    }
-  }
+  for (const int law : {1, 0})
+    for (const RevKey key : {RevKey::Ms, RevKey::Div, RevKey::ScaleFree, RevKey::ScaleSync})
+      for (const int oct : {1, 2})
+        for (const bool up : {false, true})
+          for (const double rv : {100.0, 200.0, 400.0}) {
+            const auto w4 = worstAtRates([&](std::size_t ri, int j) { return reversalRun(RevCase{law, key, oct, up, rv, kClickRates[ri]}, phaseShift(j, kClickRates[ri])); });
+            for (std::size_t ri = 0; ri < 4; ++ri) {
+              const PhaseWorst& w = w4[ri];
+              ++cases;
+              char nm[128];
+              std::snprintf(nm, sizeof nm, "%s law, %s, %d oct %s, reversed at %g ms, %g Hz", law ? "exponential" : "tape", revKeyName(key), oct, up ? "up" : "down", rv, kClickRates[ri]);
+              if (g_report)
+                std::printf("  REPORT reversal M2 %-78s %6.3f  (speed %.3f..%.3f, %llu backstop, %llu floor/overrun)\n", nm, w.m2, w.st.sMin, w.st.sMax,
+                            static_cast<unsigned long long>(w.st.clamps), static_cast<unsigned long long>(w.st.floors));
+              REQUIRE(w.st.clamps == 0 && w.st.floors == 0 && w.st.sMax <= kSDecl + 1e-9 && w.st.sMin >= 0.25 - 1e-12,
+                      "%s: speed %.3f..%.3f, %llu backstop hits, %llu floor/overrun reads", nm, w.st.sMin, w.st.sMax,
+                      static_cast<unsigned long long>(w.st.clamps), static_cast<unsigned long long>(w.st.floors));
+              REQUIRE(w.m2 <= kClickMax, "%s reads M2 %.3f at its worst of %d probe phases (threshold %.3f)", nm, w.m2, kPhases, kClickMax);
+            }
+          }
   REQUIRE(cases == kReversalCases, "the reversal matrix ran %d cases, expected %d: a loop went empty", cases, kReversalCases);
   return true;
 }
 
 // The exponential law's onsets (D-049 A2): every existing click case that runs the law, and two plain onsets
 // (500 -> 250 ms down, 125 -> 500 ms up; the other glides and sizes read identically to 500 -> 250), each at
-// 8 half-period phases and at 48 and 44.1 kHz. A separate check from the reversals so that the plant
+// 8 half-period phases and at 44.1, 48, 96 and 192 kHz (D-049 A4). A separate check from the reversals so that the plant
 // expSlewOff fails it for ITS OWN reason too, and a count guard so an emptied selection cannot pass.
 constexpr int kExpClickCases = 7, kPlainOnsets = 2;
 bool onsetClick(Detail& d) {
@@ -1801,22 +1835,14 @@ bool onsetClick(Detail& d) {
                               {{"time.sync", 0}, {"time.ms", m.from}, {"time.law", 1}, {"time.glide", m.glide}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}},
                               [m](long) { return std::vector<Event>{set(S(1.0), "time.ms", m.to)}; }, nullptr, 3.0});
   REQUIRE(static_cast<int>(cases.size()) == kExpClickCases + kPlainOnsets, "%zu onset cases built", cases.size());
-  const double rates[2] = {48000.0, 44100.0};
-  const std::size_t nCases = cases.size();
-  std::vector<ClickRun> res(2 * nCases * kPhases);  // slot = (rate * nCases + case) * kPhases + phase
-  parallelFor(res.size(), [&](std::size_t i) {
-    const std::size_t ci = i / kPhases, rate = ci / nCases;
-    res[i] = clickRun(cases[ci % nCases], phaseShift(static_cast<int>(i % kPhases), rates[rate]), rates[rate]);
-  });
   int ran = 0;
-  for (std::size_t ri = 0; ri < 2; ++ri)
-    for (std::size_t k = 0; k < nCases; ++k) {
-      const ClickCase& c = cases[k];
-      PhaseWorst w;
-      for (int j = 0; j < kPhases; ++j) foldPhase(w, res[(ri * nCases + k) * kPhases + static_cast<std::size_t>(j)]);
+  for (const ClickCase& c : cases) {
+    const auto w4 = worstAtRates([&](std::size_t ri, int j) { return clickRun(c, phaseShift(j, kClickRates[ri]), kClickRates[ri]); });
+    for (std::size_t ri = 0; ri < 4; ++ri) {
+      const PhaseWorst& w = w4[ri];
       ++ran;
       char nm[128];
-      std::snprintf(nm, sizeof nm, "%s, %g Hz", c.name, rates[ri]);
+      std::snprintf(nm, sizeof nm, "%s, %g Hz", c.name, kClickRates[ri]);
       if (g_report)
         std::printf("  REPORT onset M2 %-75s %6.3f  (speed %.3f..%.3f, %llu backstop, %llu floor/overrun)\n", nm, w.m2, w.st.sMin, w.st.sMax,
                     static_cast<unsigned long long>(w.st.clamps), static_cast<unsigned long long>(w.st.floors));
@@ -1825,7 +1851,234 @@ bool onsetClick(Detail& d) {
               static_cast<unsigned long long>(w.st.clamps), static_cast<unsigned long long>(w.st.floors));
       REQUIRE(w.m2 <= kClickMax, "exponential onset %s reads M2 %.3f at its worst of %d probe phases (threshold %.3f)", nm, w.m2, kPhases, kClickMax);
     }
-  REQUIRE(ran == 2 * (kExpClickCases + kPlainOnsets), "the onset gate ran %d cases, expected %d", ran, 2 * (kExpClickCases + kPlainOnsets));
+  }
+  REQUIRE(ran == 4 * (kExpClickCases + kPlainOnsets), "the onset gate ran %d cases, expected %d", ran, 4 * (kExpClickCases + kPlainOnsets));
+  return true;
+}
+
+
+// ---- M3 B4, T-041 (D-049 A4): the other one-sample speed steps, and the tape law's catch-up ----
+
+// A case's name must outlive the case (ClickCase holds a const char*): the built-up ones live here.
+const char* keepName(std::string s) {
+  static std::deque<std::string> names;  // a deque: growing it never moves the strings already handed out
+  names.push_back(std::move(s));
+  return names.back().c_str();
+}
+
+struct StepEv { double at; const char* key; double v; };
+ClickCase stepCase(const std::string& what, int law, int change, double from, std::vector<StepEv> ev, double seconds, bool jump = false) {
+  return ClickCase{keepName(std::string(law ? "exponential: " : "tape: ") + what), jump,
+                   {{"time.sync", 0}, {"time.ms", from}, {"time.law", static_cast<double>(law)}, {"time.change", static_cast<double>(change)}, {"time.glide", 0.3},
+                    {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}},
+                   [ev](long) { std::vector<Event> v; for (const StepEv& e : ev) v.push_back(set(S(e.at), e.key, e.v)); return v; }, nullptr, seconds};
+}
+
+// The speed steps T-041 found beyond the exponential law's: the tape law's cap release (plain onsets, and a time.glide
+// change mid-move, which sends the model past the cap again), the fade's frozen outgoing head (D-006's fallback taken
+// from a MOVING head, and a crossfade-mode retarget of a glide in flight), and a retarget of a fade in flight.
+std::vector<ClickCase> stepCases() {
+  std::vector<ClickCase> cs;
+  cs.push_back(stepCase("plain onset 500 -> 125 ms", 0, 0, 500, {{1.0, "time.ms", 125}}, 3.0));
+  cs.push_back(stepCase("long glide 2000 -> 20 ms", 0, 0, 2000, {{1.0, "time.ms", 20}}, 3.0));
+  for (const int law : {0, 1}) {
+    cs.push_back(stepCase("time.glide 0.3 -> 0.01, 100 ms into a 500 -> 125 ms move", law, 0, 500, {{1.0, "time.ms", 125}, {1.1, "time.glide", 0.01}}, 3.0));
+    cs.push_back(stepCase("time.glide 0.01 -> 1, 100 ms into a 500 -> 125 ms move", law, 0, 500, {{0.9, "time.glide", 0.01}, {1.0, "time.ms", 125}, {1.1, "time.glide", 1.0}}, 3.0));
+    // D-006's fallback from a head that is moving: a 12 s target (or 1 ms from 5 s) taken while the glide is at speed 2.0 or 0.5.
+    cs.push_back(stepCase("fallback: 500 -> 125 ms, then 12000 ms 60 ms in", law, 0, 500, {{1.0, "time.ms", 125}, {1.06, "time.ms", 12000}}, 3.0));
+    cs.push_back(stepCase("fallback: 500 -> 125 ms, then 12000 ms 200 ms in", law, 0, 500, {{1.0, "time.ms", 125}, {1.2, "time.ms", 12000}}, 3.0));
+    cs.push_back(stepCase("fallback: 4000 -> 5000 ms, then 1 ms 100 ms in", law, 0, 4000, {{1.0, "time.ms", 5000}, {1.1, "time.ms", 1}}, 6.0));
+    cs.push_back(stepCase("fallback: 4000 -> 5000 ms, then 1 ms 300 ms in", law, 0, 4000, {{1.0, "time.ms", 5000}, {1.3, "time.ms", 1}}, 6.0));
+    // a crossfade-mode retarget of a repitch glide in flight (the same freeze, from startFade's other call site)
+    cs.push_back(stepCase("glide in flight, time.change flipped to crossfade, retargeted", law, 0, 500, {{1.0, "time.ms", 125}, {1.1, "time.change", 1}, {1.12, "time.ms", 400}}, 3.0));
+  }
+  cs.push_back(stepCase("crossfade retargeted mid-fade", 0, 1, 500, {{1.0, "time.ms", 250}, {1.010, "time.ms", 1000}}, 3.0));
+  cs.push_back(stepCase("jump retargeted mid-fade", 0, 2, 500, {{1.0, "time.ms", 250}, {1.001, "time.ms", 1000}}, 3.0, true));
+  return cs;
+}
+constexpr int kStepCases = 2 + 2 * 7 + 2;
+
+// D-049 A4: the cases above at 44.1 - 192 kHz, worst of 8 phases, under the bar with zero backstop hits. The plants
+// tapeKinkUnbounded (the onsets and glide changes read 2.4 .. 12) and fbFrozenOutgoing (the fallbacks and the retarget
+// read 3.5 at 48 kHz, 14 at 192) each break their own rows and not the other's. A count guard so an emptied list
+// cannot pass.
+bool stepClick(Detail& d) {
+  const auto cases = stepCases();
+  const std::size_t nc = cases.size();
+  REQUIRE(static_cast<int>(nc) == kStepCases, "%zu speed-step cases built, expected %d", nc, kStepCases);
+  int ran = 0;
+  for (const ClickCase& c : cases) {
+    const auto w4 = worstAtRates([&](std::size_t ri, int j) { return clickRun(c, phaseShift(j, kClickRates[ri]), kClickRates[ri]); });
+    for (std::size_t ri = 0; ri < 4; ++ri) {
+      const PhaseWorst& w = w4[ri];
+      ++ran;
+      char nm[192];
+      std::snprintf(nm, sizeof nm, "%s, %g Hz", c.name, kClickRates[ri]);
+      if (g_report)
+        std::printf("  REPORT step M2 %-100s %6.3f  (speed %.3f..%.3f, %llu backstop, %llu floor/overrun)\n", nm, w.m2, w.st.sMin, w.st.sMax,
+                    static_cast<unsigned long long>(w.st.clamps), static_cast<unsigned long long>(w.st.floors));
+      REQUIRE(w.st.clamps == 0 && w.st.floors == 0 && w.st.sMax <= kSDecl + 1e-9 && w.st.sMin >= 0.25 - 1e-12,
+              "%s: speed %.3f..%.3f, %llu backstop hits, %llu floor/overrun reads", nm, w.st.sMin, w.st.sMax,
+              static_cast<unsigned long long>(w.st.clamps), static_cast<unsigned long long>(w.st.floors));
+      REQUIRE(w.m2 <= kClickMax, "%s reads M2 %.3f at its worst of %d probe phases (threshold %.3f)", nm, w.m2, kPhases, kClickMax);
+    }
+  }
+  REQUIRE(ran == 4 * kStepCases, "the speed-step gate ran %d cases, expected %d", ran, 4 * kStepCases);
+  return true;
+}
+
+// The outgoing head's bound (D-049 A6). A fade's outgoing head slews its speed to rest under the bound a = 1/(k::kExpSlewS fs)
+// per sample, and is held inside the line by a clamp that must not itself step the speed: the first form (kMinRead + |offset|)
+// bound under a MODULATED fade from a shortening glide and stepped it by up to 27 in one sample. M2 cannot be the gate for the
+// modulated case: under 20 ms of modulation at 1.25 Hz the OFFSET's own slew limit (0.25 a sample) steps the read speed and the
+// click reads 2.3 at 96 kHz and 4.5 at 192 even with the head right (the modulation's, not the fade's). So this gate reads the head
+// alone, the read position without the offset, and requires its speed to change by at most a from one sample to the next across
+// the whole move, at 44.1 - 192 kHz, both laws, a crossfade retarget 1 - 12 ms into a 20 -> 2 ms glide under 20 ms of modulation.
+// A vacuity guard, read only on steps whose last two samples are fading (Echo::fading), so the step is the outgoing head's
+// speed against the speed just before it (the slew to rest takes a sample or two: the glide's speed here is ~0.15 under
+// the exponential law at 44.1 kHz, under a): the worst there must reach 0.5 a, which only a fade whose outgoing head
+// actually slews can do. Read over the whole move it would
+// be vacuous, since the law's own onset step reaches a with no fade at all (critic re-check L1).
+struct OutgoingRun { double worst = 0, worstInFade = 0; };
+OutgoingRun outgoingWorstStep(double sr, int law, double x) {
+  Echo e;
+  e.prepare(sr, 4096);
+  const std::pair<const char*, double> kv[] = {{"time.sync", 0}, {"time.ms", 20}, {"time.law", static_cast<double>(law)}, {"time.change", 0}, {"time.glide", 0.3}, {"fb.amount", 0},
+                                               {"filt.loop.on", 0}, {"mix", 100}, {"mod.depthMs", 20}, {"mod.rateHz", 1.25}};
+  for (const auto& [k, v] : kv)
+    if (!e.setParam(k, v)) { std::fprintf(stderr, "outgoing bound: setParam(%s) refused\n", k); std::abort(); }
+  const long n = S(1.6, sr), at = S(1.0, sr), at2 = at + std::lround(x * sr);
+  std::vector<double> h(static_cast<std::size_t>(n));
+  std::vector<char> f(static_cast<std::size_t>(n));
+  double oL = 0, oR = 0;
+  for (long i = 0; i < n; ++i) {
+    if (i == at) e.setParam("time.ms", 2);
+    if (i == at2) { e.setParam("time.change", 1); e.setParam("time.ms", 400); }
+    const double s = 0.1 * std::sin(0.05 * static_cast<double>(i));
+    e.process(&s, &s, &oL, &oR, 1, 120.0);
+    h[static_cast<std::size_t>(i)] = e.readPosition(0) - e.modOffset(0);  // the head's own position: the fade's outgoing head while it fades
+    f[static_cast<std::size_t>(i)] = e.fading(0);
+  }
+  OutgoingRun r;
+  for (long i = at - 50; i < n; ++i) {
+    const std::size_t u = static_cast<std::size_t>(i);
+    const double a = h[u], b = h[u - 1], c = h[u - 2];
+    if (std::fabs(a - b) >= 100 || std::fabs(b - c) >= 100) continue;  // a handover (a fade's end) is not a speed
+    const double step = std::fabs(a - 2 * b + c);
+    r.worst = std::max(r.worst, step);
+    if (f[u] && f[u - 1]) r.worstInFade = std::max(r.worstInFade, step);  // the outgoing head's speed against the one before it
+  }
+  return r;
+}
+bool outgoingBound(Detail& d) {
+  const double xs[] = {0.001, 0.002, 0.003, 0.004, 0.006, 0.008, 0.010, 0.012};
+  constexpr std::size_t nx = sizeof xs / sizeof xs[0];
+  std::vector<OutgoingRun> res(4 * 2 * nx);  // slot = (rate * 2 + law) * nx + x
+  parallelFor(res.size(), [&](std::size_t i) { res[i] = outgoingWorstStep(kClickRates[i / (2 * nx)], static_cast<int>((i / nx) % 2), xs[i % nx]); });
+  for (std::size_t ri = 0; ri < 4; ++ri) {
+    const double a = 1.0 / (echo::k::kExpSlewS * kClickRates[ri]);
+    double worst = 0, inFade = 0;
+    for (std::size_t j = 0; j < 2 * nx; ++j) {
+      worst = std::max(worst, res[ri * 2 * nx + j].worst);
+      inFade = std::max(inFade, res[ri * 2 * nx + j].worstInFade);
+    }
+    if (g_report) std::printf("  REPORT outgoing bound at %g Hz: worst speed change a sample %.4f (inside fades %.4f), the bound %.4f\n", kClickRates[ri], worst, inFade, a);
+    REQUIRE(worst <= a * (1.0 + 1e-6), "outgoing head at %g Hz: the speed changed by %.4f in one sample (bound %.4f): its clamp to the line steps it", kClickRates[ri], worst, a);
+    REQUIRE(inFade >= 0.5 * a, "outgoing head at %g Hz: the worst step inside a fade %.4f is under half the bound %.4f: the cases no longer slew a fading head (vacuous)", kClickRates[ri], inFade, a);
+  }
+  return true;
+}
+
+// The catch-up gate (D-049 A4 and A5, ROADMAP T-041 criterion 4): after the tape law's cap releases, the head lands on
+// the model, and on the target. M2 cannot judge HOW: a bound alone (the plant tapeNoBrake) keeps every step under the
+// bar (M2 <= 1.06) while the head overshoots the model by up to 1.8 samples, rings, and dips to speed 0.5 (a wobble in
+// pitch, not a click). So the gate reads the head against the model's own delay (Echo::tapeModelDelay) and against
+// the target, by direction (D-049 A5, A6), in the 20 ms after the cap lets go, at 44.1 - 192 kHz:
+//   shortening (held at +12 st): the speed never falls below 0.9, and the head passes neither the model nor the target
+//     by more than 0.1 sample;
+//   lengthening (held at -12 st, whose speed rises from 0.5 to 1: the mirror of "never falls below 0.9" is the only
+//     form its release can satisfy): the speed never rises above 1.1, and the head passes the target by at most 0.1
+//     sample. The model half is shortening-only: during a lengthening hold the model's read is pinned to the head, so
+//     there is no model to pass (the target term of the catch-up is the brake there).
+// READINGS are in the T-041 trace (traces/2026-10-30-t041-speed-steps.md) and in `--click-report`. A case that never
+// reaches the cap would make the gate vacuous, so every capped case must first hold it for at least kCatchCapMin samples
+// and must have made the catch-up act.
+// Second half: on the model the law is untouched. A tape move that stays inside the cap must read 0 samples braked or
+// bound (SpeedStats::catchUps), which is what "bit-identical to the unbraked law" means here: V is the law's own,
+// sample for sample. The SPEC's 0.5 <-> 0.25 s moves are among them.
+constexpr double kCatchSpeedMin = 0.9, kCatchSpeedMax = 1.1, kCatchOvershootMax = 0.1;
+constexpr long kCatchCapMin = 50;
+struct CatchCase { double from, to, glide; };
+struct CatchRun { long capSamples = 0; double speed = 0, overshoot = 0; std::uint64_t catchUps = 0; };  // speed: the min (shortening) or max (lengthening) after the release
+CatchRun catchUpRun(const CatchCase& c, double sr) {
+  auto e = mk({{"time.sync", 0}, {"time.ms", c.from}, {"time.change", 0}, {"time.law", 0}, {"time.glide", c.glide}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, sr);
+  const long n = S(3.0, sr), at = S(1.0, sr);
+  const Vec in(n, 0.1);  // not silent: a silent engine rests, and a resting head lands
+  std::vector<double> D(static_cast<std::size_t>(n)), M(static_cast<std::size_t>(n), 0.0);
+  runEach(*e, in, in, {set(at, "time.ms", c.to)}, [](long) { return 120.0; }, [&](long i, Echo& x) {
+    D[static_cast<std::size_t>(i)] = x.headDelay(0);
+    M[static_cast<std::size_t>(i)] = x.tapeModelDelay(0);
+  });
+  const bool shorten = c.to < c.from;
+  const double T = c.to / 1000.0 * sr;
+  // The cap holds the speed at exactly 2.0 (shortening) or 0.5 (lengthening); the longest such run is the one gated, and
+  // the sample after it is the release.
+  long run = 0, best = 0, end = -1;
+  for (long i = at + 1; i < n; ++i) {
+    const double sp = 1.0 - (D[static_cast<std::size_t>(i)] - D[static_cast<std::size_t>(i - 1)]);
+    run = (shorten ? sp >= 2.0 - 1e-9 : sp <= 0.5 + 1e-9) ? run + 1 : 0;
+    if (run > best) { best = run; end = i; }
+  }
+  CatchRun r;
+  r.catchUps = e->speedStats(0).catchUps;
+  r.capSamples = best;
+  r.speed = best > 0 ? (shorten ? 1e300 : -1e300) : 0.0;  // no cap run: nothing to read (the gate then demands none of it)
+  for (long i = end + 1; best > 0 && i <= std::min(n - 1, end + S(0.02, sr)); ++i) {
+    const double sp = 1.0 - (D[static_cast<std::size_t>(i)] - D[static_cast<std::size_t>(i - 1)]);
+    r.speed = shorten ? std::min(r.speed, sp) : std::max(r.speed, sp);
+    const double Di = D[static_cast<std::size_t>(i)], Mi = M[static_cast<std::size_t>(i)];
+    // ahead = past the target (D below it when shortening, above it when lengthening); a SHORTENING head is also gated
+    // against the model. A lengthening head is not: while it lags the model the tape search only moves forward from the
+    // head's own cursor, so the model's read is pinned to the head (tapeModelDelay = D + 1) and there is no model to
+    // overshoot; the target is the only reference (D-049 A6).
+    const double ahead = shorten ? std::max(Mi != 0.0 ? Mi - Di : 0.0, T - Di) : Di - T;
+    r.overshoot = std::max(r.overshoot, ahead);
+  }
+  return r;
+}
+bool tapeCatchUp(Detail& d) {
+  // 2 octave shortening moves at three glides, lengthening moves held at the lower cap (-12 st) to their landing; then
+  // moves that stay inside the cap
+  const CatchCase cases[] = {{500, 125, 0.3}, {500, 100, 0.05}, {500, 60, 0.01}, {125, 1000, 0.01}, {125, 500, 0.01}, {125, 750, 0.01},
+                             {500, 250, 0.01}, {500, 250, 0.03}, {500, 250, 0.3}, {250, 500, 0.01}, {250, 500, 0.03}, {250, 500, 0.3}, {125, 500, 0.3}, {2, 1, 0.01}, {2, 1, 0.3}};
+  constexpr std::size_t nc = sizeof cases / sizeof cases[0], nCapped = 6;
+  std::vector<CatchRun> res(4 * nc);
+  parallelFor(res.size(), [&](std::size_t i) { res[i] = catchUpRun(cases[i % nc], kClickRates[i / nc]); });
+  if (g_report)  // every reading, before the first REQUIRE can return
+    for (std::size_t ri = 0; ri < 4; ++ri)
+      for (std::size_t k = 0; k < nc; ++k)
+        std::printf("  REPORT catch-up %g -> %g ms glide %g, %g Hz: cap held %ld samples; speed after release %s %.3f; overshoot of the %s %.4f sample; %llu samples braked or bound\n",
+                    cases[k].from, cases[k].to, cases[k].glide, kClickRates[ri], res[ri * nc + k].capSamples, cases[k].to < cases[k].from ? "min" : "max", res[ri * nc + k].speed,
+                    cases[k].to < cases[k].from ? "model or target" : "target", res[ri * nc + k].overshoot, static_cast<unsigned long long>(res[ri * nc + k].catchUps));
+  for (std::size_t ri = 0; ri < 4; ++ri)
+    for (std::size_t k = 0; k < nc; ++k) {
+      const CatchRun& r = res[ri * nc + k];
+      const CatchCase& c = cases[k];
+      if (k >= nCapped) {  // inside the cap the catch-up never acts: the law's own V, bit for bit (a braked V would differ in the last digits at least)
+        REQUIRE(r.catchUps == 0, "tape move %g -> %g ms glide %g at %g Hz stays inside the cap, yet the catch-up changed the law's V on %llu samples", c.from, c.to, c.glide, kClickRates[ri],
+                static_cast<unsigned long long>(r.catchUps));
+        continue;
+      }
+      const bool shorten = c.to < c.from;
+      REQUIRE(r.catchUps > 0, "catch-up %g -> %g ms glide %g at %g Hz: the catch-up never acted on a capped move (vacuous)", c.from, c.to, c.glide, kClickRates[ri]);
+      REQUIRE(r.capSamples >= kCatchCapMin, "catch-up %g -> %g ms glide %g at %g Hz: the cap was held for %ld samples (< %ld): the case does not reach the cap, the gate is vacuous",
+              c.from, c.to, c.glide, kClickRates[ri], r.capSamples, kCatchCapMin);
+      REQUIRE(shorten ? r.speed >= kCatchSpeedMin : r.speed <= kCatchSpeedMax,
+              "catch-up %g -> %g ms glide %g at %g Hz: after the cap released the speed %s to %.3f (limit %s %.1f): the head overshoots and rings", c.from, c.to, c.glide, kClickRates[ri],
+              shorten ? "fell" : "rose", r.speed, shorten ? "min" : "max", shorten ? kCatchSpeedMin : kCatchSpeedMax);
+      REQUIRE(r.overshoot <= kCatchOvershootMax, "catch-up %g -> %g ms glide %g at %g Hz: the head overshoots %s by %.3f sample (limit %.1f)", c.from, c.to, c.glide,
+              kClickRates[ri], shorten ? "the model or the target" : "the target", r.overshoot, kCatchOvershootMax);
+    }
   return true;
 }
 
@@ -3825,16 +4078,23 @@ const std::vector<Check> kChecks = {
      scaleUnityBits, {"scaleOffsetRewrite"}},
     {"time.scale and the tail: the declared tail, the rest gate and the offline renderer use the scaled times (44.1, 96 kHz)", scaleTail,
      {"scaleTailUnscaled", "scaleIgnoredSynced"}},
-    {"click metric (M2 gate, s fixed at 2.25): sweeps, tempo sweeps and single moves under 2.5 and inside the speed invariants; a planted click over",
-     clickSweep, {"integerRead", "blockSteppedD", "bareJump", "noLawCap", "scaleBypassesChange"}},
-    {"click metric over the probe's phase: a move reversed mid-glide (both laws, time.ms / time.div / time.scale free and synced, 1 and 2 octaves, down and up, 100/200/400 ms; 48 and 44.1 kHz) reads under 2.5 at the worst of 8 half-period phases, zero backstop hits",
-     reversalClick, {"expSlewOff"}},
+    {"click metric (M2 gate, s fixed at 2.25): sweeps, tempo sweeps and single moves under 2.5 and inside the speed invariants, at 44.1 / 48 / 96 / 192 kHz, worst of 8 probe phases; a planted click over",
+     clickSweep, {"integerRead", "blockSteppedD", "bareJump", "noLawCap", "scaleBypassesChange", "fadeLinear"}},
+    {"click metric over the probe's phase: a move reversed mid-glide (both laws, time.ms / time.div / time.scale free and synced, 1 and 2 octaves, down and up, 100/200/400 ms; 44.1 / 48 / 96 / 192 kHz) reads under 2.5 at the worst of 8 half-period phases, zero backstop hits",
+     reversalClick, {"expSlewOff", "tapeKinkUnbounded"}},
     {"the click gates' probe-phase sweep sweeps: the 8 shifts are distinct and span half a probe period, and they move a step's reading (an onset's, and a reversal's)",
      phaseSweepWorks, {"phaseSweepCollapsed"}},
-    {"click metric over the probe's phase: every exponential-law onset (sweeps, single moves, octave steps, plain onsets; 48 and 44.1 kHz) reads under 2.5 at the worst of 8 half-period phases, zero backstop hits",
+    {"click metric over the probe's phase: every exponential-law onset (sweeps, single moves, octave steps, plain onsets; 44.1 / 48 / 96 / 192 kHz) reads under 2.5 at the worst of 8 half-period phases, zero backstop hits",
      onsetClick, {"expSlewOff"}},
     {"the exponential law's 0.1 ms bound binds only just after a move (44.1 - 192 kHz; glides 0.01 - 1 s; onsets, reversals, 1 and 2 ms targets, a glide change; modulated): never in a relaxation",
      expSlewBinds, {"expSlewLong", "expSpuriousRetarget", "expSlewOff"}},
+    // ---- M3 B4, T-041 ----
+    {"click metric over the probe's phase: the tape law's plain onsets, time.glide changes mid-move, D-006's fallback taken from a moving head, a crossfade-mode retarget of a glide in flight and a retarget mid-fade (both laws; 44.1 / 48 / 96 / 192 kHz) read under 2.5 at the worst of 8 half-period phases, zero backstop hits",
+     stepClick, {"tapeKinkUnbounded", "fbFrozenOutgoing"}},
+    {"a fade's outgoing head: its speed changes by at most the 0.1 ms bound a sample across a modulated crossfade retarget of a shortening glide, both laws (44.1 - 192 kHz): the clamp to the line must not step it",
+     outgoingBound, {"fbClampUnsigned"}},
+    {"the tape law's catch-up: after the cap releases, the speed does not ring (>= 0.9 shortening, <= 1.1 lengthening) and the head never overshoots the model or passes its target by more than 0.1 sample, at 44.1 - 192 kHz (M2 cannot see this)",
+     tapeCatchUp, {"tapeNoBrake", "tapeNoTargetBrake"}},
     // ---- M3 B2, T-013 ----
     {"ABI: properties() validates after prepare at 44.1/48/96/192 kHz (latency 0, tail, min_block 1, load 20 ms) and is refused before",
      abiProperties, {"propsNoTail", "loadBoundShort"}},
@@ -3937,6 +4197,7 @@ bool* plantFlag(std::string_view n) {
       {"tempoStealsKeyMove", &tempoStealsKeyMove}, {"followNoTrackInFade", &followNoTrackInFade}, {"followKeepsResidual", &followKeepsResidual},
       {"modNoFloorBound", &modNoFloorBound}, {"wakeOffsetFromZero", &wakeOffsetFromZero}, {"tapeLinearHistory", &tapeLinearHistory},
       {"glideFixedRate", &glideFixedRate}, {"expSlewOff", &expSlewOff}, {"expSlewLong", &expSlewLong}, {"phaseSweepCollapsed", &phaseSweepCollapsed}, {"expSlewBlockStart", &expSlewBlockStart}, {"expSpuriousRetarget", &expSpuriousRetarget},
+      {"tapeKinkUnbounded", &tapeKinkUnbounded}, {"tapeNoBrake", &tapeNoBrake}, {"tapeNoTargetBrake", &tapeNoTargetBrake}, {"fbClampUnsigned", &fbClampUnsigned}, {"fbFrozenOutgoing", &fbFrozenOutgoing}, {"fadeLinear", &fadeLinear},
       {"propsNoTail", &propsNoTail}, {"tailWraps32", &tailWraps32}, {"paramNoClass", &paramNoClass},
       {"processReadsAfterWrite", &processReadsAfterWrite}, {"loadBoundShort", &loadBoundShort},
       {"latchClears", &latchClears}, {"tapBeforeGain", &tapBeforeGain}, {"prepareRampsIn", &prepareRampsIn},
@@ -4017,7 +4278,7 @@ const std::vector<AdmissionRow>& admissionRows() {
       {"A10", "Real-time", {noAlloc, a10Session, ftzSet, ftzRestored},
        "locks and syscalls by review only: no RealtimeSanitizer on this toolchain, and the engine calls nothing that locks"},
       {"A11", "Parameter classes",
-       {switchesClickFree, crossfadeEqualGain, jumpIsShortFade, deferral, modSeeded, clickSweep, reversalClick, onsetClick, phaseSweepWorks, expSlewBinds, scaleControlMove, loadLeavesDevice, presetValidate, b265Port},
+       {switchesClickFree, crossfadeEqualGain, jumpIsShortFade, deferral, modSeeded, clickSweep, reversalClick, onsetClick, phaseSweepWorks, expSlewBinds, scaleControlMove, stepClick, outgoingBound, tapeCatchUp, loadLeavesDevice, presetValidate, b265Port},
        "structural: every flip key's switch declaration in params.json (`check_manifest.py`, with planted bare and length-less switches); the B265 reading REPORTED, never judged (`.harness/b265-report.txt`)"},
       {"A12", "Macros", {presetA12, presetCurves, presetValidate, presetFactoryBank}, "the factory bank: the init plus seven, each valid, loading as its own values (T-021); B408 for the bank is stated in the run's REPORT lines"},
       {"A13", "Corner presets", {presetA13}, "the horde preset's own save and reload is horde's"},
@@ -4099,14 +4360,20 @@ int main(int argc, char** argv) {
     phaseSweepWorks(d);
     reversalClick(d);
     onsetClick(d);
+    stepClick(d);
+    outgoingBound(d);
+    tapeCatchUp(d);
     expSlewBinds(d);
 #ifdef ECHO_PLANTS
-    for (const char* p : {"bareJump", "integerRead", "blockSteppedD", "noLawCap", "scaleBypassesChange", "expSlewOff"}) {
+    for (const char* p : {"bareJump", "integerRead", "blockSteppedD", "noLawCap", "scaleBypassesChange", "expSlewOff", "tapeKinkUnbounded", "tapeNoBrake", "tapeNoTargetBrake", "fbClampUnsigned", "fbFrozenOutgoing", "fadeLinear"}) {
       std::printf("  -- under plant %s\n", p);
       *plantFlag(p) = true;
       clickSweep(d);
       reversalClick(d);
       onsetClick(d);
+      stepClick(d);
+      outgoingBound(d);
+      tapeCatchUp(d);
       *plantFlag(p) = false;
     }
 #endif
@@ -4142,7 +4409,8 @@ int main(int argc, char** argv) {
                         "stereoInvertsR", "pingpongBothLines", "foldScaleSlip", "foldOctaveNarrow", "foldNotchUnsmoothed",
                         "zoneAnyMode", "zoneAtEqual", "pingpongInvertsR", "presetStateOversized", "presetPatchOfDropsKey", "factoryHomeOffset", "factoryLabelTypo",
                         "scaleIgnoredSynced", "scaleNotSnapped", "scaleBypassesChange", "scaleAfterClamp", "scaleResendIsMove", "scaleTailUnscaled",
-                        "scaleMoveSwallowed", "scaleSnapRounds", "scaleOffsetRewrite", "stateMissingScaleDefaults", "expSlewOff", "expSlewLong", "phaseSweepCollapsed", "expSlewBlockStart", "expSpuriousRetarget"}) {
+                        "scaleMoveSwallowed", "scaleSnapRounds", "scaleOffsetRewrite", "stateMissingScaleDefaults", "expSlewOff", "expSlewLong", "phaseSweepCollapsed", "expSlewBlockStart", "expSpuriousRetarget",
+                        "tapeKinkUnbounded", "tapeNoBrake", "tapeNoTargetBrake", "fbClampUnsigned", "fbFrozenOutgoing", "fadeLinear"}) {
     bool guarded = false;
     for (const auto& c : kChecks)
       for (const char* p : c.plants) guarded = guarded || std::string_view(p) == n;
