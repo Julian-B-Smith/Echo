@@ -1114,6 +1114,7 @@ bool repitchCents(Detail& d) {
 // s in [0.25, 2.25] by construction (so the [0.25, 4] backstop never acts),
 // never reversed, never past the line; a move longer than 3 s at the cap
 // crossfades (the fallback) instead of gliding.
+bool speedStress(Detail& d);  // T-042's seeded gestures, defined with the click gates (it renders on their pool)
 bool speedInvariant(Detail& d) {
   struct Move { double from, to; bool fallback; };
   const Move moves[] = {{500, 250, false}, {250, 500, false}, {12000, 10, true}, {10, 12000, true}, {300, 300.5, false}};
@@ -1139,7 +1140,7 @@ bool speedInvariant(Detail& d) {
           REQUIRE((st.fallbacks > 0) == mv.fallback, "law %d, %g -> %g ms: fallback %s", law, mv.from, mv.to, mv.fallback ? "expected, not taken" : "taken, not expected");
         }
       }
-  return true;
+  return speedStress(d);
 }
 
 // The modulation (SPEC §7): a sine of depth A moves the read by exactly +-A
@@ -1874,11 +1875,91 @@ ClickCase stepCase(const std::string& what, int law, int change, double from, st
                    [ev](long) { std::vector<Event> v; for (const StepEv& e : ev) v.push_back(set(S(e.at), e.key, e.v)); return v; }, nullptr, seconds};
 }
 
+// T-042 (D-049 A8, A9): the same bar under MODULATION, where the offset's own speed steps read. A speed step reads in proportion
+// to the offset's slope and to where it meets the read floor, so each gesture is gated at four lfoAts of the LFO, the crest, the trough
+// and both zero crossings (the first build gated the crest only and missed a case of the criterion's own family, the outgoing clamp
+// reading last sample's offset: M2 4.27 at 192 kHz, found near the trough). `at` is the time of the gesture's first move, chosen from the
+// LFO's period (a sine at phase 0 from the wake, sin = 1 at a quarter period): lfoLands reads the offset there and requires it to be where
+// the label says. They are the lean set of a 252-case census (both laws, drift and sine, moves, fades, reversals, limit lifts: worst M2
+// 105 / 124 / 495 / 1971 at 44.1 - 192 kHz before the fix, 1.19 / 1.43 / 1.48 / 1.48 after) and of the critic's sweeps over the LFO
+// phase: every mechanism found has a row here that reads over the bar without its fix (the plants).
+struct LfoPhase { const char* name; double frac; int slopeSign; };  // frac: the fraction of the period at which the label holds
+constexpr LfoPhase kLfoPhases[4] = {{"crest", 0.25, 0}, {"down zero crossing", 0.5, -1}, {"trough", 0.75, 0}, {"up zero crossing", 1.0, +1}};
+double lfoMoveTime(double hz, double frac) { return (std::ceil(1.0 * hz - frac - 1e-9) + frac) / hz; }  // the first such place at or after 1 s
+// phase: an index into kLfoPhases, or -1 for a row placed by hand, which states the offset it expects there (a fraction of the depth, falling)
+struct ModRow { ClickCase c; double hz, at; int phase; double expect = 0; };
+struct RelEv { double dt; const char* key; double v; };    // dt after the gesture's first move
+ModRow modRow(const std::string& what, int law, int change, double from, double hz, int phase, double atHand, std::vector<RelEv> ev, double tail, bool jump,
+              std::vector<std::pair<const char*, double>> extra) {
+  const double at = phase >= 0 ? lfoMoveTime(hz, kLfoPhases[phase].frac) : atHand;
+  std::vector<StepEv> abs;
+  for (const RelEv& e : ev) abs.push_back({at + e.dt, e.key, e.v});
+  const std::string nm = what + (phase >= 0 ? std::string(" at the ") + kLfoPhases[phase].name + " of the LFO" : std::string(" at ") + std::to_string(static_cast<int>(std::lround(at * 1000))) + " ms") +
+                         ", 20 ms at " + (hz == 1.25 ? "1.25" : "5") + " Hz";
+  ClickCase c = stepCase(nm, law, change, from, abs, at + tail, jump);
+  c.kv.push_back({"mod.depthMs", 20});
+  c.kv.push_back({"mod.rateHz", hz});
+  for (const auto& kv : extra) c.kv.push_back(kv);  // a later key overrides an earlier one (clickRun sets them in order)
+  return {c, hz, at, phase};
+}
+// Eight gestures, each gated at the four lfoAts of the LFO, and two placed by hand where the critic found what the four lfoAts miss: the
+// aim branch (1.3 s: between the down crossing and the trough) and the outgoing clamp (1.38 s, just before the trough). A plant stops the
+// gate at its first row over the bar, so the rows are ordered with the one row each mechanism reads over first, then the rest.
+std::vector<ModRow> modRows() {
+  using KV = std::vector<std::pair<const char*, double>>;
+  struct Gesture { const char* what; int law, change; double from, hz; std::vector<RelEv> ev; double tail; bool jump; KV extra; };
+  const std::vector<RelEv> retarget6 = {{0, "time.ms", 2}, {0.006, "time.change", 1}, {0.006, "time.ms", 400}};
+  const std::vector<RelEv> retarget12 = {{0, "time.ms", 2}, {0.012, "time.change", 1}, {0.012, "time.ms", 400}};
+  const std::vector<Gesture> g = {
+      // criterion 2 of T-042: a 20 -> 2 ms glide retargeted to a crossfade 6 ms in. The offset's slew stops abruptly when its depth limit
+      // lifts at the retarget (M2 2.28 / 4.55 at 96 / 192 kHz in both laws before the slope bound).
+      {"20 -> 2 ms glide, crossfade to 400 ms 6 ms in", 0, 0, 20, 1.25, retarget6, 0.6, false, {}},
+      {"20 -> 2 ms glide, crossfade to 400 ms 6 ms in", 1, 0, 20, 1.25, retarget6, 0.6, false, {}},
+      // a fade to a short time: the outgoing head sounds and the offset answers to it alone (the floor clamp); the incoming head rides
+      // the floor and the offset leaves it braking (the ride). 20 ms asked at 5 Hz is limited to ~8 ms by its slope.
+      {"crossfade 100 -> 3 ms", 0, 1, 100, 5, {{0, "time.ms", 3}}, 0.6, false, {}},
+      {"jump 100 -> 3 ms", 0, 2, 100, 5, {{0, "time.ms", 3}}, 0.6, true, {}},
+      // the aim branch: a LONG fade to a short time, the offset aims at the incoming head's floor while it is under it (D-049 A9)
+      {"crossfade 100 -> 5 ms over 40 ms", 0, 1, 100, 1.25, {{0, "time.ms", 5}}, 0.6, false, {{"time.xfadeMs", 40}}},
+      // a deep repitch dive to the floor: the head's closing speed meets the offset's retreat (the floor brake). The exponential law at
+      // glide 0.01 s: at its default 0.3 s it dives slowly enough that the brake changes nothing (it read the same without it), at 0.01
+      // it reads 1.46 with the brake and 9.8 without, at 192 kHz.
+      {"repitch 100 -> 2 ms", 0, 0, 100, 1.25, {{0, "time.ms", 2}}, 0.8, false, {}},
+      {"repitch 100 -> 2 ms, glide 0.01", 1, 0, 100, 1.25, {{0, "time.ms", 2}}, 0.8, false, {{"time.glide", 0.01}}},
+      // H1 (D-049 A9): the same retarget 12 ms in. The outgoing head's floor clamp must look one sample ahead of the offset (the plant
+      // fbClampStale): the rows at the four lfoAts read under 1.5; the hand-placed one, 4.06 at 192 kHz without it.
+      {"20 -> 2 ms glide, crossfade to 400 ms 12 ms in", 0, 0, 20, 1.25, retarget12, 0.6, false, {}},
+  };
+  std::vector<ModRow> r;
+  std::vector<std::pair<int, int>> done;
+  auto add = [&](int gi, int p) {
+    for (const auto& dn : done) if (dn.first == gi && dn.second == p) return;
+    done.push_back({gi, p});
+    const Gesture& x = g[static_cast<std::size_t>(gi)];
+    r.push_back(modRow(x.what, x.law, x.change, x.from, x.hz, p, 0, x.ev, x.tail, x.jump, x.extra));
+  };
+  const auto hand = [&](int gi, double at, double expect) {
+    const Gesture& x = g[static_cast<std::size_t>(gi)];
+    r.push_back(modRow(x.what, x.law, x.change, x.from, x.hz, -1, at, x.ev, x.tail, x.jump, x.extra));
+    r.back().expect = expect;
+  };
+  add(0, 0); add(1, 0);          // criterion 2 at the crest
+  add(2, 2); add(3, 2);          // the fades at the trough
+  hand(4, 1.3, -0.7071);         // the aim branch: sin(225 deg), falling toward the trough
+  hand(7, 1.38, -0.9877);        // the outgoing clamp: sin(261 deg), falling, just before the trough (slope still negative: the clamp looks ahead by it)
+  add(5, 2); add(6, 2);          // the dives at the trough
+  for (int p = 0; p < 4; ++p)
+    for (int gi = 0; gi < 8; ++gi) add(gi, p);
+  return r;
+}
+constexpr int kModRows = 8 * 4 + 2;
 // The speed steps T-041 found beyond the exponential law's: the tape law's cap release (plain onsets, and a time.glide
 // change mid-move, which sends the model past the cap again), the fade's frozen outgoing head (D-006's fallback taken
-// from a MOVING head, and a crossfade-mode retarget of a glide in flight), and a retarget of a fade in flight.
+// from a MOVING head, and a crossfade-mode retarget of a glide in flight), and a retarget of a fade in flight; and, from T-042, the
+// moves under deep modulation (modRows above, first in the list).
 std::vector<ClickCase> stepCases() {
   std::vector<ClickCase> cs;
+  for (const ModRow& m : modRows()) cs.push_back(m.c);
   cs.push_back(stepCase("plain onset 500 -> 125 ms", 0, 0, 500, {{1.0, "time.ms", 125}}, 3.0));
   cs.push_back(stepCase("long glide 2000 -> 20 ms", 0, 0, 2000, {{1.0, "time.ms", 20}}, 3.0));
   for (const int law : {0, 1}) {
@@ -1896,16 +1977,69 @@ std::vector<ClickCase> stepCases() {
   cs.push_back(stepCase("jump retargeted mid-fade", 0, 2, 500, {{1.0, "time.ms", 250}, {1.001, "time.ms", 1000}}, 3.0, true));
   return cs;
 }
-constexpr int kStepCases = 2 + 2 * 7 + 2;
+constexpr int kStepCases = kModRows + 2 + 2 * 7 + 2;
+
+// Each modulated row's LFO label is a claim about the offset at the row's first move: read it there, at every rate, on the engine itself
+// (one fresh engine per distinct LFO rate and place: the offset does not depend on the gesture). A crest is +A, a trough -A, a crossing is 0
+// with the slope's sign, A being the depth the slope limit allows (20 ms, or 0.25 / (2 pi f / fs) samples at 5 Hz).
+bool lfoLands(Detail& d) {
+  struct LfoAt { double hz, at; int phase; double expect; };  // phase -1: a hand-placed row, with the offset it states
+  std::vector<LfoAt> lfoAts;
+  for (const ModRow& m : modRows()) {
+    bool seen = false;
+    for (const LfoAt& p : lfoAts) seen = seen || (p.hz == m.hz && p.phase == m.phase && (m.phase >= 0 || p.at == m.at));
+    if (!seen) lfoAts.push_back({m.hz, m.at, m.phase, m.expect});
+  }
+  struct Read { double m0 = 0, m1 = 0, A = 0; };
+  std::vector<Read> res(4 * lfoAts.size());
+  parallelFor(res.size(), [&](std::size_t i) {
+    const double sr = kClickRates[i / lfoAts.size()];
+    const LfoAt& p = lfoAts[i % lfoAts.size()];
+    auto e = mk({{"time.sync", 0}, {"time.ms", 100}, {"time.change", 0}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}, {"mod.depthMs", 20}, {"mod.rateHz", p.hz}}, sr);
+    const long at = std::lround(p.at * sr);
+    const Vec in = clickProbeAt(at + 2, sr);
+    Vec oL(64), oR(64);
+    for (long n = 0; n < at + 1;) {  // 64-sample blocks, then single samples for the last few
+      const int len = n < at - 70 ? 64 : 1;
+      e->process(in.data() + n, in.data() + n, oL.data(), oR.data(), len, 120.0);
+      if (n == at - 1) res[i].m0 = e->modOffset(0);
+      if (n == at) res[i].m1 = e->modOffset(0);
+      n += len;
+    }
+    res[i].A = std::min(0.020 * sr, 0.25 / (2 * kPi * p.hz / sr));
+  });
+  for (std::size_t i = 0; i < res.size(); ++i) {
+    const LfoAt& p = lfoAts[i % lfoAts.size()];
+    const double sr = kClickRates[i / lfoAts.size()], m = res[i].m1 / res[i].A;
+    if (p.phase < 0) {  // a hand-placed row: its stated offset, falling. A timing change that detunes it fails here, not silently.
+      if (g_report) std::printf("  REPORT LFO hand-placed row %g Hz at %.4f s, %6.0f Hz: offset %+.4f of its depth (states %+.4f)\n", p.hz, p.at, sr, m, p.expect);
+      REQUIRE(std::fabs(m - p.expect) <= 0.02 && res[i].m1 - res[i].m0 < 0,
+              "the hand-placed row at %g Hz and %g Hz moved off its LFO place: the offset reads %+.4f of its depth (slope %+.4f), it states %+.4f and falling", p.hz, sr, m, res[i].m1 - res[i].m0, p.expect);
+      continue;
+    }
+    const LfoPhase& ph = kLfoPhases[p.phase];
+    if (g_report) std::printf("  REPORT LFO %-20s %g Hz at %.4f s, %6.0f Hz: offset %+.4f of its depth (%.1f samples)\n", ph.name, p.hz, p.at, sr, m, res[i].m1);
+    const bool crossing = ph.slopeSign != 0;
+    const double want = crossing ? 0.0 : (ph.frac == 0.25 ? 1.0 : -1.0);
+    REQUIRE(std::fabs(m - want) <= 0.03 && (!crossing || (res[i].m1 - res[i].m0) * ph.slopeSign > 0),
+            "the %s row at %g Hz and %g Hz does not land on the LFO's %s: the offset reads %+.4f of its depth there (slope %+.4f)", ph.name, p.hz, sr, ph.name, m, res[i].m1 - res[i].m0);
+  }
+  return true;
+}
 
 // D-049 A4: the cases above at 44.1 - 192 kHz, worst of 8 phases, under the bar with zero backstop hits. The plants
 // tapeKinkUnbounded (the onsets and glide changes read 2.4 .. 12) and fbFrozenOutgoing (the fallbacks and the retarget
-// read 3.5 at 48 kHz, 14 at 192) each break their own rows and not the other's. A count guard so an emptied list
-// cannot pass.
+// read 3.5 at 48 kHz, 14 at 192) each break their own rows and not the other's. T-042's six plants break the modulated rows, each its own,
+// at 192 kHz (all readings in the T-042 trace): modAccelUnbounded the 20 -> 2 ms retarget at the crest (4.5, both laws; it lifts every fade
+// and dive row too, 3 - 7, since the slope bound is part of what keeps them smooth); modFloorClampsBoth the crossfade at the trough (the speed
+// reverses, to -954; M2 868); modBoundKeepsSlope the jump at the trough (3.5); modRideKink the hand-placed aim row only (3.40; the rows
+// at the four lfoAts read clean without it); modNoFloorBrake the tape dive at the trough (8.4, exponential 9.8) and nothing else;
+// fbClampStale the hand-placed H1 row only (4.06). A count guard so an emptied list cannot pass.
 bool stepClick(Detail& d) {
   const auto cases = stepCases();
   const std::size_t nc = cases.size();
   REQUIRE(static_cast<int>(nc) == kStepCases, "%zu speed-step cases built, expected %d", nc, kStepCases);
+  if (!lfoLands(d)) return false;
   int ran = 0;
   for (const ClickCase& c : cases) {
     const auto w4 = worstAtRates([&](std::size_t ri, int j) { return clickRun(c, phaseShift(j, kClickRates[ri]), kClickRates[ri]); });
@@ -1924,6 +2058,92 @@ bool stepClick(Detail& d) {
     }
   }
   REQUIRE(ran == 4 * kStepCases, "the speed-step gate ran %d cases, expected %d", ran, 4 * kStepCases);
+  return true;
+}
+
+// T-042 (D-049 A8): random control gestures at deep modulation, read on the engine's own speed statistics. The depth-20 report
+// (time.ms / time.change / time.law / time.glide gestures under mod.depthMs 20 read a speed of -870 with reverse > 0) is real and
+// dates from M2: the offset's floor clamp bounded the offset by BOTH heads of a fade, so a fade to a short time moved it by up to
+// its whole size in one sample under the head still sounding. It reads on SpeedStats and not on M2 alone: some of those cases read
+// speed -2547 with M2 0.2, because the outgoing head sounds silence and a click metric over silence reads nothing. Four seeds at
+// four rates at depths 5 and 20 (a 7 Hz sine), the gestures from a seeded mulberry32 stream (no wall clock): the speed stays in
+// [0.25, 2.25], never reverses, and neither the backstop nor the read floor acts. A vacuity guard: the gestures start fades.
+struct Mulberry {
+  std::uint32_t s;
+  double next() {  // [0, 1)
+    std::uint32_t t = (s += 0x6D2B79F5u);
+    t = (t ^ (t >> 15)) * (t | 1u);
+    t ^= t + ((t ^ (t >> 7)) * (t | 61u));
+    return static_cast<double>(t ^ (t >> 14)) / 4294967296.0;
+  }
+};
+struct StressRun { Echo::SpeedStats st[2]; std::uint64_t fades = 0; double peak = 0; };  // peak: the largest offset reached, in samples
+StressRun stressRun(double sr, double depth, double rateHz, int seed) {
+  Mulberry r{0x9E3779B9u * static_cast<std::uint32_t>(seed) + static_cast<std::uint32_t>(sr) + static_cast<std::uint32_t>(depth) + static_cast<std::uint32_t>(rateHz * 100)};
+  Echo e;
+  e.prepare(sr, 4096);
+  const std::pair<const char*, double> kv[] = {{"time.sync", 0}, {"time.ms", 400}, {"time.change", 0}, {"time.glide", 0.3}, {"fb.amount", 0}, {"mod.depthMs", depth},
+                                               {"mod.rateHz", rateHz}, {"mod.shape", 0}, {"filt.loop.on", 0}, {"mix", 100}};
+  for (const auto& [k, v] : kv)
+    if (!e.setParam(k, v)) { std::fprintf(stderr, "speed stress: setParam(%s) refused\n", k); std::abort(); }
+  const long n = S(8.0, sr);
+  const Vec in = clickProbeAt(n, sr);
+  Vec oL(64), oR(64);
+  e.resetStats();
+  long pos = 0, nextEv = 0;
+  StressRun o;
+  while (pos < n) {
+    if (pos >= nextEv) {
+      // Ten draws a gesture, always in this order (never inside an argument list: C++ leaves that order unspecified), whether or
+      // not they are used, so a seed's stream is the same whatever branches it takes.
+      const double dMs = r.next(), dSkew = r.next(), dChange = r.next(), dChangeV = r.next(), dLaw = r.next(), dLawV = r.next(), dGlide = r.next(), dGlideV = r.next();
+      const double dGap = r.next(), dGap2 = r.next();
+      e.setParam("time.ms", std::exp(std::log(12000.0) * std::pow(dMs, dSkew < 0.5 ? 1.0 : 2.5)));  // 1 ms .. 12 s, log-uniform or skewed short
+      if (dChange < 0.3) e.setParam("time.change", std::floor(dChangeV * 3.0));
+      if (dLaw < 0.3) e.setParam("time.law", std::floor(dLawV * 2.0));
+      if (dGlide < 0.2) e.setParam("time.glide", std::exp(std::log(0.01) + (std::log(5.0) - std::log(0.01)) * dGlideV));
+      nextEv = pos + S(0.005 + 0.4 * dGap * dGap2, sr);
+    }
+    const int len = static_cast<int>(std::min<long>(64, n - pos));
+    const auto u = static_cast<std::size_t>(pos);
+    e.process(in.data() + u, in.data() + u, oL.data(), oR.data(), len, 120.0);
+    pos += len;
+    o.peak = std::max({o.peak, std::fabs(e.modOffset(0)), std::fabs(e.modOffset(1))});
+  }
+  for (int k = 0; k < 2; ++k) { o.st[k] = e.speedStats(k); o.fades += e.fadeCount(k); }
+  return o;
+}
+bool speedStress(Detail& d) {
+  constexpr int kSeeds = 4;
+  // The depth is asked for in ms and LIMITED by the curve's slope (§7: A <= 0.25 / (2 pi f / fs) samples), so a label can go false: a 7 Hz sine
+  // caps at 5.68 ms whatever is asked (the first build's "depth 20" was that). The 1.25 Hz row is where 20 ms is real; every row asserts the
+  // offset it reached against what its label allows.
+  struct Cfg { double depthMs, hz; };
+  const Cfg cfgs[] = {{5.0, 7.0}, {20.0, 7.0}, {20.0, 1.25}};
+  constexpr std::size_t nc = 3, nj = 4 * nc * kSeeds;
+  std::vector<StressRun> res(nj);  // slot = (rate * nc + config) * kSeeds + seed - 1
+  parallelFor(nj, [&](std::size_t i) {
+    const Cfg& c = cfgs[(i / kSeeds) % nc];
+    res[i] = stressRun(kClickRates[i / (nc * kSeeds)], c.depthMs, c.hz, static_cast<int>(i % kSeeds) + 1);
+  });
+  for (std::size_t i = 0; i < nj; ++i) {
+    const Cfg& c = cfgs[(i / kSeeds) % nc];
+    const double sr = kClickRates[i / (nc * kSeeds)];
+    for (int k = 0; k < 2; ++k) {
+      const auto& st = res[i].st[k];
+      REQUIRE(st.sMin >= 0.25 - 1e-12 && st.sMax <= 2.25 + 1e-9 && st.reverse == 0 && st.clamps == 0 && st.overruns == 0 && st.floors == 0,
+              "gestures at %g Hz, depth %g ms at %g Hz, seed %zu, line %d: speed [%.4f, %.4f], %llu reverse, %llu backstop, %llu overruns, %llu floors", sr, c.depthMs, c.hz,
+              i % kSeeds + 1, k, st.sMin, st.sMax, static_cast<unsigned long long>(st.reverse), static_cast<unsigned long long>(st.clamps),
+              static_cast<unsigned long long>(st.overruns), static_cast<unsigned long long>(st.floors));
+    }
+    REQUIRE(res[i].fades >= 20, "gestures at %g Hz, depth %g ms at %g Hz, seed %zu started only %llu fades: the stress no longer reaches the fades it guards (vacuous)", sr, c.depthMs, c.hz,
+            i % kSeeds + 1, static_cast<unsigned long long>(res[i].fades));
+    const double reach = std::min(c.depthMs * 1e-3 * sr, 0.25 / (2 * kPi * c.hz / sr));  // the offset the label allows, in samples
+    if (g_report) std::printf("  REPORT stress %g Hz, depth %g ms at %g Hz, seed %zu: offset reached %.2f of %.2f samples (%.1f%%), %llu fades\n", sr, c.depthMs, c.hz, i % kSeeds + 1, res[i].peak, reach,
+                              100.0 * res[i].peak / reach, static_cast<unsigned long long>(res[i].fades));
+    REQUIRE(res[i].peak >= 0.9 * reach, "gestures at %g Hz, depth %g ms at %g Hz, seed %zu: the offset reached only %.2f of the %.2f samples the label allows: the depth is not what it says (vacuous)", sr, c.depthMs, c.hz,
+            i % kSeeds + 1, res[i].peak, reach);
+  }
   return true;
 }
 
@@ -1970,11 +2190,50 @@ OutgoingRun outgoingWorstStep(double sr, int law, double x) {
   }
   return r;
 }
+// D-049 A9, A10: the head's bound above holds AWAY from the read floor. For the READ, the head and the offset each move by at most a, so its
+// speed changes by at most 2 a in this gesture (the head alone can change by more at contact: the floor brake, below, is an exception, up to
+// 5.8 a at 192 kHz, cancelled in the read by the offset). That is NOT a general limit: a search reads 2.000 a far from the floor and 2.955 a
+// when the floor stops the read, and the M2 bar governs (SPEC §3.6). So the contact case reads the read position itself, dA + the offset, from the first move
+// to the fade's end (the handover to the incoming head is a position change by design, and not read): the critic's gesture, a 20 -> 2 ms
+// glide at 1.38 s, near the LFO's trough, retargeted to a crossfade 12 ms in, at the worst of the 8 probe phases (the timing of the retarget
+// against the offset's slope decides whether the clamp binds, as M2's rows are timed). Its bound is 2 a, the bound for this gesture and no general limit, and applies to this case only; the cases
+// above keep a (1 + 1e-6). The plant fbClampStale (the clamp reads last sample's offset) reads far above it (5.7 a at 192 kHz, M2 4.06).
+double contactWorstStep(double sr, long shift) {
+  Echo e;
+  e.prepare(sr, 4096);
+  const std::pair<const char*, double> kv[] = {{"time.sync", 0}, {"time.ms", 20}, {"time.law", 0}, {"time.change", 0}, {"time.glide", 0.3}, {"fb.amount", 0},
+                                               {"filt.loop.on", 0}, {"mix", 100}, {"mod.depthMs", 20}, {"mod.rateHz", 1.25}};
+  for (const auto& [k, v] : kv)
+    if (!e.setParam(k, v)) { std::fprintf(stderr, "contact bound: setParam(%s) refused\n", k); std::abort(); }
+  const long at = S(1.38, sr) + shift, at2 = at + std::lround(0.012 * sr), n = at2 + S(0.2, sr);
+  double worst = 0, pP = 0, vP = 0, oL = 0, oR = 0;
+  for (long i = 0; i < n; ++i) {
+    if (i == at) e.setParam("time.ms", 2);
+    if (i == at2) { e.setParam("time.change", 1); e.setParam("time.ms", 400); }
+    const double s = 0.1 * std::sin(0.05 * static_cast<double>(i));
+    e.process(&s, &s, &oL, &oR, 1, 120.0);
+    const double p = e.readPosition(0), v = p - pP;
+    if (i > at && !(!e.fading(0) && i >= at2)) worst = std::max(worst, std::fabs(v - vP));
+    pP = p; vP = v;
+  }
+  return worst;
+}
 bool outgoingBound(Detail& d) {
   const double xs[] = {0.001, 0.002, 0.003, 0.004, 0.006, 0.008, 0.010, 0.012};
   constexpr std::size_t nx = sizeof xs / sizeof xs[0];
   std::vector<OutgoingRun> res(4 * 2 * nx);  // slot = (rate * 2 + law) * nx + x
-  parallelFor(res.size(), [&](std::size_t i) { res[i] = outgoingWorstStep(kClickRates[i / (2 * nx)], static_cast<int>((i / nx) % 2), xs[i % nx]); });
+  std::vector<double> contact(4 * kPhases);  // slot = rate * kPhases + phase (the tape law: the exponential law's 20 -> 2 ms glide barely moves in 12 ms, so it reads nothing there)
+  parallelFor(res.size() + contact.size(), [&](std::size_t i) {
+    if (i < res.size()) res[i] = outgoingWorstStep(kClickRates[i / (2 * nx)], static_cast<int>((i / nx) % 2), xs[i % nx]);
+    else { const std::size_t c = i - res.size(); contact[c] = contactWorstStep(kClickRates[c / kPhases], phaseShift(static_cast<int>(c % kPhases), kClickRates[c / kPhases])); }
+  });
+  if (g_report)  // every rate's contact reading before the first REQUIRE can stop the gate
+    for (std::size_t ri = 0; ri < 4; ++ri) {
+      double c = 0;
+      for (int j = 0; j < kPhases; ++j) c = std::max(c, contact[ri * kPhases + static_cast<std::size_t>(j)]);
+      const double a = 1.0 / (echo::k::kExpSlewS * kClickRates[ri]);
+      std::printf("  REPORT contact at %g Hz: the read's speed changes by %.4f = %.4f a at most (contact bound 2 a = %.4f)\n", kClickRates[ri], c, c / a, 2.0 * a);
+    }
   for (std::size_t ri = 0; ri < 4; ++ri) {
     const double a = 1.0 / (echo::k::kExpSlewS * kClickRates[ri]);
     double worst = 0, inFade = 0;
@@ -1985,6 +2244,10 @@ bool outgoingBound(Detail& d) {
     if (g_report) std::printf("  REPORT outgoing bound at %g Hz: worst speed change a sample %.4f (inside fades %.4f), the bound %.4f\n", kClickRates[ri], worst, inFade, a);
     REQUIRE(worst <= a * (1.0 + 1e-6), "outgoing head at %g Hz: the speed changed by %.4f in one sample (bound %.4f): its clamp to the line steps it", kClickRates[ri], worst, a);
     REQUIRE(inFade >= 0.5 * a, "outgoing head at %g Hz: the worst step inside a fade %.4f is under half the bound %.4f: the cases no longer slew a fading head (vacuous)", kClickRates[ri], inFade, a);
+    double c = 0;
+    for (int j = 0; j < kPhases; ++j) c = std::max(c, contact[ri * kPhases + static_cast<std::size_t>(j)]);
+    REQUIRE(c <= 2.0 * a * (1.0 + 1e-6), "the read at %g Hz at floor contact: its speed changed by %.4f = %.2f a in one sample (contact bound 2 a = %.4f for this gesture): the offset's slope bound or the outgoing head's clamp is broken", kClickRates[ri], c, c / a, 2.0 * a);
+    REQUIRE(c >= 0.5 * a, "the read at %g Hz at floor contact: the worst step %.4f is under half the bound %.4f: the case no longer moves the read (vacuous)", kClickRates[ri], c, a);
   }
   return true;
 }
@@ -4052,8 +4315,8 @@ const std::vector<Check> kChecks = {
     {"exponential law = its ln-D recurrence; a big move runs at the 12 st cap", expLaw, {"expLawLinear", "noLawCap"}},
     {"repitch accuracy: output pitch = 1 - dD/dt within 1 cent from the move's start, both laws, fast and slow glides", repitchCents,
      {"integerRead"}},
-    {"read speed in [0.25, 2.25], no reverse, backstop, overrun or floor: 4 modes x 5 moves x 3 mods; fallback past 3 s", speedInvariant,
-     {"noLawCap", "noFallback"}},
+    {"read speed in [0.25, 2.25], no reverse, backstop, overrun or floor: 4 modes x 5 moves x 3 mods; fallback past 3 s; and seeded time.ms / change / law / glide gestures under modulation (5 ms and 20 ms at 7 Hz, 20 ms at 1.25 Hz, the offset's depth asserted; 4 seeds, 44.1 - 192 kHz)", speedInvariant,
+     {"noLawCap", "noFallback", "modFloorClampsBoth"}},
     {"tail clock holds while a head moves: a 2900 -> 300 ms glide at fb 0 is never cut (D-025)", tailDuringGlide, {"tailClockIgnoresMotion"}},
     {"mod.seed: an unchanged re-send changes nothing; a load derives the drift from the patch's seed (D-026)", seedRules,
      {"seedResendRestarts", "loadKeepsModState"}},
@@ -4089,10 +4352,10 @@ const std::vector<Check> kChecks = {
     {"the exponential law's 0.1 ms bound binds only just after a move (44.1 - 192 kHz; glides 0.01 - 1 s; onsets, reversals, 1 and 2 ms targets, a glide change; modulated): never in a relaxation",
      expSlewBinds, {"expSlewLong", "expSpuriousRetarget", "expSlewOff"}},
     // ---- M3 B4, T-041 ----
-    {"click metric over the probe's phase: the tape law's plain onsets, time.glide changes mid-move, D-006's fallback taken from a moving head, a crossfade-mode retarget of a glide in flight and a retarget mid-fade (both laws; 44.1 / 48 / 96 / 192 kHz) read under 2.5 at the worst of 8 half-period phases, zero backstop hits",
-     stepClick, {"tapeKinkUnbounded", "fbFrozenOutgoing"}},
-    {"a fade's outgoing head: its speed changes by at most the 0.1 ms bound a sample across a modulated crossfade retarget of a shortening glide, both laws (44.1 - 192 kHz): the clamp to the line must not step it",
-     outgoingBound, {"fbClampUnsigned"}},
+    {"click metric over the probe's phase: the tape law's plain onsets, time.glide changes mid-move, D-006's fallback taken from a moving head, a crossfade-mode retarget of a glide in flight and a retarget mid-fade (both laws), and the modulated moves, each at the crest, the trough and both zero crossings of the LFO (20 -> 2 ms glide then crossfade 6 and 12 ms in, repitch 100 -> 2 ms in both laws, crossfade and jump 100 -> 3 ms at 5 Hz, a long crossfade 100 -> 5 ms; 44.1 / 48 / 96 / 192 kHz) read under 2.5 at the worst of 8 half-period phases, zero backstop hits",
+     stepClick, {"tapeKinkUnbounded", "fbFrozenOutgoing", "modAccelUnbounded", "modFloorClampsBoth", "modNoFloorBrake", "modRideKink", "modBoundKeepsSlope", "fbClampStale"}},
+    {"a fade's outgoing head: its speed changes by at most the 0.1 ms bound a sample across a modulated crossfade retarget of a shortening glide, both laws (44.1 - 192 kHz): the clamp to the line must not step it (floor contact, the H1 gesture: at most 2 a)",
+     outgoingBound, {"fbClampUnsigned", "fbClampStale"}},
     {"the tape law's catch-up: after the cap releases, the speed does not ring (>= 0.9 shortening, <= 1.1 lengthening) and the head never overshoots the model or passes its target by more than 0.1 sample, at 44.1 - 192 kHz (M2 cannot see this)",
      tapeCatchUp, {"tapeNoBrake", "tapeNoTargetBrake"}},
     // ---- M3 B2, T-013 ----
@@ -4198,6 +4461,7 @@ bool* plantFlag(std::string_view n) {
       {"modNoFloorBound", &modNoFloorBound}, {"wakeOffsetFromZero", &wakeOffsetFromZero}, {"tapeLinearHistory", &tapeLinearHistory},
       {"glideFixedRate", &glideFixedRate}, {"expSlewOff", &expSlewOff}, {"expSlewLong", &expSlewLong}, {"phaseSweepCollapsed", &phaseSweepCollapsed}, {"expSlewBlockStart", &expSlewBlockStart}, {"expSpuriousRetarget", &expSpuriousRetarget},
       {"tapeKinkUnbounded", &tapeKinkUnbounded}, {"tapeNoBrake", &tapeNoBrake}, {"tapeNoTargetBrake", &tapeNoTargetBrake}, {"fbClampUnsigned", &fbClampUnsigned}, {"fbFrozenOutgoing", &fbFrozenOutgoing}, {"fadeLinear", &fadeLinear},
+      {"modAccelUnbounded", &modAccelUnbounded}, {"modFloorClampsBoth", &modFloorClampsBoth}, {"modNoFloorBrake", &modNoFloorBrake}, {"modRideKink", &modRideKink}, {"modBoundKeepsSlope", &modBoundKeepsSlope}, {"fbClampStale", &fbClampStale},
       {"propsNoTail", &propsNoTail}, {"tailWraps32", &tailWraps32}, {"paramNoClass", &paramNoClass},
       {"processReadsAfterWrite", &processReadsAfterWrite}, {"loadBoundShort", &loadBoundShort},
       {"latchClears", &latchClears}, {"tapBeforeGain", &tapBeforeGain}, {"prepareRampsIn", &prepareRampsIn},
@@ -4361,6 +4625,7 @@ int main(int argc, char** argv) {
     reversalClick(d);
     onsetClick(d);
     stepClick(d);
+    std::printf("  SPEED STRESS %s\n", speedStress(d) ? "clean" : d.c_str());
     outgoingBound(d);
     tapeCatchUp(d);
     expSlewBinds(d);
@@ -4374,6 +4639,14 @@ int main(int argc, char** argv) {
       stepClick(d);
       outgoingBound(d);
       tapeCatchUp(d);
+      *plantFlag(p) = false;
+    }
+    // T-042's plants act on the modulated rows alone (stepClick, and the stress, which reports as a pass or a fail)
+    for (const char* p : {"modAccelUnbounded", "modFloorClampsBoth", "modNoFloorBrake", "modRideKink", "modBoundKeepsSlope", "fbClampStale"}) {
+      std::printf("  -- under plant %s\n", p);
+      *plantFlag(p) = true;
+      stepClick(d);
+      std::printf("  SPEED STRESS %s\n", speedStress(d) ? "clean" : d.c_str());
       *plantFlag(p) = false;
     }
 #endif
@@ -4410,7 +4683,8 @@ int main(int argc, char** argv) {
                         "zoneAnyMode", "zoneAtEqual", "pingpongInvertsR", "presetStateOversized", "presetPatchOfDropsKey", "factoryHomeOffset", "factoryLabelTypo",
                         "scaleIgnoredSynced", "scaleNotSnapped", "scaleBypassesChange", "scaleAfterClamp", "scaleResendIsMove", "scaleTailUnscaled",
                         "scaleMoveSwallowed", "scaleSnapRounds", "scaleOffsetRewrite", "stateMissingScaleDefaults", "expSlewOff", "expSlewLong", "phaseSweepCollapsed", "expSlewBlockStart", "expSpuriousRetarget",
-                        "tapeKinkUnbounded", "tapeNoBrake", "tapeNoTargetBrake", "fbClampUnsigned", "fbFrozenOutgoing", "fadeLinear"}) {
+                        "tapeKinkUnbounded", "tapeNoBrake", "tapeNoTargetBrake", "fbClampUnsigned", "fbFrozenOutgoing", "fadeLinear",
+                        "modAccelUnbounded", "modFloorClampsBoth", "modNoFloorBrake", "modRideKink", "modBoundKeepsSlope", "fbClampStale"}) {
     bool guarded = false;
     for (const auto& c : kChecks)
       for (const char* p : c.plants) guarded = guarded || std::string_view(p) == n;

@@ -210,6 +210,13 @@ ECHO_PLANT(tapeNoTargetBrake)    // the catch-up brakes on the model but not on 
 ECHO_PLANT(fbFrozenOutgoing)     // a fade freezes its outgoing head (speed 2.0 or 0.5 to 1.0 in one sample): the fallback and a crossfade-mode retarget of a glide in flight read 3.5 at 48 kHz, 14 at 192
 ECHO_PLANT(fbClampUnsigned)       // the outgoing head's clamp to the line uses kMinRead + |offset| (too tight): under a modulated fade from a shortening glide it binds and steps the speed by 0.132 in one sample at 192 kHz
 ECHO_PLANT(fadeLinear)           // the time crossfade's weight is linear, not raised-cosine: its slope kinks at both ends and reads in proportion to the rate (the 3 ms jump: 3.6 at 96 kHz, 7.0 at 192)
+// ---- M3, B4 (T-042: the modulation offset's speed steps, D-049 A8) ----
+ECHO_PLANT(modAccelUnbounded)    // the offset's slope is not bounded, only its size (the old clamp to +-0.25 a sample): it stops dead on its target, a speed step that reads in proportion to the rate (20 ms of modulation, a 20 -> 2 ms glide retargeted 1 - 12 ms in: M2 4.5 at 192 kHz)
+ECHO_PLANT(modFloorClampsBoth)   // during a fade the offset's floor clamp answers to BOTH heads (the old headSpan), so a fade to a short time moves the offset by up to its whole size in one sample under the sounding head (a crossfade or jump to 3 ms at the trough of a 5 Hz sine)
+ECHO_PLANT(modNoFloorBrake)      // a shortening head's closing speed toward the read floor is not limited to the stopping speed: the offset, slope-bounded, cannot retreat as fast, the read pins to the floor and the speed stops dead (a 100 -> 2 ms repitch at the offset's trough)
+ECHO_PLANT(modRideKink)          // while a fade's incoming head rides the floor the offset does not aim at it braking: it reaches the floor with the curve's slope and the read kinks as the head leaves (a crossfade 100 -> 5 ms over 40 ms at the offset's trough)
+ECHO_PLANT(modBoundKeepsSlope)   // a floor clamp leaves the offset's tracked slope as it was: the offset leaves the bound still carrying the slope it arrived with, and the read kinks (a 100 -> 3 ms jump at the trough of a 5 Hz sine)
+ECHO_PLANT(fbClampStale)         // the outgoing head's clamp to the line reads last sample's offset and misses the offset's coming move: it binds a sample late and steps the head's speed (a 20 -> 2 ms glide crossfaded 12 ms in, 20 ms of modulation at 1.25 Hz near the trough: M2 4.06 at 192 kHz)
 }  // namespace echo::plant
 
 #undef ECHO_PLANT

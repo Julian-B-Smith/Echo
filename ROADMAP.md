@@ -22,7 +22,7 @@ with HIGH findings the author's own suite had passed.
   (D-037 – D-040), T-016 on its own PR (D-041): **batch 2 done**. Batch 3's four items done
   2026-10-28 (D-042 – D-045): T-017 on PR #24 (2975c34), T-018 on PR #25 (1a78af5), T-019 on
   PR #26 (2966256), T-020 on PR #27 (985c1d1); the T-021 bank draft B3 also plans is not
-  started (the bank holds the init only). Batch 4 (T-021 finished, T-022, T-023) next; D-048 (2026-10-29) adds T-038 and T-039 ahead of T-022's face; D-049 adds T-040, T-041 and T-042 before T-023 (T-040 and T-041 done). **M4 (the IR
+  started (the bank holds the init only). Batch 4 (T-021 finished, T-022, T-023) next; D-048 (2026-10-29) adds T-038 and T-039 ahead of T-022's face; D-049 adds T-040, T-041 and T-042 before T-023 (all three done). **M4 (the IR
   display and Echo's screen) is under way beside it** (D-027, D-030): T-030 – T-032 done (PR #15,
   PR #16); T-033 open (T-014 is on main, PR #20); T-036 (gate 4's flicker) done 2026-10-28 (D-046).
 - **Oracle:** `./verify fast` = kit integrity, leak gate, private-name gate,
@@ -657,7 +657,7 @@ filings need the human's go-ahead each time.
 - **Out of scope:** Echo's own screen (M4, D-027).
 
 ### T-023 — M3: Listening renders and the human's sign-off (bar row 20)
-- **Status:** blocked (on T-042, D-049 A7; T-021, T-040 and T-041 are done).
+- **Status:** open (T-021, T-040, T-041 and T-042 are done).
 - **Scope:** `core/tools/render_presets.cpp` (WAVs from the C++ engine, never the lab), a
   small listening page in `lab/` or `docs/`, ROADMAP.
 - **Ruled by poll 2026-10-28:** the source set is **synthetic and seeded**, generated in C++
@@ -1039,9 +1039,11 @@ filings need the human's go-ahead each time.
   modulated fade's M2 (T-042, D-049 A7; the fade itself is guarded here by `outgoingBound`).
 
 ### T-042 — M3: deep modulation's speed steps: the depth-20 report and the slew stop (D-049 A4, A7)
-- **Status:** open (found 2026-10-30 by T-041's phase-1 stress run; widened 2026-11-01, D-049 A7; blocks T-023).
-- **Scope:** `core/include/echo/engine.h` (`modStep` and the modulation's depth limit), `plants.h`, `core_tests.cpp`
-  (`speedInvariant`, `stepClick`), SPEC §7 and the lab if their statements change (a poll first).
+- **Status:** done 2026-11-02 (found 2026-10-30 by T-041's phase-1 stress run; widened 2026-11-01, D-049 A7; ruled
+  D-049 A8 - A10; trace `traces/2026-11-02-t042-mod-speed.md`; critic FIX-THEN-SHIP twice, all fixed).
+- **Scope:** `core/include/echo/engine.h` (`modStep`, the modulation's depth limit, `stepHead`'s approach to the floor,
+  the backstop's rounding tolerance, D-049 A8), `plants.h`, `core_tests.cpp` (`speedInvariant`, `stepClick`), SPEC §7 and
+  §3.6, and the lab (`lab/echo-lab.html`, `tools/lab_smoke.mjs`), ruled by poll (D-049 A8).
 - **Acceptance criteria:**
   1. The depth-20 report (random `time.ms` / `time.change` / `time.law` / `time.glide` gestures at `mod.depthMs` 20 read
      a speed of −870 with reverse > 0; depth 0 clean) is reproduced with the engine's own `SpeedStats`, or shown to be
@@ -1050,7 +1052,7 @@ filings need the human's go-ahead each time.
      M2 2.28 / 4.55 at 96 / 192 kHz (both laws), because the offset's 0.25-a-sample slew ends abruptly when the depth
      limit lifts.
   3. Whatever is real is fixed: the modulated case joins `stepClick` at 44.1, 48, 96 and 192 kHz, worst of 8 phases,
-     under 2.5 with zero backstop hits; any gestures that broke the speed invariant join `speedInvariant`; each
+     at the crest, the trough and both zero crossings of the LFO (D-049 A9), under 2.5 with zero backstop hits; any gestures that broke the speed invariant join `speedInvariant`; each
      unfixed behaviour is a planted control its own gate catches; `./verify fast` green.
 - **Out of scope:** T-041's fixes (the fade's outgoing head is guarded by `outgoingBound`).
 

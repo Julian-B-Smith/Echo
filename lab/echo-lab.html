@@ -364,13 +364,15 @@ class EchoLab {
     this.smLeft = new Int32Array(6);
     this.dc = new Float64Array(4);
     this.mods = new Float64Array(2);
+    this.modV = new Float64Array(2);    // the offset's own slope (_modStep's tracker), 0 whenever the offset is set from outside
+    this.modTp = new Float64Array(2);   // the curve's target at the previous sample: the tracker's error and target slope are taken against it
     this.Tt = new Float64Array(2);
     this.heads = [this._newHead(), this._newHead()];
     this.drift = [{ r: null, u: 0, pts: new Float64Array(4) }, { r: null, u: 0, pts: new Float64Array(4) }];
     this.stats = [this._newStats(), this._newStats()];
     this.reset();
   }
-  _newStats() { return { sMin: Infinity, sMax: -Infinity, reverse: 0, clamps: 0, fades: 0, fallbacks: 0, nonfinite: 0, overrun: 0, gates: 0 }; }
+  _newStats() { return { sMin: Infinity, sMax: -Infinity, reverse: 0, clamps: 0, fades: 0, fallbacks: 0, nonfinite: 0, overrun: 0, floors: 0, gates: 0 }; }
   resetStats() { for (let k = 0; k < 2; k++) Object.assign(this.stats[k], this._newStats()); }
   _newHead() {
     return { D: 0, V: 0, T: 0, tc: 0, fade: false, dA: 0, dB: 0, fi: 0, fn: 1, pending: NaN,
@@ -488,6 +490,7 @@ class EchoLab {
     this.modPhase = 0;
     this._reseedDrift(this.get("mod.seed"), false);
     this.mods[0] = this.mods[1] = 0;
+    this.modV[0] = this.modV[1] = this.modTp[0] = this.modTp[1] = 0;
     this._resolveBoth(this.bpm);
     for (let k = 0; k < 2; k++) {
       const h = this.heads[k];
@@ -563,9 +566,10 @@ class EchoLab {
   }
   // Modulation offsets (samples) for both lines at this sample. The depth is
   // limited so the curve's own slope stays within modSlopeMax, and the OFFSET
-  // itself is slew-limited to modSlopeMax per sample, so no rate glide, spread
-  // ramp, shape blend or seed change can move the read faster than that.
-  // The depth is also kept clear of the write head (D + offset >= 3 samples).
+  // itself is slew-limited to modSlopeMax per sample, and its SLOPE to one unit of speed
+  // per expSlewS (D-049 A8), so no rate glide, spread ramp, shape blend or seed change
+  // can move the read faster, or step its speed. The depth is also kept clear of the
+  // write head (D + offset >= 3 samples).
   _modStep(dMin) {
     const depth = this.smV[4], out = this.mods, sr = this.sr;
     this.rateL2 += (Math.log2(this.p[EI["mod.rateHz"]]) - this.rateL2) * this.rateA;
@@ -589,10 +593,46 @@ class EchoLab {
       const A = Math.max(0, Math.min(depth, ECHO_K.modSlopeMax / slope, dMin - ECHO_K.minReadSamples));
       t0 = A * m0; t1 = A * m1;
     }
-    if (this.lab.plant === "modUnlimited") { out[0] = t0; out[1] = t1; return; }
-    const lim = ECHO_K.modSlopeMax;
-    out[0] += Math.max(-lim, Math.min(lim, t0 - out[0]));
-    out[1] += Math.max(-lim, Math.min(lim, t1 - out[1]));
+    const plant = this.lab.plant;
+    if (plant === "modUnlimited") { out[0] = t0; out[1] = t1; return; }
+    const a = 1 / (ECHO_K.expSlewS * sr), cap = ECHO_K.modSlopeMax, mV = this.modV, mTp = this.modTp;
+    const clampTo = (x, lo, hi) => x < lo ? lo : x > hi ? hi : x;
+    for (let k = 0; k < 2; k++) {
+      const tg = k ? t1 : t0, h = this.heads[k];
+      if (plant === "modAccelUnbounded") out[k] += clampTo(tg - out[k], -cap, cap);   // the old form: it stops dead on its target, a speed step
+      else {
+        // The slope changes by at most a and the offset lands on its target by braking (the form of the tape catch-up above): the
+        // target's own slope plus the stopping term, the error taken against the PREVIOUS sample's target so that on the curve the
+        // offset IS the curve. While a fade's incoming head rides the floor (offset under minRead - dB) the offset aims at that
+        // floor first, braking onto it with no target slope, so the head leaves the floor at about zero slope (the plant modRideKink).
+        let tk = tg, ts = clampTo(tg - mTp[k], -cap, cap), e = mTp[k] - out[k];
+        mTp[k] = tg;
+        if (plant !== "modRideKink" && h.fade && out[k] < ECHO_K.minReadSamples - h.dB) { tk = ECHO_K.minReadSamples - h.dB; ts = 0; e = tk - out[k]; }
+        const r = Math.min(Math.abs(e), Math.sqrt(0.25 * a * a + 2 * a * Math.abs(e)) - 0.5 * a);
+        let v = clampTo(ts + (e > 0 ? r : -r), -cap, cap);
+        v = clampTo(v, mV[k] - a, mV[k] + a);
+        if (Math.abs(tk - (out[k] + v)) < 1e-9) v = tk - out[k];
+        out[k] += v;
+        mV[k] = v;                                                  // the tracker's own slope, never the floor clamp's jump below
+      }
+    }
+  }
+
+  // The read floor wins over the slew, and it is applied with THIS sample's head (the core clamps after its heads step, too), so a
+  // head diving at the floor never reads under it. During a fade the offset answers to the OUTGOING head alone, the one still
+  // sounding (the incoming head rides the floor while the offset retreats); clamping by both moved the offset by up to its whole size
+  // in one sample when a fade to a short time began, under the head that sounded it (D-049 A8; the plant modFloorClampsBoth).
+  // The ceiling is the core's too (D-049 A9): the offset never reads past the line. `lab.ceiling === false` removes it, so the
+  // drift-overshoot control in lab_smoke can be shown to read the offset's peak and not the clamp's silence. This lab's outgoing
+  // clamp (_slewOut) already sees THIS sample's offset (the offset steps before the heads here), the lookahead the core's takes by modV_.
+  _floorClamp(k) {
+    const h = this.heads[k], plant = this.lab.plant, out = this.mods, both = plant === "modFloorClampsBoth";
+    const lo = h.fade ? (both ? Math.min(h.dA, h.dB) : h.dA) : h.D, hi = h.fade ? (both ? Math.max(h.dA, h.dB) : h.dA) : h.D;
+    const bounded = out[k];
+    if (out[k] < ECHO_K.minReadSamples - lo) out[k] = ECHO_K.minReadSamples - lo;
+    if (this.lab.ceiling !== false && out[k] > this.N - 4 - hi) out[k] = this.N - 4 - hi;
+    if (out[k] !== bounded && plant !== "modBoundKeepsSlope") this.modV[k] = 0;   // stopped at the bound: it leaves it from rest, its slope bounded again
+    return out[k];
   }
 
   // ---- the read kernel (D-004: a 4-point FIR, position in double) ----------
@@ -612,10 +652,12 @@ class EchoLab {
     return ((c3 * f + c2) * f + c1) * f + x0;
   }
   // Every read position is held inside the line; an attempt past it is counted.
-  _pos(p, st) {
+  // `ride` marks a fade's INCOMING head, which sits on the floor by design while the offset retreats (D-049 A8): held there, not counted.
+  _pos(p, st, ride) {
     const hi = this.N - 4;
     if (p > hi) { st.overrun++; return hi; }
-    return p < ECHO_K.minReadSamples ? ECHO_K.minReadSamples : p;
+    if (p < ECHO_K.minReadSamples) { if (!ride) st.floors++; return ECHO_K.minReadSamples; }
+    return p;
   }
 
   // ---- the time engine -----------------------------------------------------
@@ -765,6 +807,14 @@ class EchoLab {
       const a = 1 / (ECHO_K.expSlewS * sr);
       h.V = h.V < vPrev - a ? vPrev - a : h.V > vPrev + a ? vPrev + a : h.V;
     }
+    // The floor brake (D-049 A8). The read is D + the offset and the read floor clamps the OFFSET, so a head shortening hard toward the floor
+    // (100 -> 2 ms at the trough of a deep sine) meets it at the law's full closing speed, the slope-bounded offset cannot retreat as
+    // fast, and the speed stops dead from up to 0.75. So a SHORTENING head's closing speed toward the floor is limited to the discrete
+    // stopping speed from its distance (the catch-up's form), less the offset's own slope. Far from the floor it never acts.
+    if (!h.fade && h.V < 0 && lab.plant !== "modNoFloorBrake") {
+      const a = 1 / (ECHO_K.expSlewS * sr), dist = Math.max(0, h.D + mod - ECHO_K.minReadSamples), stop = Math.sqrt(0.25 * a * a + 2 * a * dist) - 0.5 * a;
+      h.V = Math.max(h.V, -stop - this.modV[k]);
+    }
     if (Math.abs(T - (h.D + h.V)) < 1e-9 && Math.abs(h.V) <= Math.abs(gap)) { h.D = T; h.V = 0; }
     else h.D += h.V;
     if (h.law === "varispeed") h.c = this.n - h.D;
@@ -776,7 +826,9 @@ class EchoLab {
   _clampSpeed(h, mod, st) {
     if (this.lab.plant === "noClamp") return;
     const dp = h.D + mod - h.lastPos, lo = 1 - ECHO_K.sMax, hi = 1 - ECHO_K.sMin;
-    if (dp > hi || dp < lo) {
+    // 1e-9 of tolerance (D-049 A8): the head's cap (0.5) and the offset's slope cap (0.25) add to exactly 0.75 = 1 - sMin, so rounding
+    // tipped a legitimate 0.25 speed over the bound and counted a hit. The bound itself is unchanged.
+    if (dp > hi + 1e-9 || dp < lo - 1e-9) {
       const D = h.lastPos + (dp > hi ? hi : lo) - mod;
       h.V += D - h.D; h.D = D; h.c = this.n - D; st.clamps++;
     }
@@ -833,6 +885,7 @@ class EchoLab {
     }
     this.paramMoved = false; this.loadLeft = 0;
     this.mods[0] = this.mods[1] = 0;
+    this.modV[0] = this.modV[1] = this.modTp[0] = this.modTp[1] = 0;   // at rest the offset is 0 and tracks itself
   }
   // The declared tail, in samples (spec §10): after the input stops, one pass
   // drains what the input wrote; after that the returning term is at most the
@@ -905,9 +958,11 @@ class EchoLab {
       }
       let y0 = 0, y1 = 0;
       for (let j = 0; j < 2; j++) {
-        const h = this.heads[j], st = this.stats[j], md = this.mods[j], buf = j ? L1 : L0;
+        const h = this.heads[j], st = this.stats[j], buf = j ? L1 : L0;
+        let md = this.mods[j];
         if (h.init) { h.lastPos = h.statPos = h.D + md; h.init = false; this._latch(h); }
         this._headStep(j, h, this.Tt[j], cls, md, st);
+        md = this._floorClamp(j);
         if (h.law === "varispeed" && !h.tapeRun) {
           // Outside the tape law's glide the tape still runs, steadily at 1/D,
           // so the law resumes from a consistent speed history.
@@ -918,7 +973,7 @@ class EchoLab {
         // modulation rides on every head.
         let yy, sp;
         if (h.fade) {
-          const wF = (h.fi + 1) / h.fn, pa = this._pos(h.dA + md, st), pb = this._pos(h.dB + md, st);
+          const wF = (h.fi + 1) / h.fn, pa = this._pos(h.dA + md, st), pb = this._pos(h.dB + md, st, true);
           // Raised-cosine weights (D-049 A4): w + (1 - w) = 1 still (equal-gain), but the slope is 0 at both ends. A linear
           // weight kinks there, and a kink reads in proportion to the rate (the 3 ms jump: 1.9 / 3.6 / 7.0 at 48 / 96 / 192 kHz).
           const w = lab.plant === "fadeLinear" ? wF : 0.5 - 0.5 * Math.cos(wF * Math.PI);

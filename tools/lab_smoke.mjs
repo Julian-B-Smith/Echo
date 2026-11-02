@@ -227,7 +227,21 @@ check(ctl > 1e-3, `control: an impulse at the same settings is audible in all 9 
   for (const st of driftRun()) { runs++; if (!ok(st)) { bad++; worst = note("drift at 12 s", st); } }
   check(bad === 0, `read speed in [${X.ECHO_K.sMin}, ${X.ECHO_K.sMax}], no reverse read, no read past the line, no hard-bound hit — ${runs} law/move/modulation runs` + (bad ? " — " + worst : ""));
   plant(shortRun(1, { plant: "modUnlimited" }).some(st => !ok(st)), "speed check detects the modulation slew limit removed");
-  plant(driftRun({ plant: "driftOvershoot" }).some(st => st.overrun > 0), "line-bound check detects the drift curve's 1.25x overshoot");
+  // The drift curve's 1.25x overshoot is read as the OFFSET'S PEAK against the depth, on a 100 ms delay far from both line bounds (D-049 A9). The
+  // first form read counted overruns at 12 s, and fired only because the lab had no clamp at the line's end: with the core's ceiling clamp ported
+  // that form is silent. The peak cannot be hidden by a clamp, so the control fires with the ceiling and without it (`lab.ceiling === false`).
+  const driftPeak = lab => {
+    const sr = 8000, e = engine(X, { "time.sync": 0, "time.ms": 100, "mod.depthMs": 20, "mod.rateHz": 3, "mod.shape": 1, "mod.spread": 100, "fb.amount": 0 }, lab, sr);
+    const x = new Float32Array(1).fill(1e-3), y = new Float32Array(1), y2 = new Float32Array(1), n = 30 * sr;
+    let pk = 0;
+    for (let i = 0; i < n; i++) { e.process(x, x, y, y2, 1, 120); if (i > 0.5 * sr) pk = Math.max(pk, Math.abs(e.mods[0]), Math.abs(e.mods[1])); }
+    return pk;
+  };
+  const depthS = 0.020 * 8000, pClean = driftPeak({}), pCleanNoCeil = driftPeak({ ceiling: false });
+  check(pClean <= depthS * (1 + 1e-9) && pClean >= 0.9 * depthS, `drift stays inside its depth: the offset's peak is ${pClean.toFixed(2)} of ${depthS} samples (and reaches it: not vacuous)`);
+  check(pCleanNoCeil <= depthS * (1 + 1e-9), `drift stays inside its depth with no ceiling clamp either (${pCleanNoCeil.toFixed(2)} of ${depthS} samples)`);
+  plant(driftPeak({ plant: "driftOvershoot" }) > 1.1 * depthS, `offset-peak check detects the drift curve's 1.25x overshoot (${driftPeak({ plant: "driftOvershoot" }).toFixed(1)} of ${depthS} samples)`);
+  plant(driftPeak({ plant: "driftOvershoot", ceiling: false }) > 1.1 * depthS, `offset-peak check detects it with the ceiling clamp removed too (${driftPeak({ plant: "driftOvershoot", ceiling: false }).toFixed(1)} of ${depthS} samples)`);
   const sp = X.echoQA1Spec(0, "probe", 8000, { fb: 0, mix: 100, glide: 0.05, fallback: false, lab: { law: "onepoleD", plant: "noClamp" }, params: { "time.ms": 250 } });
   sp.srcL = live(sp.srcL.length);
   sp.events = [{ t: 1, key: "time.ms", v: 3000 }];
@@ -399,7 +413,7 @@ function generations(params, sr, lab) {
   plant(unbounded > 2.5, `M2 flags the exponential law without its speed-step bound (${unbounded.toFixed(2)})`);
 }
 
-// ---- 18c - 18f. T-041 (D-049 A4, A5): the other one-sample speed steps, and the lab's twins of the core's fixes.
+// ---- 18c - 18g. T-041 (D-049 A4, A5) and T-042 (D-049 A8): the other one-sample speed steps, and the lab's twins of the core's fixes.
 // The core's census found three defects that read in proportion to the sample rate: the tape law's cap release
 // (the deadbeat catch-up steps the speed by 2 - s_model), a fade that stops its outgoing head dead (a step of 1.0),
 // and a linear fade weight (a kink). The lab carries the same three fixes (braking catch-up with the target term,
@@ -475,6 +489,63 @@ function generations(params, sr, lab) {
     const smooth = run({}), linear = run({ plant: "fadeLinear" });
     check(smooth < 2.5, `M2: the 3 ms jump reads clean at 192 kHz, worst of 4 probe phases (${smooth.toFixed(2)} < 2.5): its weight is a raised cosine`);
     plant(linear > 2.5, `M2 flags a linear fade weight (${linear.toFixed(2)})`);
+  }
+  // 18g. T-042 (D-049 A8): the modulation offset's own speed steps. The lab carries the core's four pieces, each with a planted control
+  // (`lab.plant`, the core's names): the offset's SLOPE changes by at most a = 1/(0.1 ms fs) a sample and it lands on its target by
+  // braking (modAccelUnbounded: the old clamp to 0.25 a sample stops dead on its target); during a fade the floor clamp answers to the
+  // outgoing head alone and the incoming head rides the floor (modFloorClampsBoth: the offset moved by its whole size in one sample,
+  // the read reversing under the sounding head); the offset leaves a clamp from rest
+  // (modBoundKeepsSlope); a shortening head brakes toward the read floor (modNoFloorBrake). The aim branch (modRideKink: the offset aims at
+  // the incoming head's floor, braking) has its own case below: a crossfade 100 -> 5 ms over 60 ms at 1.45 s, 20 ms at 1.25 Hz (found by the
+  // critic's search; the core's row at 1.3 s over 40 ms does not cross the bar in the lab). All at 192 kHz, where the defects read in
+  // proportion to the rate (the core's readings there: 4.5, 867, 3.5, 8.4), 20 ms of modulation, worst of 4 probe phases.
+  {
+    const modBase = Object.assign({}, base, { "mod.depthMs": 20 });
+    // the offset's slope, read off the engine itself one sample at a time (a 20 -> 2 ms glide, crossfaded to 400 ms 6 ms in)
+    const slopeStep = lab => {
+      const sr = 192000, a = 1 / (X.ECHO_K.expSlewS * sr), n = Math.round(1.6 * sr), at = Math.round(1.0 * sr), at2 = at + Math.round(0.006 * sr);
+      const e = engine(X, Object.assign({}, modBase, { "time.ms": 20, "time.law": 0, "time.glide": 0.3, "mod.rateHz": 1.25 }), lab, sr);
+      const x = new Float32Array(1), y = new Float32Array(1), y2 = new Float32Array(1);
+      let prev = 0, prevV = 0, worst = 0;
+      for (let i = 0; i < n; i++) {
+        if (i === at) e.setParam("time.ms", 2);
+        if (i === at2) { e.setParam("time.change", 1); e.setParam("time.ms", 400); }
+        x[0] = 0.5 * Math.sin(2 * Math.PI * X.ECHO_PROBE_HZ * i / sr) * Math.min(1, i / 480);
+        e.process(x, x, y, y2, 1, 120);
+        const m = e.mods[0], v = m - prev;
+        if (i > 0.3 * sr) worst = Math.max(worst, Math.abs(v - prevV));
+        prev = m; prevV = v;
+      }
+      return worst / a;
+    };
+    const sF = slopeStep({ fallback: true }), sU = slopeStep({ fallback: true, plant: "modAccelUnbounded" });
+    check(sF <= 1 + 1e-6 && sF >= 0.5, `the offset's slope changes by at most the 0.1 ms bound a sample (${sF.toFixed(3)} a, 192 kHz) and does change (>= 0.5 a: not vacuous)`);
+    plant(sU > 2, `slope check detects the offset's slope unbounded (${sU.toFixed(2)} a)`);
+    const crit2 = lab => worstM2(192000, 1.6, Object.assign({}, modBase, { "time.ms": 20, "time.law": 0, "time.glide": 0.3, "mod.rateHz": 1.25 }),
+      [{ t: 1.0, key: "time.ms", v: 2 }, { t: 1.006, key: "time.change", v: 1 }, { t: 1.006, key: "time.ms", v: 400 }], lab, 2.25);
+    const cC = crit2({ fallback: true }), cA = crit2({ fallback: true, plant: "modAccelUnbounded" });
+    check(cC < 2.5, `M2: a 20 -> 2 ms glide crossfaded to 400 ms 6 ms in, under 20 ms of modulation at 1.25 Hz, reads clean at 192 kHz (${cC.toFixed(2)} < 2.5)`);
+    plant(cA > 2.5, `M2 flags the offset's slope unbounded on that retarget (${cA.toFixed(2)})`);
+    // a 3 ms jump at the offset's trough (the sine starts at phase 0, so the 5 Hz trough is at 0.15 s + 0.2 s k): the floor clamp and the ride
+    const trough = lab => worstM2(192000, 1.6, Object.assign({}, modBase, { "time.ms": 100, "time.change": 2, "time.law": 0, "mod.rateHz": 5 }), [{ t: 1.15, key: "time.ms", v: 3 }], lab, 2.25);
+    const tC = trough({ fallback: true }), tF = trough({ fallback: true, plant: "modFloorClampsBoth" }), tK = trough({ fallback: true, plant: "modBoundKeepsSlope" });
+    check(tC < 2.5, `M2: a 3 ms jump 100 -> 3 ms at the offset's trough reads clean at 192 kHz (${tC.toFixed(2)} < 2.5): the trough jump is gone`);
+    plant(tF > 2.5, `M2 flags a floor clamp bounded by both heads of the fade (${tF.toFixed(1)})`);
+    plant(tK > 2.5, `M2 flags an offset that leaves a floor clamp still carrying its slope (${tK.toFixed(2)})`);
+    const aim = lab => worstM2(192000, 1.9, Object.assign({}, modBase, { "time.ms": 100, "time.change": 1, "time.xfadeMs": 60, "time.law": 0, "mod.rateHz": 1.25 }), [{ t: 1.45, key: "time.ms", v: 5 }], lab, 2.25);
+    const aC = aim({ fallback: true }), aR = aim({ fallback: true, plant: "modRideKink" });
+    check(aC < 2.5, `M2: a crossfade 100 -> 5 ms over 60 ms at 1.45 s, 20 ms at 1.25 Hz, reads clean at 192 kHz (${aC.toFixed(2)} < 2.5): the offset aims at the incoming head's floor`);
+    plant(aR > 2.5, `M2 flags an offset that does not aim at the incoming head's floor (${aR.toFixed(2)})`);
+    // H1 (D-049 A9): the core's outgoing clamp must look one sample ahead of the offset; the lab's already sees this sample's offset (the offset steps first)
+    const h1 = lab => worstM2(192000, 2.0, Object.assign({}, modBase, { "time.ms": 20, "time.law": 0, "time.glide": 0.3, "mod.rateHz": 1.25 }),
+      [{ t: 1.38, key: "time.ms", v: 2 }, { t: 1.392, key: "time.change", v: 1 }, { t: 1.392, key: "time.ms", v: 400 }], lab, 2.25);
+    const hC = h1({ fallback: true });
+    check(hC < 2.5, `M2: the critic's gesture (a 20 -> 2 ms glide crossfaded to 400 ms 12 ms in at 1.38 s, 20 ms at 1.25 Hz) reads clean at 192 kHz (${hC.toFixed(2)} < 2.5)`);
+    // a deep repitch dive at the trough: the floor brake
+    const dive = lab => worstM2(192000, 2.2, Object.assign({}, modBase, { "time.ms": 100, "time.law": 0, "time.glide": 0.3, "mod.rateHz": 1.25 }), [{ t: 1.4, key: "time.ms", v: 2 }], lab, 2.25);
+    const dC = dive({ fallback: true }), dB = dive({ fallback: true, plant: "modNoFloorBrake" });
+    check(dC < 2.5, `M2: a tape repitch 100 -> 2 ms at the offset's trough reads clean at 192 kHz (${dC.toFixed(2)} < 2.5): the head brakes toward the floor`);
+    plant(dB > 2.5, `M2 flags a head that meets the read floor at its full closing speed (${dB.toFixed(2)})`);
   }
 }
 

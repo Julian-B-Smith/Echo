@@ -1446,3 +1446,50 @@ lifts after the retarget, a speed step that reads in proportion to the rate. **R
 of modulation; the unsigned clamp, planted as `fbClampUnsigned`, reads up to 27.8× over). T-042 widens to deep
 modulation's speed steps (the depth-20 report and this slew stop, likely one family): the modulated case enters
 `stepClick` there, and T-042 blocks T-023.
+
+**D-049 A8 — T-042's fix: the offset's slope bounded, the floor clamp answers to the sounding head, two floor brakes; a
+rounding tolerance; the lab along (2026-11-01, the human, four polls on T-042's phase-1 report).** The depth-20 report is
+real and dates from M2: `modStep`'s read-floor clamp bounded the offset by both heads' span, so a fade to a short time
+moved the offset up to its whole magnitude in one sample, and the outgoing head, still sounding, read that jump (5 ms
+sine at 1 Hz, 100 → 2 ms crossfade at the trough, 48 kHz: a 147-sample jump, speed −146, M2 33.9; the census's worst M2
+105 / 124 / 495 / 1971 at 44.1 / 48 / 96 / 192 kHz). The backstop skips fades, so it never saw it.
+1. **Four pieces, all shipped; T-042's scope widens to `stepHead`'s approach to the floor.** (A) The offset's slope
+   changes by at most one unit of speed per 0.1 ms (D-049 A1's bound) and lands on its target by braking; the 0.25 cap
+   stays. (F) During a fade the floor and ceiling clamp answer to the outgoing head alone; the incoming head rides the
+   3-sample floor. (H) A shortening head's closing speed toward the floor is limited to its stopping speed, allowing for
+   the offset's slope; it holds the head back in a deep dive (100 → 2 ms at the trough: D 564 vs 331 samples at +100 ms,
+   identical by +200 ms). (W) While the offset is under the incoming head's floor it aims at that floor, braking, and it
+   leaves any bound from rest. Measured in a scratch copy: worst M2 1.19 / 1.43 / 1.48 / 1.48, zero backstop hits, zero
+   speed breaches over 252 cases × 4 rates × 8 phases. A alone leaves the jumps; A + F still reads 8.6 at 192 kHz.
+2. **The backstop gets a 1e-9 tolerance.** The head's cap (0.5) and the offset's (0.25) sum to exactly 0.75, so rounding
+   (about 3e-14) tipped a legitimate 0.25 speed over the bound and counted a hit, which would make "zero backstop hits"
+   flaky. This is rounding: the speed bound and the gate requiring zero hits are unchanged.
+3. **SPEC §7 and §3.6 state the three rules, and the lab comes along** (as D-049 A1's and A4's did), with `lab_smoke`
+   cases.
+4. **Gates:** six modulated cases join `stepClick`, a seeded stress at depths 5 and 20 joins `speedInvariant`, and four
+   plants guard the pieces: `modAccelUnbounded`, `modFloorClampsBoth`, `modNoFloorBrake`, `modRideKink`.
+
+**D-049 A9 — The bar holds at every LFO phase; the read's bound is stated as measured; the lab gets its ceiling
+(2026-11-01, the human, three polls on the T-042 critic's FIX-THEN-SHIP).**
+1. **The modulated bar holds at every LFO phase of a gesture.** The first build gated at the sine's crest and missed a
+   case in the criterion's own family: 20 ms at 1.25 Hz, a 20 → 2 ms tape glide, a crossfade to 400 ms 12 – 60 ms later,
+   near the trough, read M2 4.27 at 192 kHz and 2.57 at 96 (not a regression: before T-042, 4.1 – 5.05). The outgoing
+   head's floor clamp read last sample's offset and missed the offset's coming move; it now looks one sample ahead, with
+   a plant. The modulated `stepClick` rows are gated at the crest, the trough and both zero crossings, at four rates and
+   8 phases; a wide LFO-phase sweep is measured evidence in the trace, not a gate.
+2. **SPEC states the bound as measured.** The head and the offset each move by at most a, so the read's speed changes by
+   at most 2 a at floor contact and by a elsewhere; the floor brake is the stated exception for the head alone (up to
+   5.8 a at 192 kHz, cancelled in the read by the offset; no click traces to it). `outgoingBound` keeps its bound away
+   from the floor and takes the contact bound only at contact, stated in its comment. The M2 bar does not move.
+3. **The lab gets the core's ceiling clamp, and its drift-overshoot control reads the offset's peak against the depth.**
+   The control fired only because the lab had no clamp, so a ceiling would have silently killed it.
+
+**D-049 A10 — The read's bound, as measured (2026-11-02, the human, by poll on the T-042 critic's re-check; amends A9
+ruling 2).** A9's sentence was false on both halves: a seeded gesture search read 2.000 a far from the floor, and 2.955 a
+at contact (drift at 0.25 Hz, 44.3 → 3.38 ms, exponential law, 192 kHz), where the offset closes on the floor while the
+head is not moving toward it, so the floor brake (gated on the head's own speed) does not act and the floor stops the read.
+That click reads M2 2.16, peaking at 2.24 in a directed sweep, under the bar; the one engine change tried reached 2.49 a,
+not a clean fix. **Ruled:** the SPEC states it as measured: the read's speed changes by at most 2 a in general and by up to
+about 3 a when the floor stops the read, and the M2 bar is what governs. No engine change for this. `outgoingBound`'s
+contact gesture keeps its 2 a gate, and its comment does not claim a general limit. The same re-check swept 26,496 rows
+over every gesture family at 16 LFO phases: worst M2 1.59.
