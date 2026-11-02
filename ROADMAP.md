@@ -1054,6 +1054,18 @@ filings need the human's go-ahead each time.
      unfixed behaviour is a planted control its own gate catches; `./verify fast` green.
 - **Out of scope:** T-041's fixes (the fade's outgoing head is guarded by `outgoingBound`).
 
+### T-043 — M3: move A19's budget to whatever horde rules (ADR-351)
+- **Status:** blocked (on horde's ruling of the re-derived state budgets; Echo's two numbers filed 2026-11-02, seq 4).
+- **Scope:** `core/include/echo/state.h` (`kMaxBytes`), SPEC §16.2, `stateSize` and `presetFactoryStateSize`, the
+  admission row's wording.
+- **Acceptance criteria:**
+  1. The load-refusal constant and every stated figure equal the ruled budget, and the refusal stays first, before any
+     allocation (A19).
+  2. Echo's 910 B ceiling (`integrations/hypersaw/response-state-budgets.md`) is at or under the ruled budget; if it is
+     not, this stops and goes to the human.
+  3. `./verify fast` green.
+- **Out of scope:** any cap on Echo's values: creation is bounded by the fixed 30 keys.
+
 ## Open questions (blocking — ask the human)
 
 - (none open; the M3 plan's questions closed 2026-10-21, D-028)
