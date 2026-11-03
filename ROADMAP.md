@@ -1064,7 +1064,7 @@ filings need the human's go-ahead each time.
   2. Echo's 910 B ceiling (`integrations/hypersaw/response-state-budgets.md`) is at or under the ruled budget; if it is
      not, this stops and goes to the human.
   3. `./verify fast` green.
-- **Out of scope:** any cap on Echo's values: creation is bounded by the fixed 30 keys.
+- **Out of scope:** any cap on Echo's values: creation is bounded by the fixed set of keys.
 
 ## Open questions (blocking — ask the human)
 
