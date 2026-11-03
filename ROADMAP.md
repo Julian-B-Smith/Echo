@@ -22,7 +22,7 @@ with HIGH findings the author's own suite had passed.
   (D-037 – D-040), T-016 on its own PR (D-041): **batch 2 done**. Batch 3's four items done
   2026-10-28 (D-042 – D-045): T-017 on PR #24 (2975c34), T-018 on PR #25 (1a78af5), T-019 on
   PR #26 (2966256), T-020 on PR #27 (985c1d1); the T-021 bank draft B3 also plans is not
-  started (the bank holds the init only). Batch 4 (T-021 finished, T-022, T-023) next; D-048 (2026-10-29) adds T-038 and T-039 ahead of T-022's face; D-049 adds T-040, T-041 and T-042 before T-023 (all three done). **M4 (the IR
+  started (the bank holds the init only). Batch 4 (T-021 finished, T-022, T-023) next; D-048 (2026-10-29) adds T-038 and T-039 ahead of T-022's face; D-049 adds T-040, T-041 and T-042 before T-023 (all three done); D-050 (2026-11-03) removes macros and `time.scale`: T-039 rewritten, T-044 and T-045 added. **M4 (the IR
   display and Echo's screen) is under way beside it** (D-027, D-030): T-030 – T-032 done (PR #15,
   PR #16); T-033 open (T-014 is on main, PR #20); T-036 (gate 4's flicker) done 2026-10-28 (D-046).
 - **Oracle:** `./verify fast` = kit integrity, leak gate, private-name gate,
@@ -652,8 +652,8 @@ filings need the human's go-ahead each time.
   key has a display name and a normalised law that maps [0, 1] onto its range and back
   (plant: a key with no law). horde's FX screens workshop draws the house-style UI from it
   (B336/B531), and the GUI review is horde's.
-- **Acceptance criteria:** the face spec exists and is complete for all 29 keys; the law
-  check is in `./verify`; the human or horde's workshop accepts the face.
+- **Acceptance criteria:** the face spec exists and is complete for all 29 keys, with the row of D-050, Time's three modes and
+  the dot and triplet toggles; the law check is in `./verify`; the human or horde's workshop accepts the face.
 - **Out of scope:** Echo's own screen (M4, D-027).
 
 ### T-023 — M3: Listening renders and the human's sign-off (bar row 20)
@@ -965,19 +965,19 @@ filings need the human's go-ahead each time.
 - **Out of scope:** macros that bind `time.scale` (T-039 rules them); the face (T-022);
   horde's notice (T-027).
 
-### T-039 — M3: no macro only drives a fixed control; the bank revoiced (D-048)
-- **Status:** open (after T-038).
-- **Scope:** `core/include/echo/presets.h` (`validate()` or the bank check, and `factory()`),
-  `plants.h`, `core/tests/core_tests.cpp`, the generated `presets/echo-factory.json`.
+### T-039 — M3: Echo offers no macros (D-050; rewritten 2026-11-03, was the macro rule and the revoice)
+- **Status:** open.
+- **Scope:** `core/include/echo/presets.h` (the slot model, resolver, bindings and their validation), `plants.h`,
+  `core/tests/core_tests.cpp`, the generated `presets/echo-factory.json`, SPEC §16.3, `docs/admission.md`, the docs' counts.
 - **Acceptance criteria:**
-  1. A preset whose slot binds only fixed-control keys is refused, with a message naming the
-     preset, the slot and the key; a plant (a factory slot bound to `fb.amount` alone) makes
-     the check fail for that reason. A slot binding a fixed control together with another key
-     is allowed.
-  2. The seven are revoiced so every slot passes, each preset keeping 1 – 4 slots and its
-     character as described; homes at offset 0 as before (A12 unchanged).
-  3. B408 and A19 are re-reported for the revoiced bank; `./verify fast` green.
-- **Out of scope:** the final set (the human's listen, T-023).
+  1. Every factory preset has empty slots and the file keeps `slots: []`; a preset with a slot is refused with a message
+     naming the preset, and a plant (a factory preset carrying a slot) makes the check fail for that reason.
+  2. The slot model, the resolver and the bindings are gone, with the plants and checks whose subject went with them, each
+     listed in the trace. No other check or threshold moves.
+  3. A12 reports macros as not offered (RS-5.1) and still round-trips every preset's values and the fixed row; A13 holds.
+  4. The bank's saved values do not change: A19 and B408 re-report the same figures, and no description mentions a macro.
+  5. `./verify fast` green.
+- **Out of scope:** the time keys and the row (T-044, T-045); the final bank (the human's listen, T-023).
 
 ### T-040 — M3: the exponential law's mid-glide reversal clicks (D-049)
 - **Status:** done 2026-10-30 (D-049, A1 – A3; critic FIX-THEN-SHIP twice, all fixed; its
@@ -1055,6 +1055,34 @@ filings need the human's go-ahead each time.
      at the crest, the trough and both zero crossings of the LFO (D-049 A9), under 2.5 with zero backstop hits; any gestures that broke the speed invariant join `speedInvariant`; each
      unfixed behaviour is a planted control its own gate catches; `./verify fast` green.
 - **Out of scope:** T-041's fixes (the fade's outgoing head is guarded by `outgoingBound`).
+
+### T-044 — M3: Time in Sec, Hz or Sync; `time.scale` removed (D-050)
+- **Status:** open (after T-039).
+- **Scope:** `spec/params.json`, SPEC §3, §13, §16, `core/manifest.lock.json` and `module_version.h` (only by
+  `tools/manifest_lock.py write --decision D-050`), `engine.h`, `state.h`, `params.h`, `plants.h`, `core_tests.cpp`, the
+  lab and `tools/lab_smoke.mjs`, the generated presets, stereo report and admission files, the docs' counts.
+- **Acceptance criteria:**
+  1. `time.scale` is gone, with T-038's four plants and its checks, each listed in the trace. 29 keys.
+  2. `time.mode` (`sec`, `hz`, `sync`) replaces `time.sync`. Switching between `sec` and `hz` moves no read head, bit for bit
+     against a run with no switch; a switch into or out of `sync` follows `time.change` and reads under the click bar at
+     four rates, as `time.sync` does today.
+  3. SPEC states the Hz reading of `time.ms` (Hz = 1000 / ms, 1000 - 0.083 Hz) and the time's exactness: a saved `time.ms`
+     reads back bit for bit (RS-6.11).
+  4. `route.mode`'s first label is `standard`; state, presets and the lab agree.
+  5. The lock's row is Time `time.ms`, Feedback, Mix, Type `route.mode`, marked provisional until T-045.
+  6. A plant per new behaviour fails its own check for its own reason; every factory preset sounds as before; real time,
+     determinism, SR and block independence hold; `./verify fast` green.
+- **Out of scope:** the row's mode-following entry (T-045); the toggles (the face, T-022).
+
+### T-045 — M3: the Time entry follows the mode; Type as a selector (D-050)
+- **Status:** blocked (on horde's answer to `echo-003`, `integrations/echo/brief-fixed-row-modes.md` in horde's tree, PR #1359, respond by 2026-11-13).
+- **Scope:** `spec/params.json`, SPEC §16.4, the lock (`--decision D-NNN`), `tools/manifest_lock.py` and `tools/check_manifest.py`
+  if the shape needs them (a human gate), `docs/face.md`.
+- **Acceptance criteria:**
+  1. The row is declared in the shape horde rules, A12's round trip includes it, and T-044's "provisional" is gone.
+  2. A refusal or no answer goes to the human with the options D-050 set aside; nothing is chosen for them.
+  3. `./verify fast` green.
+- **Out of scope:** horde's side of it.
 
 ## Open questions (blocking — ask the human)
 
