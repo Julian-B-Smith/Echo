@@ -966,7 +966,7 @@ filings need the human's go-ahead each time.
   horde's notice (T-027).
 
 ### T-039 — M3: Echo offers no macros (D-050; rewritten 2026-11-03, was the macro rule and the revoice)
-- **Status:** open.
+- **Status:** done 2026-11-03 (D-050, A1; trace `traces/2026-11-03-t039-no-macros.md`; critic FIX-THEN-SHIP, all fixed).
 - **Scope:** `core/include/echo/presets.h` (the slot model, resolver, bindings and their validation), `plants.h`,
   `core/tests/core_tests.cpp`, the generated `presets/echo-factory.json`, SPEC §16.3, `docs/admission.md`, the docs' counts.
 - **Acceptance criteria:**
@@ -1057,7 +1057,7 @@ filings need the human's go-ahead each time.
 - **Out of scope:** T-041's fixes (the fade's outgoing head is guarded by `outgoingBound`).
 
 ### T-044 — M3: Time in Sec, Hz or Sync; `time.scale` removed (D-050)
-- **Status:** open (after T-039).
+- **Status:** open (T-039 is done).
 - **Scope:** `spec/params.json`, SPEC §3, §13, §16, `core/manifest.lock.json` and `module_version.h` (only by
   `tools/manifest_lock.py write --decision D-050`), `engine.h`, `state.h`, `params.h`, `plants.h`, `core_tests.cpp`, the
   lab and `tools/lab_smoke.mjs`, the generated presets, stereo report and admission files, the docs' counts.
@@ -1070,12 +1070,13 @@ filings need the human's go-ahead each time.
      reads back bit for bit (RS-6.11).
   4. `route.mode`'s first label is `standard`; state, presets and the lab agree.
   5. The lock's row is Time `time.ms`, Feedback, Mix, Type `route.mode`, marked provisional until T-045.
+     SPEC §1's macro line goes in the same lock rewrite (the lock hashes §1, so T-039 could not touch it; D-050).
   6. A plant per new behaviour fails its own check for its own reason; every factory preset sounds as before; real time,
      determinism, SR and block independence hold; `./verify fast` green.
 - **Out of scope:** the row's mode-following entry (T-045); the toggles (the face, T-022).
 
 ### T-045 — M3: the Time entry follows the mode; Type as a selector (D-050)
-- **Status:** blocked (on horde's answer to `echo-003`, `integrations/echo/brief-fixed-row-modes.md` in horde's tree, PR #1359, respond by 2026-11-13).
+- **Status:** blocked (on horde's answer to `echo-003`, `integrations/echo/brief-fixed-row-modes.md` in horde's tree, PR #1359, merged; respond by 2026-11-13).
 - **Scope:** `spec/params.json`, SPEC §16.4, the lock (`--decision D-NNN`), `tools/manifest_lock.py` and `tools/check_manifest.py`
   if the shape needs them (a human gate), `docs/face.md`.
 - **Acceptance criteria:**

@@ -158,20 +158,14 @@ ECHO_PLANT(clearWritesState)     // Clear edits the patch (feedback to 0): the s
 ECHO_PLANT(clearRestartsFade)    // a Clear during a fade restarts it (D-020: never)
 ECHO_PLANT(clearFreezesHeads)    // a Clear's fade holds the heads like a load's (critic T-037 H1; D-040: they keep moving)
 ECHO_PLANT(clearFreezesWet)      // a Clear's fading wet is frozen at the Clear (D-040: it follows the live mix)
-// ---- M3, B3 (T-017: module presets and macros, echo/presets.h) ----
-ECHO_PLANT(presetReordersSlots)  // reading a bank swaps the first and last slots (A12: order is the contract)
+// ---- M3, B3 (T-017: module presets, echo/presets.h; the macro plants left with the macros, T-039 / D-050) ----
 ECHO_PLANT(presetDeviceAccepted) // a Device key is accepted in a preset (RS-4.5)
-ECHO_PLANT(presetLogAccepted)    // a log curve on a zero or mixed-sign endpoint is accepted (A3)
-ECHO_PLANT(presetLogModifyAccepted) // a log curve under macroLaw modify is accepted (ADR-251; critic T-017 H1)
 // ---- M3, B3 (T-018: the admission self-test; contract rows A1 - A23) ----
 ECHO_PLANT(resetKeepsModPhase)   // A2: reset() leaves the modulation phase where it was (rest holds it; D-043)
 ECHO_PLANT(dryLate)              // A4: the dry path runs one sample late (an undeclared latency)
 ECHO_PLANT(monoSum)              // A8: the output is summed to mono (the image collapses)
 ECHO_PLANT(selfStart)            // A14: at rest the output is a 1e-24 speck, not zero: in a cycle it starts itself
 ECHO_PLANT(b265HoodHalved)       // TEST-SIDE: the click metric's +-16 neighbourhood halved (the port must match horde exactly)
-ECHO_PLANT(presetEndpointInexact) // curves lose their exact-endpoint special case (A3: lo + (hi - lo)*1 may miss hi)
-ECHO_PLANT(presetHzLinear)       // modify adds Hz offsets linearly instead of in octaves (ADR-251)
-ECHO_PLANT(presetResolveMutates) // resolve() writes back into the preset: a corner flip changes the next resolve (A13)
 // ---- M3, B3 (T-019: the B408 stereo report, D-010 / D-044; core/tests/fold.h) ----
 ECHO_PLANT(stereoInvertsR)       // stereo mode decodes line 1 inverted: a centred source cancels in mono (P1 in the engine)
 ECHO_PLANT(pingpongBothLines)    // ping-pong also feeds the input into the right line: repeats land on both sides at once
@@ -184,8 +178,9 @@ ECHO_PLANT(zoneAtEqual)          // TEST-SIDE: the colouring flag is raised at e
 // ---- M3, B4 (T-021: the factory bank) ----
 ECHO_PLANT(presetStateOversized) // TEST-SIDE: one factory preset's saved text is padded past 2 KiB (A19 over the bank)
 ECHO_PLANT(presetPatchOfDropsKey) // patchOf leaves fb.amount out of the load: the engine keeps its default (critic T-021 M1)
-ECHO_PLANT(factoryHomeOffset)    // dub-loop's Wobble home is nudged off its exact 0.25: the preset no longer loads as its own values (critic T-021 M2)
 ECHO_PLANT(factoryLabelTypo)     // pingpong-dotted's division label is "3/16 ": step() answers -1 and validate() must refuse it (critic T-021 M2)
+// ---- M3, B4 (T-039: no macros, D-050) ----
+ECHO_PLANT(factoryCarriesSlot)   // the bank's file gives dub-loop a slot: Echo offers no macros (RS-5.1), so readBank must refuse it, naming the preset
 // ---- M3, B4 (T-038: time.scale, D-048) ----
 ECHO_PLANT(scaleIgnoredSynced)   // time.scale is ignored while synced (it scales free time only)
 ECHO_PLANT(scaleNotSnapped)      // while synced the scale is applied as set, not snapped to the nearest octave

@@ -30,6 +30,7 @@ move; `status:` is lifecycle; neither does the other's job.
 | HYPERSAW (repo `horde`) | `integrations/echo/notice-spinup.md` | we exist; horde is our consumer. **Filed 2026-10-23**, horde PR #1201 (merged), `ball: none` (T-002) |
 | autonomous | `integrations/echo/brief.md` | register Echo in the ecosystem tracks. **Filed 2026-10-23**, autonomous PR #61, `ball: autonomous`, respond by 2026-11-06 (T-002) |
 | FOUNDATIONS | `integrations/echo/brief.md` | `echo-002`: four ABI questions; listed as a module inside horde. **Filed 2026-10-23**, FOUNDATIONS PR #133 (merged), `ball: FOUNDATIONS`, respond by 2026-11-06 (T-012) |
-| HYPERSAW (repo `horde`) | `integrations/echo/brief-fixed-row-modes.md` | `echo-003`: Echo offers no macros; a row entry that follows the mode, and a stepped entry as a selector (D-050, T-045). **Filed 2026-11-03**, horde PR #1359, `ball: HYPERSAW`, respond by 2026-11-13 |
+| HYPERSAW (repo `horde`) | `integrations/echo/brief-fixed-row-modes.md` | `echo-003`: Echo offers no macros; a row entry that follows the mode, and a stepped entry as a selector (D-050, T-045). **Filed 2026-11-03**, horde PR #1359 (merged), `ball: HYPERSAW`, respond by 2026-11-13 |
+| HYPERSAW (repo `horde`) | `integrations/echo/brief-bank-import.md` | `echo-004`, same thread: does Echo's bank file import as it is (D-050 A1)? **Filed 2026-11-03**, horde PR #1363, `ball: HYPERSAW`, respond by 2026-11-13 |
 
 Drafts are kept in `docs/filings/`; the copy in the correspondent's tree is the record.

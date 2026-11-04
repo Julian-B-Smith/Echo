@@ -305,28 +305,6 @@ core_gate() {
       fi
     fi
   else echo "fp-contract: OK — pragma holds ($href); without it the render differs ($hnop)"; fi
-  # echo/presets.h's own pragma (T-017, D-042; critic M1): fused ops inside
-  # echo::presets must be 0 with it and > 0 without, where the ISA fuses at all.
-  if command -v objdump >/dev/null 2>&1 || command -v otool >/dev/null 2>&1; then
-    local pp pn
-    fused_in() {
-      if command -v objdump >/dev/null 2>&1; then dis="$(objdump -d "$1" 2>/dev/null)"; else dis="$(otool -tv "$1" 2>/dev/null)"; fi
-      printf '%s\n' "$dis" | awk -v want="$2" '
-        /^[0-9a-f]+ <.*>:$/ || /^[_A-Za-z].*:$/ {fn=$0}
-        tolower($0) ~ /vfmadd|vfmsub|vfnmadd|fmadd|fmsub|fmla/ {
-          eng = (fn ~ /4echo/); pre = (fn ~ /7presets/)
-          if ((want=="engine" && eng) || (want=="caller" && !eng) || (want=="presets" && pre)) n++ }
-        END {print n+0}'
-    }
-    pp="$(fused_in "$b/echo_presets_fpc" presets)"; pn="$(fused_in "$b/echo_presets_nopragma" presets)"
-    if [ "$pp" -gt 0 ]; then
-      echo "verify: core — fp-contract: echo::presets holds $pp fused op(s) with its pragma: the pragma does not hold" >&2; ok=1
-    elif [ "$pn" -gt 0 ]; then
-      echo "fp-contract (presets.h): OK — echo::presets holds 0 fused ops with the pragma, $pn without"
-    else
-      echo "fp-contract (presets.h): NOT SEEN here — no fused op in echo::presets even without the pragma (this ISA/compiler did not contract it)"
-    fi
-  fi
   local cxx probe; cxx="$(command -v c++ || command -v g++ || command -v clang++)"
   "$cxx" -std=c++20 -fsyntax-only -I core/include -I core/third_party/foundations/include core/tests/guard_probe.cpp >/dev/null 2>&1 \
     || { echo "verify: core — the guard probe does not compile clean" >&2; ok=1; }

@@ -1526,3 +1526,11 @@ required.
    with `--decision D-050` (`module_version` moves, and so the presets file), `tools/check_manifest.py` only if the row's shape
    needs it. The earlier poll's C++ fixed list and the rule's SPEC sentence fall away with the rule. horde was told "four" at
    spin-up: the brief says what changed, and T-027 still carries the readiness notice.
+
+**D-050 A1 — T-039's critic rulings (2026-11-03, the human, three polls on the T-039 critic's FIX-THEN-SHIP).**
+1. **The presets fp-contract probe and its pragma go:** the `./verify` block, the two CMake targets and the pragma in `presets.h`. No
+   float arithmetic is left there, so it tested nothing, printed a false reason, and could stay green with the pragma deleted (it scans
+   only code the tool reaches). The engine's probe is untouched. Arithmetic returning to `presets.h` brings the probe back.
+2. **SPEC §12's edit is accepted,** outside ruling 7's list: it removes a sentence D-050 made false.
+3. **horde is asked** (`echo-003`'s PR had merged by then, so as its own artifact, seq 2 of the thread): whether Echo's bank file imports as it is (`slots: []`, a file-level `module`, no `macroLaw`), since
+   SPEC-MODULE-MACROS §4 draws a map with `module` per preset and no reader is in our record. Echo changes only if horde says so.

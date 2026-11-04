@@ -31,6 +31,8 @@ time under deep modulation used to move the offset by up to its whole size in on
 outgoing head's clamp looks one sample ahead of the offset; the offset's move when a fade ends), from the T-042 critic's measurements.
 **Amended 2026-11-02 by D-049 A10** (§3.6, §7, §13: the read's speed changes by at most 2 a in general and by up to about 3 a when the floor stops
 the read, and the M2 bar is what governs; this replaces A9's "a away from the floor, 2 a at contact"), from the critic's re-check.
+**Amended 2026-11-03 by D-050** (§3.5, §12, §16.3 and the last sentence of §16.4: Echo offers no macros; a preset is plain values and keeps `slots: []`, and a preset with a
+slot is refused; the rest of D-050 — Time, the saved modes, the fixed row — is amended in its own tickets).
 
 **What this is.** The behaviour Echo must have, stated so the C++ core (M1–M3) can be built and tested against it.
 The machine-readable half is [`params.json`](params.json): every key, unit, range, default, morph class, rate
@@ -143,7 +145,7 @@ Example: `2/1` at 30 bpm is 16 s, which plays at 8 s; `2/1` at 40 bpm with a +50
 
 ### 3.5 What a moving time does: `time.change`
 
-A time moves when a knob, automation, a macro or a morph changes `time.ms`, `time.div`, `time.sync`, `time.scale` or
+A time moves when a knob, automation or a morph changes `time.ms`, `time.div`, `time.sync`, `time.scale` or
 an offset (a **control move**), or when the host tempo changes a synced time (a **tempo move**, §3.8). For a control move,
 `time.change` decides:
 
@@ -526,10 +528,8 @@ budget per corner (RS-6.12).
 
 ## 12. Macros
 
-Echo offers up to 8 macros per preset, ordered and labelled by the preset (ADR-169 A4). It does not resolve them
-itself: horde resolves them through SPEC-MODULE-MACROS §5 (RS-5.5, second case). Nothing is driven by horde's
-intents unless a preset binds it. What a preset holds, which keys a macro may bind and the factory bank's law:
-§16.3. The fixed row beside the macros: §16.4.
+Echo offers **none** (D-050; RS-5.1: a module "may"). Every preset's slots are empty, and what a preset holds is §16.3.
+What the DAW sees by default is the fixed row, §16.4.
 
 ## 13. Constants
 
@@ -643,18 +643,17 @@ io.outGain 0
   label nor a division alias, or a different version refuses the whole text and changes nothing. Out of range is refused, never clamped.
 - Nothing outside the saved state and `reset()` shapes the sound (A17): the 30 keys are the whole patch.
 
-### 16.3 Module presets and macros (SPEC-MODULE-MACROS §4, ADR-251; RS-5.1 – 5.6)
+### 16.3 Module presets (SPEC-MODULE-MACROS §4; RS-5.1 – 5.6; D-050)
 
-- **Format:** SPEC-MODULE-MACROS §4's `ModulePreset`: `id`, `module: echo`, `internal_defaults` (every patch key, by
-  name as in §16.2), `macroLaw`, and up to 8 `slots`, ordered, each with its `label`, its `bind` map of
-  `key: [lo, hi]` or `[lo, hi, curve]`, and `home` ∈ [0, 1]. **No Device key** appears in a preset.
-- **A macro may bind continuous keys only** (class `continuous`, never `device`). A stepped key through a macro would
-  flip at an arbitrary threshold; the validator refuses a binding on one.
-- **The factory bank uses `macroLaw: modify`** (ADR-251): each binding adds a contribution to the preset's own value
-  (the base, a fixed control's value included, RS-5.3 as amended), clamped to the key's range. For a key in Hz (the
-  six filter cutoffs, `mod.rateHz`) the contribution is in **octaves** (base · 2^Σc). Under `modify`, a `log` curve
-  is refused. A preset from outside the bank may still say `set`.
-- A binding on `time.ms` is inert while `time.sync` is on; that is the key's own behaviour (§3.1), not the macro's.
+- **Format:** SPEC-MODULE-MACROS §4's `ModulePreset`, per preset: `id`, `label`, `description`, `internal_defaults` (every patch key, by
+  name as in §16.2) and `slots`, which is **always `[]`**. The file names the module once, at its top (`module: echo`), with its `schema` and
+  `module_version`; whether horde's reader takes that as it is, or wants `module` per preset, is asked in `echo-004` (D-050 A1). **No Device key** appears in a preset. The file carries no
+  `macroLaw`: horde reads an absent one as `set`, and it means nothing with no slots.
+- **Echo offers no macros** (D-050; RS-5.1: a module "may" offer macros, as modules with deep internals are expected
+  to, and factory presets stay required). The bank is plain values, an init plus seven (`presets/echo-factory.json`,
+  generated from `echo/presets.h`). The file keeps `slots: []`; whether horde's reader needs it is asked in `echo-004`.
+- **A preset whose `slots` is not empty is refused**, with a message naming the preset. So is a `macroLaw` or any
+  other field the writer does not produce, and a Device key, an unknown or missing key, or a value out of range.
 
 ### 16.4 Fixed controls (RS-5.8)
 
@@ -668,8 +667,7 @@ Echo declares **three**, in this order (also `params.json` → `fixedControls`):
 
 Each is always live, Time up to the 12 s line (§3.4): Time Scale scales the time whether free or synced
 (continuously, or by octaves, §3.1), where `time.ms` does nothing while synced and `time.div` is stepped. A fixed control is an ordinary parameter: saved in the
-state (§16.2), present in every preset, and in A12's round trip. Tone and Mod Depth are ordinary keys a preset's macros
-may bind (D-048).
+state (§16.2), present in every preset, and in A12's round trip.
 
 ### 16.5 The tail declaration's mapping
 

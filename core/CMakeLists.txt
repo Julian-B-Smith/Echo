@@ -103,16 +103,6 @@ set(ECHO_FPC_ISA "")
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
   set(ECHO_FPC_ISA -mfma)
 endif()
-# The same probe for echo/presets.h (critic T-017 M1): built with contraction
-# allowed, with and without the header's pragma; ./verify counts fused ops in
-# echo::presets symbols (0 with the pragma, > 0 without, where the ISA fuses).
-add_executable(echo_presets_fpc tools/presets.cpp)
-target_link_libraries(echo_presets_fpc PRIVATE echocore)
-target_compile_options(echo_presets_fpc PRIVATE ${ECHO_WARN} ${ECHO_FPC_ISA} ${ECHO_FPC_PROBE})
-add_executable(echo_presets_nopragma tools/presets.cpp)
-target_link_libraries(echo_presets_nopragma PRIVATE echocore)
-target_compile_definitions(echo_presets_nopragma PRIVATE ECHO_FP_PRAGMA_OFF=1)
-target_compile_options(echo_presets_nopragma PRIVATE ${ECHO_WARN} ${ECHO_FPC_ISA} ${ECHO_FPC_PROBE})
 add_executable(echo_hash_ref tools/render_hash.cpp)
 target_link_libraries(echo_hash_ref PRIVATE echocore)
 target_compile_options(echo_hash_ref PRIVATE ${ECHO_WARN} ${ECHO_FPC_ISA} -ffp-contract=off)
