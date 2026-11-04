@@ -1534,3 +1534,7 @@ required.
 2. **SPEC §12's edit is accepted,** outside ruling 7's list: it removes a sentence D-050 made false.
 3. **horde is asked** (`echo-003`'s PR had merged by then, so as its own artifact, seq 2 of the thread): whether Echo's bank file imports as it is (`slots: []`, a file-level `module`, no `macroLaw`), since
    SPEC-MODULE-MACROS §4 draws a map with `module` per preset and no reader is in our record. Echo changes only if horde says so.
+
+**D-050 A2 — T-044's scope (2026-11-04, the human, two polls before T-044's brief).**
+1. **SPEC §4, §9 and §11 join ruling 7's list:** they only drop what D-050 made false or rename the mode (the `stereo` label, the parameter table and its switch declarations, "30 keys").
+2. **The row's "provisional" mark lives in `spec/params.json` and SPEC §16.4,** not in the lock file. The lock is generated with `k`, `label` and `key` per entry, and marking it would edit `tools/manifest_lock.py`, a gate, for a note T-045 removes. The lock holds the row and cites D-050. T-044's criterion 5 is narrowed to say so.
