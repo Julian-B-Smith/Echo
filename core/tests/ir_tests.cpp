@@ -155,16 +155,16 @@ struct Named {
 };
 const std::vector<Named> kPatches = {
     {"defaults (synced, loop filter on)", {}},
-    {"free 250 ms, fb 0, filters off", {{"time.sync", 0}, {"time.ms", 250}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}},
-    {"ping-pong, fb 50, offsets", {{"time.sync", 0}, {"time.ms", 300}, {"fb.amount", 50}, {"route.mode", 1}, {"time.offL", 10}, {"time.offR", -20}}},
-    {"mid/side, fb 99", {{"time.sync", 0}, {"time.ms", 180}, {"fb.amount", 99}, {"route.mode", 2}, {"mix", 100}}},
-    {"past unity, fb 120", {{"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 120}, {"mix", 100}}},
-    {"input filter", {{"time.sync", 0}, {"time.ms", 200}, {"filt.in.on", 1}, {"filt.in.hpHz", 300}, {"filt.in.lpHz", 3000}}},
-    {"output filter", {{"time.sync", 0}, {"time.ms", 200}, {"filt.out.on", 1}, {"filt.out.hpHz", 200}, {"filt.out.lpHz", 5000}}},
-    {"loop filter, fb 90", {{"time.sync", 0}, {"time.ms", 120}, {"fb.amount", 90}, {"filt.loop.hpHz", 500}, {"filt.loop.lpHz", 2000}}},
-    {"I/O gains +6 / -12 dB", {{"time.sync", 0}, {"time.ms", 150}, {"io.inGain", 6}, {"io.outGain", -12}, {"fb.amount", 50}}},
-    {"sine modulation", {{"time.sync", 0}, {"time.ms", 220}, {"fb.amount", 60}, {"mod.depthMs", 3}, {"mod.rateHz", 2}, {"mod.spread", 50}}},
-    {"drift modulation", {{"time.sync", 0}, {"time.ms", 160}, {"fb.amount", 70}, {"mod.shape", 1}, {"mod.depthMs", 5}, {"mod.seed", 777}}},
+    {"free 250 ms, fb 0, filters off", {{"time.mode", 0}, {"time.ms", 250}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}},
+    {"ping-pong, fb 50, offsets", {{"time.mode", 0}, {"time.ms", 300}, {"fb.amount", 50}, {"route.mode", 1}, {"time.offL", 10}, {"time.offR", -20}}},
+    {"mid/side, fb 99", {{"time.mode", 0}, {"time.ms", 180}, {"fb.amount", 99}, {"route.mode", 2}, {"mix", 100}}},
+    {"past unity, fb 120", {{"time.mode", 0}, {"time.ms", 100}, {"fb.amount", 120}, {"mix", 100}}},
+    {"input filter", {{"time.mode", 0}, {"time.ms", 200}, {"filt.in.on", 1}, {"filt.in.hpHz", 300}, {"filt.in.lpHz", 3000}}},
+    {"output filter", {{"time.mode", 0}, {"time.ms", 200}, {"filt.out.on", 1}, {"filt.out.hpHz", 200}, {"filt.out.lpHz", 5000}}},
+    {"loop filter, fb 90", {{"time.mode", 0}, {"time.ms", 120}, {"fb.amount", 90}, {"filt.loop.hpHz", 500}, {"filt.loop.lpHz", 2000}}},
+    {"I/O gains +6 / -12 dB", {{"time.mode", 0}, {"time.ms", 150}, {"io.inGain", 6}, {"io.outGain", -12}, {"fb.amount", 50}}},
+    {"sine modulation", {{"time.mode", 0}, {"time.ms", 220}, {"fb.amount", 60}, {"mod.depthMs", 3}, {"mod.rateHz", 2}, {"mod.spread", 50}}},
+    {"drift modulation", {{"time.mode", 0}, {"time.ms", 160}, {"fb.amount", 70}, {"mod.shape", 1}, {"mod.depthMs", 5}, {"mod.seed", 777}}},
     {"synced 1/8 dotted at 93 bpm, exp law", {{"time.div", 10}, {"time.offR", 25}, {"time.change", 1}, {"time.law", 1}, {"fb.amount", 40}}},
 };
 
@@ -213,7 +213,7 @@ bool reuseIsFresh(Detail& d) {
   echo::IrRenderer ren;
   ren.prepare(48000.0);
   Vec L(96000), R(96000);
-  const Kv otherSeed{{"time.sync", 0}, {"time.ms", 160}, {"fb.amount", 70}, {"mod.shape", 1}, {"mod.depthMs", 5}, {"mod.seed", 500}};
+  const Kv otherSeed{{"time.mode", 0}, {"time.ms", 160}, {"fb.amount", 70}, {"mod.shape", 1}, {"mod.depthMs", 5}, {"mod.seed", 500}};
   for (const Kv& first : {kPatches[3].kv, kPatches[4].kv, kPatches[10].kv, otherSeed})
     for (std::size_t b : {1u, 8u, 0u, 9u, 10u}) {
       REQUIRE(ren.render(req(first, 96000), L, R), "render refused");
@@ -226,11 +226,11 @@ bool reuseIsFresh(Detail& d) {
   return true;
 }
 
-// The cache key (T-030 criterion 3): changing any one of the 30 keys, the rate,
+// The cache key (T-030 criterion 3): changing any one of the 29 keys, the rate,
 // the tempo, the level, the length or the input changes the hash; an equal
 // request hashes equal.
 bool hashCoversEveryInput(Detail& d) {
-  const auto base = req({{"time.sync", 0}}, 48000);
+  const auto base = req({{"time.mode", 0}}, 48000);
   const auto h0 = echo::irHash(base);
   REQUIRE(echo::irHash(base) == h0, "the same request hashed twice differently");
   for (std::size_t i = 0; i < echo::kParams.size(); ++i) {
@@ -251,7 +251,7 @@ bool hashCoversEveryInput(Detail& d) {
   REQUIRE(echo::irHash(r) != h0, "the length is not in the hash");
   r = base, r.input = IrInput::SideOnly;
   REQUIRE(echo::irHash(r) != h0, "the input is not in the hash");
-  const auto noise = req({{"time.sync", 0}}, 48000, 48000.0, IrInput::Noise);
+  const auto noise = req({{"time.mode", 0}}, 48000, 48000.0, IrInput::Noise);
   const auto hn = echo::irHash(noise);
   r = noise, r.noiseSeed += 1;
   REQUIRE(echo::irHash(r) != hn, "the noise seed is not in the hash (critic T-030 M3)");
@@ -265,7 +265,7 @@ bool hashCoversEveryInput(Detail& d) {
 // a held loop declares kInfiniteTail and never rests.
 bool tailThroughRenderer(Detail& d) {
   for (double fb : {0.0, 50.0, 90.0}) {
-    const Kv kv{{"time.sync", 0}, {"time.ms", 50}, {"fb.amount", fb}, {"mix", 100}};
+    const Kv kv{{"time.mode", 0}, {"time.ms", 50}, {"fb.amount", fb}, {"mix", 100}};
     auto probe = echo::renderIr(req(kv, 512));
     const long T = static_cast<long>(probe.info.tail);
     const auto got = echo::renderIr(req(kv, T + 24000));
@@ -280,14 +280,14 @@ bool tailThroughRenderer(Detail& d) {
   // block the clone rested in, with no later boundary to look at, and must
   // still report it.
   {
-    const Kv kv{{"time.sync", 0}, {"time.ms", 50}, {"fb.amount", 0}, {"mix", 100}};
+    const Kv kv{{"time.mode", 0}, {"time.ms", 50}, {"fb.amount", 0}, {"mix", 100}};
     const auto lng = echo::renderIr(req(kv, 48000));
     const long B = static_cast<long>(lng.info.restAt);
     REQUIRE(B > 0 && B < 48000, "control: the long render never rested (restAt %ld)", B);
     const auto got = echo::renderIr(req(kv, B));
     REQUIRE(got.info.restAt == B, "a render of %ld samples, resting in its last block, reports restAt %ld", B, static_cast<long>(got.info.restAt));
   }
-  const auto held = echo::renderIr(req({{"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 100}}, 48000));
+  const auto held = echo::renderIr(req({{"time.mode", 0}, {"time.ms", 100}, {"fb.amount", 100}}, 48000));
   REQUIRE(held.info.tail == echo::kInfiniteTail && held.info.restAt < 0, "a held loop must declare kInfiniteTail and never rest");
   return true;
 }
@@ -296,7 +296,7 @@ bool tailThroughRenderer(Detail& d) {
 // rendered at the request's level, not 0 dBFS. Checked against the closed form
 // at feedback 0 with the filters off: the first repeat is exactly a * wet.
 bool levelIsStated(Detail& d) {
-  const Kv kv{{"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}};
+  const Kv kv{{"time.mode", 0}, {"time.ms", 100}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}};
   for (double db : {-20.0, -40.0}) {
     auto r = req(kv, 9600);
     r.levelDb = db;
@@ -350,7 +350,7 @@ bool resumableEqualsOneShot(Detail& d) {
     IrInput in;
   };
   const std::vector<Case> cases = {{kPatches[10].kv, IrInput::Mono}, {kPatches[2].kv, IrInput::Mono}, {kPatches[3].kv, IrInput::Noise},
-                                   {{{"time.sync", 0}, {"time.ms", 50}, {"fb.amount", 0}, {"mix", 100}}, IrInput::Mono}};
+                                   {{{"time.mode", 0}, {"time.ms", 50}, {"fb.amount", 0}, {"mix", 100}}, IrInput::Mono}};
   std::uint32_t s = 99;
   for (const auto& c : cases) {
     const auto r = req(c.kv, 48000, 48000.0, c.in);
@@ -422,7 +422,7 @@ echo::IrServiceConfig svcConfig(double sr, double windowS) {
 }
 // A distinct drift patch per k (the seed defeats the cache).
 IrRequest driftReq(int k, double sr, double windowS) {
-  return req({{"time.sync", 0}, {"time.ms", 230}, {"fb.amount", 99}, {"route.mode", 2}, {"mod.shape", 1}, {"mod.depthMs", 5},
+  return req({{"time.mode", 0}, {"time.ms", 230}, {"fb.amount", 99}, {"route.mode", 2}, {"mod.shape", 1}, {"mod.depthMs", 5},
               {"mod.seed", 100 + k}, {"filt.in.on", 1}, {"filt.out.on", 1}, {"filt.loop.hpHz", 120}},
              std::lround(windowS * sr), sr);
 }
@@ -747,7 +747,7 @@ bool spectrumStrip(Detail& d) {
   const auto bin = [&](double hz) { return static_cast<std::size_t>(std::lround(hz / sr * static_cast<double>(nfft))); };
   for (int route : {0, 1, 2})
     for (int loopOn : {0, 1}) {
-      const Kv kv{{"time.sync", 0}, {"time.ms", 250}, {"time.offR", -20}, {"fb.amount", 70}, {"mix", 100}, {"route.mode", route},
+      const Kv kv{{"time.mode", 0}, {"time.ms", 250}, {"time.offR", -20}, {"fb.amount", 70}, {"mix", 100}, {"route.mode", route},
                   {"filt.loop.on", loopOn}, {"filt.loop.hpHz", 200}, {"filt.loop.lpHz", 4000}};
       const auto r = req(kv, std::lround(3.0 * sr));
       const auto got = echo::renderIr(r);
@@ -785,7 +785,7 @@ bool spectrumStrip(Detail& d) {
       }
     }
   // Undefined is refused, not drawn: mid/side with side content and unequal times.
-  auto r = req({{"time.sync", 0}, {"time.ms", 250}, {"time.offR", -20}, {"route.mode", 2}}, 4800, sr, IrInput::Left);
+  auto r = req({{"time.mode", 0}, {"time.ms", 250}, {"time.offR", -20}, {"route.mode", 2}}, 4800, sr, IrInput::Left);
   const auto got = echo::renderIr(r);
   REQUIRE(!echo::irGenerationWindows(got.info, r, 0).ok, "mid/side with side content and unequal times must have no strip");
   return true;
@@ -796,7 +796,7 @@ bool spectrumStrip(Detail& d) {
 // from one generation to the next.
 bool edcStaircase(Detail& d) {
   const double sr = 48000.0, T = 0.1, g = 0.5;
-  const auto got = echo::renderIr(req({{"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 50}, {"mix", 100}, {"filt.loop.on", 0}}, 48000));
+  const auto got = echo::renderIr(req({{"time.mode", 0}, {"time.ms", 100}, {"fb.amount", 50}, {"mix", 100}, {"filt.loop.on", 0}}, 48000));
   std::vector<double> e(got.L.size());
   echo::irEdc(got.L, e);
   REQUIRE(std::fabs(e[0]) < 1e-12, "the EDC starts at %.3g dB, not 0", e[0]);
@@ -820,7 +820,7 @@ const std::vector<Check> kChecks = {
     {"one renderer reused: every render equals a fresh one, drift seeds included (nothing leaks from the last patch)", reuseIsFresh,
      {"irReusesState", "irSeedAfterReset"}},
     {"rates: a rate the engine would clamp is refused, never rendered under the wrong hash", rateIsKept, {"irAcceptsClampedRate"}},
-    {"cache hash: each of the 30 keys, the rate, tempo, level, length and input change it", hashCoversEveryInput, {"irHashSkipsKey"}},
+    {"cache hash: each of the 29 keys, the rate, tempo, level, length and input change it", hashCoversEveryInput, {"irHashSkipsKey"}},
     {"tail oracle through the renderer: exact zero from the declared tail on; rest reported; held loop = kInfiniteTail", tailThroughRenderer,
      {"noTailGate", "irRestAtMissesEnd"}},
     {"stated level: the response is rendered at the request's level (-20, -40 dBFS)", levelIsStated, {"irLevelIgnored"}},

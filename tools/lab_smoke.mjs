@@ -65,7 +65,7 @@ const engine = (Xm, params, lab, sr) => { const e = new Xm.EchoLab(sr || SR, lab
 
 // The stress patch: every stateful path live (drift with spread, all filters,
 // past-unity feedback, a routing switch, a division flip, a tempo saw).
-const STRESS = { "time.sync": 1, "time.div": 12, "time.offR": 20, "fb.amount": 110, mix: 60, "route.mode": 2,
+const STRESS = { "time.mode": 2, "time.div": 12, "time.offR": 20, "fb.amount": 110, mix: 60, "route.mode": 2,
   "filt.in.on": 1, "filt.in.hpHz": 120, "filt.out.on": 1, "filt.out.lpHz": 6000, "mod.depthMs": 6, "mod.shape": 1, "mod.spread": 70, "mod.seed": 4242 };
 const STRESS_EV = [{ t: 0.6, key: "time.div", v: 9 }, { t: 1.1, key: "route.mode", v: 1 }, { t: 1.4, key: "filt.loop.on", v: 0 }];
 const saw = t => 100 + 40 * ((t * 1.7) % 1);
@@ -159,7 +159,7 @@ check(ctl > 1e-3, `control: an impulse at the same settings is audible in all 9 
 
 // ---- 7. The tail ends in EXACT zero within the declared tail (A5, RS-7.3).
 {
-  const p = { "time.sync": 0, "time.ms": 100, "fb.amount": 50, mix: 100, "filt.out.on": 1, "mod.depthMs": 4, "mod.shape": 1 };
+  const p = { "time.mode": 0, "time.ms": 100, "fb.amount": 50, mix: 100, "filt.out.on": 1, "mod.depthMs": 4, "mod.shape": 1 };
   const e = engine(X, p), tailN = Math.ceil(e.tailSeconds() * SR), n = blocks(tailN + 2 * SR), src = burst(n, 800, 4);
   const [L, R] = drive(e, src, src, n);
   const after = nonzero(L.subarray(800 + tailN)) + nonzero(R.subarray(800 + tailN));
@@ -179,7 +179,7 @@ check(ctl > 1e-3, `control: an impulse at the same settings is audible in all 9 
   check(r.stats[0].nonfinite === 3, `the input guard counted each repair (${r.stats[0].nonfinite} of 3)`);
   plant(stress(X, {}, src, { plant: "silentRepair" }).stats[0].nonfinite === 0, "count check detects a guard that zeroes without counting");
   // NaN planted in the loop filter's state mid-render: all loop state is repaired.
-  const poke = (lab, Xm) => drive(engine(Xm || X, { "fb.amount": 70, "time.sync": 0, "time.ms": 50 }, lab), noise(SR, 5), null, SR, null,
+  const poke = (lab, Xm) => drive(engine(Xm || X, { "fb.amount": 70, "time.mode": 0, "time.ms": 50 }, lab), noise(SR, 5), null, SR, null,
     (eng, o) => { if (o === 4096) eng.filters[1].s[0] = NaN; })[0];
   const pL = poke();
   check(pL.subarray(4096 + 2).every(Number.isFinite), "a NaN planted in the loop filter's state is repaired: the output is finite after it");
@@ -209,7 +209,7 @@ check(ctl > 1e-3, `control: an impulse at the same settings is audible in all 9 
   // depth 20 ms of drift, a rate glide 10 -> 0.05 Hz, a spread ramp, a shape
   // switch and a seed change — each of which once moved the read past the bound.
   const modRun = (change, lab) => { const sp = { sr: 8000, seconds: 6, lab, srcL: live(blocks(6 * 8000)),
-      params: { "time.sync": 0, "time.ms": 12000, "time.change": change, "mod.depthMs": 20, "mod.rateHz": 10, "mod.shape": 0, "fb.amount": 0 },
+      params: { "time.mode": 0, "time.ms": 12000, "time.change": change, "mod.depthMs": 20, "mod.rateHz": 10, "mod.shape": 0, "fb.amount": 0 },
       events: [{ t: 0.5, key: "mod.rateHz", v: 0.05 }, { t: 1.5, key: "mod.spread", v: 100 }, { t: 2.5, key: "mod.shape", v: 1 }, { t: 3.5, key: "mod.seed", v: 99 },
                { t: 4, key: "mod.rateHz", v: 10 }, { t: 4.6, key: "time.ms", v: 11990 }] };
     const r = X.echoRender(sp); return [r.stats[0], r.stats[1]]; };
@@ -218,12 +218,12 @@ check(ctl > 1e-3, `control: an impulse at the same settings is audible in all 9 
   // when a crossfade lands on a long time that limit lifts at once — the slew
   // limit is what keeps the offset from stepping.
   const shortRun = (change, lab) => X.echoRender({ sr: 8000, seconds: 2, lab, srcL: live(16000),
-    params: { "time.sync": 0, "time.ms": 10, "time.change": change, "mod.depthMs": 20, "mod.rateHz": 1, "fb.amount": 0 },
+    params: { "time.mode": 0, "time.ms": 10, "time.change": change, "mod.depthMs": 20, "mod.rateHz": 1, "fb.amount": 0 },
     events: [{ t: 0.3, key: "time.ms", v: 500 }] }).stats;
   for (const change of [0, 1, 2]) for (const st of shortRun(change)) { runs++; if (!ok(st)) { bad++; worst = note(`short time, time.change ${change}`, st); } }
   // Drift at full depth for 30 s at 12 s: the Catmull-Rom curve overshoots [-1, 1].
   const driftRun = lab => X.echoRender({ sr: 8000, seconds: 30, lab, srcL: live(240000),
-    params: { "time.sync": 0, "time.ms": 12000, "mod.depthMs": 20, "mod.rateHz": 3, "mod.shape": 1, "mod.spread": 100, "fb.amount": 0 } }).stats;
+    params: { "time.mode": 0, "time.ms": 12000, "mod.depthMs": 20, "mod.rateHz": 3, "mod.shape": 1, "mod.spread": 100, "fb.amount": 0 } }).stats;
   for (const st of driftRun()) { runs++; if (!ok(st)) { bad++; worst = note("drift at 12 s", st); } }
   check(bad === 0, `read speed in [${X.ECHO_K.sMin}, ${X.ECHO_K.sMax}], no reverse read, no read past the line, no hard-bound hit — ${runs} law/move/modulation runs` + (bad ? " — " + worst : ""));
   plant(shortRun(1, { plant: "modUnlimited" }).some(st => !ok(st)), "speed check detects the modulation slew limit removed");
@@ -231,7 +231,7 @@ check(ctl > 1e-3, `control: an impulse at the same settings is audible in all 9 
   // first form read counted overruns at 12 s, and fired only because the lab had no clamp at the line's end: with the core's ceiling clamp ported
   // that form is silent. The peak cannot be hidden by a clamp, so the control fires with the ceiling and without it (`lab.ceiling === false`).
   const driftPeak = lab => {
-    const sr = 8000, e = engine(X, { "time.sync": 0, "time.ms": 100, "mod.depthMs": 20, "mod.rateHz": 3, "mod.shape": 1, "mod.spread": 100, "fb.amount": 0 }, lab, sr);
+    const sr = 8000, e = engine(X, { "time.mode": 0, "time.ms": 100, "mod.depthMs": 20, "mod.rateHz": 3, "mod.shape": 1, "mod.spread": 100, "fb.amount": 0 }, lab, sr);
     const x = new Float32Array(1).fill(1e-3), y = new Float32Array(1), y2 = new Float32Array(1), n = 30 * sr;
     let pk = 0;
     for (let i = 0; i < n; i++) { e.process(x, x, y, y2, 1, 120); if (i > 0.5 * sr) pk = Math.max(pk, Math.abs(e.mods[0]), Math.abs(e.mods[1])); }
@@ -255,7 +255,7 @@ check(ctl > 1e-3, `control: an impulse at the same settings is audible in all 9 
 // negative tail, O((1-R) R^D): "ratio = g" holds to 1e-3, not bit-exactly
 // (spec §5.3; S-1 ruled this tolerance, D-017).
 function generations(params, sr, lab) {
-  const r = X.echoRender({ sr, seconds: 0.9, lab, params: Object.assign({ "time.sync": 0, "time.ms": 100, "fb.amount": 50, mix: 100, "filt.loop.on": 0 }, params), srcL: impulse(blocks(0.9 * sr)) });
+  const r = X.echoRender({ sr, seconds: 0.9, lab, params: Object.assign({ "time.mode": 0, "time.ms": 100, "fb.amount": 50, mix: 100, "filt.loop.on": 0 }, params), srcL: impulse(blocks(0.9 * sr)) });
   const D = Math.round(0.1 * sr), out = [];
   for (let k = 1; k <= 6; k++) out.push([r.L[k * D], peak(r.L.subarray(k * D - 3, k * D + 4))]);
   return out;
@@ -268,7 +268,7 @@ function generations(params, sr, lab) {
   plant(!ok(generations({ "filt.loop.on": 1 }, sr)), "ratio check detects the loop filter left in circuit");
   plant(!ok(generations({ "time.ms": 100.01 }, sr)), "time check detects a fractional-sample misplacement");
   // The first block lands on the HOST tempo, never gliding from 120 (spec §3.3).
-  const at60 = lab => { const r = X.echoRender({ sr: 8000, seconds: 1.3, lab, bpmAt: () => 60, params: { "time.sync": 1, "time.div": 9, mix: 100, "fb.amount": 0 }, srcL: impulse(blocks(1.3 * 8000)) });
+  const at60 = lab => { const r = X.echoRender({ sr: 8000, seconds: 1.3, lab, bpmAt: () => 60, params: { "time.mode": 2, "time.div": 9, mix: 100, "fb.amount": 0 }, srcL: impulse(blocks(1.3 * 8000)) });
     return r.L.findIndex(x => x !== 0); };
   check(at60() === 8000, `synced 1/4 at 60 bpm lands at exactly 1 s from the first block (sample ${at60()})`);
   plant(at60({ plant: "tempoFrozen" }) !== 8000, "tempo check detects the host tempo ignored");
@@ -285,7 +285,7 @@ function generations(params, sr, lab) {
   const dry = lab => X.echoRender({ sr: SR, seconds: 1, lab, params: { mix: 0, "fb.amount": 120 }, srcL: src }).L;
   check(sameBits(dry(), src), "dry path: at mix 0 the output is the input exactly (no limiter on the dry, ADR-142)");
   plant(!sameBits(dry({ plant: "dryLimiter" }), src), "dry-path check detects a limiter on the dry path");
-  const wet = lab => X.echoRender({ sr: SR, seconds: 0.2, lab, params: { mix: 100, "time.sync": 0, "time.ms": 100 }, srcL: src }).L;
+  const wet = lab => X.echoRender({ sr: SR, seconds: 0.2, lab, params: { mix: 100, "time.mode": 0, "time.ms": 100 }, srcL: src }).L;
   check(nonzero(wet().subarray(0, 1500)) === 0, "mix 100 %: nothing before the first repeat — no dry leak");
   plant(nonzero(wet({ plant: "dryLeak" }).subarray(0, 1500)) > 0, "mix check detects a cos(pi/2) dry leak");
 }
@@ -301,7 +301,7 @@ function generations(params, sr, lab) {
   const dbRamp = build(subst("case 1: return Math.pow(10, p[EI[\"io.outGain\"]] / 20);", "case 1: return 1 + p[EI[\"io.outGain\"]] / 20;"));
   plant(!ok(run(dbRamp)), "gain check detects a wrong gain law");
   // Input Gain sits before the loop: +12 dB in drives the ceiling (B435 test 5).
-  const loop = gIn => X.echoRender({ sr: SR, seconds: 1, params: { mix: 100, "fb.amount": 100, "time.sync": 0, "time.ms": 50, "filt.loop.on": 0, "io.inGain": gIn }, srcL: burst(SR, 400, 6) }).L;
+  const loop = gIn => X.echoRender({ sr: SR, seconds: 1, params: { mix: 100, "fb.amount": 100, "time.mode": 0, "time.ms": 50, "filt.loop.on": 0, "io.inGain": gIn }, srcL: burst(SR, 400, 6) }).L;
   check(peak(loop(12).subarray(SR / 2)) < 4 * peak(loop(0).subarray(SR / 2)), "io.inGain is before the loop: +12 dB in is held by the ceiling, not passed through 4x");
 }
 
@@ -309,7 +309,7 @@ function generations(params, sr, lab) {
 {
   const probe = () => X.echoSource("probe", SR, blocks(2 * SR));
   const M2 = (key, v, extra, lab) => { const r = X.echoRender({ sr: SR, seconds: 2, lab, srcL: probe(), srcR: new Float32Array(blocks(2 * SR)),
-      params: Object.assign({ mix: 100, "time.sync": 0, "time.ms": 120, "fb.amount": 0, "filt.loop.on": 0 }, extra), events: [{ t: 1, key, v }] });
+      params: Object.assign({ mix: 100, "time.mode": 0, "time.ms": 120, "fb.amount": 0, "filt.loop.on": 0 }, extra), events: [{ t: 1, key, v }] });
     return X.echoClickM2(key === "route.mode" ? r.R : r.L, SR - 200, SR + 2000, 0.5, X.ECHO_PROBE_HZ, SR, 1); };
   const route = M2("route.mode", 2, {}), routeI = M2("route.mode", 2, {}, { plant: "instantSwitch" });
   const filt = M2("filt.out.on", 1, { "filt.out.lpHz": 500 }), filtI = M2("filt.out.on", 1, { "filt.out.lpHz": 500 }, { plant: "instantSwitch" });
@@ -317,14 +317,14 @@ function generations(params, sr, lab) {
   plant(routeI > 2 * route && filtI > 2 * filt, `switch check detects instant switches (M2 ${routeI.toFixed(1)}, ${filtI.toFixed(1)})`);
   // The crossfade law is equal-GAIN (RS-3.6, D-007): two heads on a constant never exceed it.
   const xf = lab => peak(X.echoRender({ sr: SR, seconds: 1, lab, srcL: new Float32Array(SR).fill(0.5), events: [{ t: 0.5, key: "time.ms", v: 60 }],
-      params: { mix: 100, "time.sync": 0, "time.ms": 100, "time.change": 1, "fb.amount": 0, "filt.loop.on": 0 } }).L.subarray(SR / 4));
+      params: { mix: 100, "time.mode": 0, "time.ms": 100, "time.change": 1, "fb.amount": 0, "filt.loop.on": 0 } }).L.subarray(SR / 4));
   check(xf() <= 0.5 + 1e-9, `crossfade: equal-gain, two correlated heads never exceed the signal (peak ${xf().toFixed(4)})`);
   plant(xf({ plant: "equalPower" }) > 0.6, "crossfade check detects an equal-power law (1.41x on correlated heads)");
 }
 
 // ---- 14. Deferred flips and the seeded seed switch (A11 as amended, §12.2).
 {
-  const glide = (Xm, flip) => { const e = engine(Xm, { "time.sync": 0, "time.ms": 500, mix: 100, "fb.amount": 0 });
+  const glide = (Xm, flip) => { const e = engine(Xm, { "time.mode": 0, "time.ms": 500, mix: 100, "fb.amount": 0 });
     return drive(e, X.echoSource("probe", SR, 3 * SR), null, 3 * SR, null, (eng, o) => {
       if (o === blocks(0.5 * SR)) eng.setParam("time.ms", 250);
       if (o === blocks(0.6 * SR) && flip) eng.setParam("time.change", 2); })[0]; };
@@ -341,7 +341,7 @@ function generations(params, sr, lab) {
 
 // ---- 15. A load ends the old repeats; Device keys are not part of a patch (D-015, RS-6.7, RS-4.5).
 {
-  const ring = lab => { const e = engine(X, { "fb.amount": 85, "time.sync": 0, "time.ms": 200, mix: 100 }, lab);
+  const ring = lab => { const e = engine(X, { "fb.amount": 85, "time.mode": 0, "time.ms": 200, mix: 100 }, lab);
     const [L] = drive(e, burst(2 * SR, 600, 2), null, 2 * SR, null, (eng, o) => { if (o === LD) eng.load({ "time.ms": 300, "fb.amount": 40, "io.inGain": 12 }); });
     return [L, e]; };
   const LD = blocks(SR / 2), [L, e] = ring(), rampN = Math.round(X.ECHO_K.rampS * SR);
@@ -355,7 +355,7 @@ function generations(params, sr, lab) {
 {
   const fold = r => Float64Array.from(r.L, (x, i) => 0.5 * (x + r.R[i]));
   const n = blocks(1.5 * SR), L = noise(n, 5), R = noise(n, 6), M = Float32Array.from(L, (x, i) => 0.5 * (x + R[i]));
-  const run = (Xm, l, r) => Xm.echoRender({ sr: SR, seconds: 1.5, params: { "route.mode": 2, "time.sync": 0, "time.ms": 90, "time.offR": 37, "fb.amount": 70, mix: 100, "mod.depthMs": 3 }, srcL: l, srcR: r });
+  const run = (Xm, l, r) => Xm.echoRender({ sr: SR, seconds: 1.5, params: { "route.mode": 2, "time.mode": 0, "time.ms": 90, "time.offR": 37, "fb.amount": 70, mix: 100, "mod.depthMs": 3 }, srcL: l, srcR: r });
   const maxDiff = (a, b) => a.reduce((m, x, i) => Math.max(m, Math.abs(x - b[i])), 0);
   const e = maxDiff(fold(run(X, L, R)), fold(run(X, M, M)));
   check(e < 1e-6, `mid/side: fold(out(L,R)) == fold(out(M,M)) — the fold IS the M line (max diff ${e.toExponential(1)})`);
@@ -367,7 +367,7 @@ function generations(params, sr, lab) {
 // stops, the returning term is at most the ceiling x the DC blocker's L1 gain
 // (1 + R < 2); while it plays, the wet is at most the input's peak + 2 (spec §5.1).
 {
-  const park = (src, lab) => X.echoRender({ sr: SR, seconds: 4, lab, params: { "time.sync": 0, "time.ms": 150, "fb.amount": 120, mix: 100, "filt.loop.on": 0 }, srcL: src });
+  const park = (src, lab) => X.echoRender({ sr: SR, seconds: 4, lab, params: { "time.mode": 0, "time.ms": 150, "fb.amount": 120, mix: 100, "filt.loop.on": 0 }, srcL: src });
   const n = 4 * SR, pulse = Float32Array.from({ length: n }, (_, i) => (i < 0.1 * SR ? 0.9 : 0));
   const sq = Float32Array.from({ length: n }, (_, i) => (Math.floor(i / (0.3 * SR)) % 2 ? -0.9 : 0.9));
   const a = park(impulse(n)), b = park(pulse), c = park(sq);
@@ -402,7 +402,7 @@ function generations(params, sr, lab) {
       const src = new Float32Array(n), nf = Math.round(0.01 * SR48);
       for (let i = 0; i < n; i++) src[i] = 0.5 * Math.sin(2 * Math.PI * (X.ECHO_PROBE_HZ * i / SR48 + j / 8)) * (i < nf ? 0.5 - 0.5 * Math.cos(Math.PI * i / nf) : 1);
       const r = X.echoRender({ sr: SR48, seconds: secs, srcL: src, lab,
-        params: { "time.sync": 0, "time.ms": 500, "time.change": 0, "time.law": 1, "time.glide": 0.3, "fb.amount": 0, "filt.loop.on": 0, mix: 100 },
+        params: { "time.mode": 0, "time.ms": 500, "time.change": 0, "time.law": 1, "time.glide": 0.3, "fb.amount": 0, "filt.loop.on": 0, mix: 100 },
         events: [{ t: 1, key: "time.ms", v: 125 }, { t: 1.2, key: "time.ms", v: 500 }] });
       w = Math.max(w, X.echoClickM2(r.L, Math.round(0.2 * SR48), r.L.length, 0.5, X.ECHO_PROBE_HZ, SR48, 2.25));
     }
@@ -432,7 +432,7 @@ function generations(params, sr, lab) {
     }
     return w;
   };
-  const base = { "time.sync": 0, "time.change": 0, "fb.amount": 0, "filt.loop.on": 0, mix: 100 };
+  const base = { "time.mode": 0, "time.change": 0, "fb.amount": 0, "filt.loop.on": 0, mix: 100 };
   // 18c. The tape law's plain 500 -> 125 ms move holds the cap (speed 2.0) while the model runs ahead and lands on it:
   // 2.4 at 48 kHz and 3.2 at 96 in the core, more at 192. The braking catch-up lands it without a step.
   {
@@ -555,7 +555,7 @@ function generations(params, sr, lab) {
 {
   const n = blocks(5 * SR), src = new Float32Array(n);
   src.set(noise(0.4 * SR, 3), 0); src.set(noise(0.6 * SR, 4), blocks(3.2 * SR));
-  const p = { "time.sync": 1, "time.div": 15, "fb.amount": 20, mix: 60, "mod.depthMs": 8, "mod.shape": 0, "mod.rateHz": 1.3 };
+  const p = { "time.mode": 2, "time.div": 15, "fb.amount": 20, mix: 60, "mod.depthMs": 8, "mod.shape": 0, "mod.rateHz": 1.3 };
   const tempo = t => (t < 2 ? 120 : 96);
   function pair(Xm) {
     const twin = engine(Xm, p), sleeper = engine(Xm, p);
@@ -573,47 +573,73 @@ function generations(params, sr, lab) {
   plant(!pair(runs), "sleep check detects a modulation that keeps running at rest");
 }
 
-// ---- 20. time.scale (T-038, D-048): the synced snap and what counts as a move. The lab mirrors the C++
-// (engine.h timeScale / applied): the octave snap is exact at the doubles nearest the boundaries, and a scale
-// send is a control move only if it moves a resolved time.
+// ---- 20. time.mode (T-044, D-050): sec and hz read one time.ms, and what counts as a move. The lab mirrors the C++
+// (engine.h synced / applied): hz resolves as sec and follows no tempo, a flip between sec and hz marks no move, a flip that
+// moves a time does, and a sec <-> hz flip in the middle of a move in flight leaves the render bit-identical.
 {
-  const nextDown = x => { const f = new Float64Array([x]); new BigUint64Array(f.buffer)[0] -= 1n; return f[0]; };
-  // 1/4 at 120 bpm is 0.5 s; a synced scale s resolves to 0.5 x its octave.
-  const syncedTime = (Xm, s) => { const e = new Xm.EchoLab(SR, {}); e.setParam("time.sync", 1); e.setParam("time.div", 9); e.setParam("time.scale", s); e._resolveBoth(120); return e.Tt[0] / SR; };
-  function snapBad(Xm) {
-    const bad = [];
-    for (let k = -2; k <= 2; k++) { const t = syncedTime(Xm, Math.pow(2, k)); if (t !== 0.5 * Math.pow(2, k)) bad.push(`x2^${k} -> ${t}`); }
-    for (let k = -2; k <= 1; k++) {
-      const edge = Math.pow(2, k) * Math.SQRT2;   // the double nearest 2^(k + 1/2): just above it, so up
-      for (const [what, s, want] of [["one ulp under", nextDown(edge), Math.pow(2, k)], ["the double nearest", edge, Math.pow(2, k + 1)]]) {
-        const t = syncedTime(Xm, s); if (t !== 0.5 * want) bad.push(`${what} the 2^${k + 0.5} boundary (${s}) -> ${t} s, expected ${0.5 * want}`);
-      }
-    }
-    return bad;
-  }
-  const bad = snapBad(X);
-  check(bad.length === 0, "time.scale: synced it snaps to the nearest octave: every octave, the double nearest each boundary (up) and one ulp under it (down)" + (bad.length ? " — " + bad.slice(0, 3).join("; ") : ""));
-  const rounds = build(subst("return Math.pow(2, s / Math.pow(2, e) >= Math.SQRT2 ? e + 1 : e);", "const l = Math.log2(s); return Math.pow(2, Math.sign(l) * Math.round(Math.abs(l)));"));
-  plant(snapBad(rounds).length > 0, "time.scale snap check detects round(log2 s) with halves away from zero (C's lround), wrong at the doubles nearest a boundary");
-  const free = (() => { const e = new X.EchoLab(SR, {}); e.setParam("time.sync", 0); e.setParam("time.ms", 100); e.setParam("time.scale", 3.1); e._resolveBoth(120); return e.Tt[0] / SR; })();
-  check(Math.abs(free - 0.31) < 1e-12, `time.scale: free it is the value itself (100 ms x 3.1 = ${(free * 1000).toFixed(6)} ms)`);
+  const lab = plantName => (plantName ? { plant: plantName } : {});
+  const timesOf = (Xm, mode, bpm, plantName) => {
+    const e = new Xm.EchoLab(SR, lab(plantName));
+    e.setParam("time.mode", mode); e.setParam("time.ms", 100); e.setParam("time.div", 12);   // 1/8 at 97 bpm is 309.28 ms
+    return e._timesNow(bpm).slice(0, 2).join();
+  };
+  // sec (0) and hz (1) read time.ms alone: the same times at any tempo; sync (2) reads the division at the tempo.
+  const wantMs = (0.1 * SR) + "," + (0.1 * SR);
+  const hzAsSec = Xm => [0, 1].every(mode => [97, 60].every(bpm => timesOf(Xm, mode, bpm) === wantMs));
+  check(hzAsSec(X), "time.mode: sec and hz both resolve time.ms (100 ms), at 97 and at 60 bpm: hz follows no tempo");
+  check(timesOf(X, 2, 120) === (0.25 * SR) + "," + (0.25 * SR), "time.mode: sync resolves the division at the host tempo (1/8 at 120 bpm = 250 ms)");
+  plant(timesOf(X, 1, 97, "hzCountsAsSync") !== wantMs, "time.mode check detects hz played as sync (the old >= 0.5 test)");
 
-  // What counts as a move: flags first, then a render.
-  function moveFlags(Xm) {
-    const e = new Xm.EchoLab(SR, {});
-    e.setParam("time.sync", 1); e.setParam("time.div", 9); e._resolveBoth(120);
+  // What counts as a move: flags first. 1/4 at 120 bpm is 0.5 s; time.ms is 100 ms.
+  function moveFlags(plantName) {
+    const e = new X.EchoLab(SR, lab(plantName));
+    e.setParam("time.mode", 0); e.setParam("time.ms", 100); e.setParam("time.div", 9); e._resolveBoth(120);
     const sent = v => {
-      e.paramMoved = false; e.setParam("time.scale", v);
+      e.paramMoved = false; e.setParam("time.mode", v);
       const moved = e.paramMoved;
       if (e.timeDirty) { e._resolveBoth(120); e.timeDirty = false; }   // the next block resolves, and consumes the move
       return moved;
     };
-    return [sent(1), sent(1.2), sent(0.8), sent(1.5), sent(1.6), sent(0.5)];   // resend, in band, in band, x2, still x2, x1/2
+    return [sent(1), sent(0), sent(2), sent(1), sent(0), sent(2)];   // sec -> hz, -> sec, -> sync, -> hz, -> sec, -> sync
   }
-  const flags = moveFlags(X).join();
-  check(flags === "false,false,false,true,false,true", `time.scale: a re-sent or in-band synced scale moves nothing; an octave step moves (${flags})`);
-  const always = build(subst("if (t[0] !== this.Tt[0] || t[1] !== this.Tt[1]) { this.timeDirty = true; this.paramMoved = true; }", "this.timeDirty = true; this.paramMoved = true;"));
-  plant(moveFlags(always).join() !== flags, "time.scale move check detects every scale send counted as a move");
+  const flags = moveFlags().join();
+  check(flags === "false,false,true,true,false,true", `time.mode: a flip between sec and hz moves nothing; a flip into or out of sync moves the time (${flags})`);
+  plant(moveFlags("modeFlipSwallowed")[3] === false, "time.mode move check detects a flip out of sync that moves a time but is not counted as a move (a tempo move's latch would stay)");
+  plant(moveFlags("modeFlipIntoSyncSwallowed")[2] === false, "time.mode move check detects a flip into sync that moves a time but is not counted as a move (a stale tempo latch would stay)");
+  // A flip that lands on the time already playing (time.ms 500 = 1/4 at 120 bpm) moves nothing, in either direction.
+  function sameTimeFlags(plantName) {
+    const e = new X.EchoLab(SR, lab(plantName));
+    e.setParam("time.mode", 0); e.setParam("time.ms", 500); e.setParam("time.div", 9); e._resolveBoth(120);
+    const sent = v => { e.paramMoved = false; e.setParam("time.mode", v); const moved = e.paramMoved; if (e.timeDirty) { e._resolveBoth(120); e.timeDirty = false; } return moved; };
+    return [sent(2), sent(0), sent(2), sent(1)];
+  }
+  check(sameTimeFlags().join() === "false,false,false,false", `time.mode: a flip that lands on the time already playing moves nothing, in any direction (${sameTimeFlags().join()})`);
+  plant(sameTimeFlags("modeFlipAlwaysMove").some(x => x), "time.mode same-time check detects every flip counted as a move");
+  // The value keys: a send that moves no time is no move (time.ms while synced is stored, not read); one that moves a time is.
+  function keyFlags(plantName) {
+    const e = new X.EchoLab(SR, lab(plantName));
+    e.setParam("time.mode", 2); e.setParam("time.div", 9); e._resolveBoth(120);
+    const sent = (k, v) => { e.paramMoved = false; e.setParam(k, v); const moved = e.paramMoved; if (e.timeDirty) { e._resolveBoth(120); e.timeDirty = false; } return moved; };
+    return [sent("time.ms", 200), sent("time.ms", 250), sent("time.div", 12), sent("time.offL", 10), sent("time.offL", 0)];
+  }
+  const kflags = keyFlags().join();
+  check(kflags === "false,false,true,true,true", `time.mode: while synced, time.ms moves nothing; a division or an offset that moves the time does (${kflags})`);
+  plant(keyFlags("keyResendIsMove")[0] === true, "key move check detects a time.ms send counted as a move while synced");
+  // The host: time.ms automated every 20 ms on a synced patch under a tempo step (change jump, tempoMode crossfade): bit-identical to no automation.
+  const host = (auto, plantName) => X.echoRender({ sr: SR, seconds: 2, lab: lab(plantName), srcL: noise(blocks(2 * SR), 22), bpmAt: t => (t < 1.0 ? 120 : 150),
+    params: { "time.mode": 2, "time.div": 9, "time.change": 2, "time.tempoMode": 0, "fb.amount": 50, mix: 100 },
+    events: auto ? Array.from({ length: 100 }, (_, i) => ({ t: 0.02 * (i + 1), key: "time.ms", v: 100 + 50 * Math.sin(i) })).concat([{ t: 15872 / SR, key: "time.ms", v: 333 }]) : [] }).L;  // the last send lands in the block the tempo steps in
+  const quiet = host(false);
+  check(sameBits(host(true), quiet), "time.mode: time.ms automated every 20 ms on a synced patch under a tempo step renders bit-identically to no automation");
+  plant(!sameBits(host(true, "keyResendIsMove"), quiet), "host check detects time.ms automation that re-latches a tempo move");
+
+  // A render: a repitch move in flight, time.change flipped to crossfade (deferred), then sec -> hz -> sec. Bit-identical to no flips.
+  const render = (flips, plantName) => X.echoRender({ sr: SR, seconds: 2, lab: lab(plantName), srcL: noise(blocks(2 * SR), 21),
+    params: { "time.mode": 0, "time.ms": 300, "time.change": 0, "time.glide": 0.3, "fb.amount": 50, mix: 100 },
+    events: [{ t: 0.5, key: "time.ms", v: 120 }, { t: 0.55, key: "time.change", v: 1 }].concat(flips ? [{ t: 0.6, key: "time.mode", v: 1 }, { t: 1.0, key: "time.mode", v: 0 }] : []) }).L;
+  const still = render(false);
+  check(sameBits(render(true), still), "time.mode: sec -> hz -> sec flips, one inside a move in flight whose time.change was flipped, render bit-identically to none");
+  plant(!sameBits(render(true, "hzFlipIsMove"), still), "time.mode render check detects a sec <-> hz flip that lands the heads: a move in flight stops dead");
 }
 
 console.log(fail ? "lab_smoke: RED" : "lab_smoke: OK");

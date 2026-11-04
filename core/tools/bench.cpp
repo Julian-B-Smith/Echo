@@ -87,7 +87,7 @@ struct Cell {
 };
 std::vector<Cell> cells() {
   const std::vector<KV> worst = {{"route.mode", 2},  {"filt.in.on", 1},   {"filt.loop.on", 1}, {"filt.out.on", 1}, {"mod.depthMs", 20},
-                                 {"mod.shape", 1},   {"mod.spread", 100}, {"fb.amount", 120},  {"time.sync", 0},   {"time.ms", 550}};
+                                 {"mod.shape", 1},   {"mod.spread", 100}, {"fb.amount", 120},  {"time.mode", 0},   {"time.ms", 550}};
   auto with = [&](std::vector<KV> extra) {
     auto p = worst;
     p.insert(p.end(), extra.begin(), extra.end());
@@ -107,7 +107,7 @@ std::vector<Cell> cells() {
       {"auto-time",
        "the defaults, free time, time.ms under a 1 Hz full-range sine (1 ms – 12 s, linear), repitch: the head repitches while it can, and past "
        "the 12-semitone cap D-006's fallback crossfades instead (the fades and fallbacks columns)",
-       {{"time.sync", 0}, {"time.change", 0}}, Move::TimeFullRange, kBudgetWorst},
+       {{"time.mode", 0}, {"time.change", 0}}, Move::TimeFullRange, kBudgetWorst},
       {"auto-fb", "the defaults, fb.amount under a 1 Hz full-range sine (0 – 120 %)", {}, Move::FbFullRange, kBudgetWorst},
       {"morph", "blended setParam targets every block between corner A (defaults) and corner B (every continuous key 3/4 along its law), "
                 "x on a 1 Hz sine",

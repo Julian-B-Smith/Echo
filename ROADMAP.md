@@ -22,7 +22,7 @@ with HIGH findings the author's own suite had passed.
   (D-037 – D-040), T-016 on its own PR (D-041): **batch 2 done**. Batch 3's four items done
   2026-10-28 (D-042 – D-045): T-017 on PR #24 (2975c34), T-018 on PR #25 (1a78af5), T-019 on
   PR #26 (2966256), T-020 on PR #27 (985c1d1); the T-021 bank draft B3 also plans is not
-  started (the bank holds the init only). Batch 4 (T-021 finished, T-022, T-023) next; D-048 (2026-10-29) adds T-038 and T-039 ahead of T-022's face; D-049 adds T-040, T-041 and T-042 before T-023 (all three done); D-050 (2026-11-03) removes macros and `time.scale`: T-039 rewritten, T-044 and T-045 added. **M4 (the IR
+  started (the bank holds the init only). Batch 4 (T-021 finished, T-022, T-023) next; D-048 (2026-10-29) adds T-038 and T-039 ahead of T-022's face; D-049 adds T-040, T-041 and T-042 before T-023 (all three done); D-050 (2026-11-03) removes macros and `time.scale`: T-039 rewritten, T-044 and T-045 added (T-039 and T-044 done; T-046 added by D-050 A3). **M4 (the IR
   display and Echo's screen) is under way beside it** (D-027, D-030): T-030 – T-032 done (PR #15,
   PR #16); T-033 open (T-014 is on main, PR #20); T-036 (gate 4's flicker) done 2026-10-28 (D-046).
 - **Oracle:** `./verify fast` = kit integrity, leak gate, private-name gate,
@@ -190,7 +190,7 @@ commercial delay or borrow its mode names, presets or UI text.
     (all `engine.h`; T-037 added by D-035); T-016 beside them (`./verify`, tools).
   - **B3, presets and reports (11-09 → 11-20):** T-017, T-018, T-019, T-020 (tools and tests,
     disjoint files); the T-021 bank drafted.
-  - **B4, listening (11-23 → 11-27):** T-021 finished, T-022, T-023.
+  - **B4, listening (11-23 → 11-27):** T-021 finished, T-022, T-046 (before the listen, D-050 A3), T-023.
   - **B5, close (11-30 → 12-04):** T-024, T-025, T-026, T-027. A week of slack before the
     2026-12-11 cutoff.
 - **The `core/` files each batch touches** (so M4's offline renderer, D-011/D-027, lands in
@@ -1057,15 +1057,15 @@ filings need the human's go-ahead each time.
 - **Out of scope:** T-041's fixes (the fade's outgoing head is guarded by `outgoingBound`).
 
 ### T-044 — M3: Time in Sec, Hz or Sync; `time.scale` removed (D-050)
-- **Status:** in progress (2026-11-04; stacked on T-039's PR).
+- **Status:** done 2026-11-04 (stacked on T-039's PR; `traces/2026-11-04-t044-time-modes.md`).
 - **Scope:** `spec/params.json`, SPEC §1, §3, §4, §9, §11, §13, §16 (D-050 A2), `core/manifest.lock.json` and `module_version.h` (only by
   `tools/manifest_lock.py write --decision D-050`), `engine.h`, `state.h`, `params.h`, `plants.h`, `core_tests.cpp`, the
   lab and `tools/lab_smoke.mjs`, the generated presets, stereo report and admission files, the docs' counts.
 - **Acceptance criteria:**
-  1. `time.scale` is gone, with T-038's four plants and its checks, each listed in the trace. 29 keys.
+  1. `time.scale` is gone, with T-038's plants (ten by then, not four: eight deleted, two renamed) and its checks, each listed in the trace. 29 keys.
   2. `time.mode` (`sec`, `hz`, `sync`) replaces `time.sync`. Switching between `sec` and `hz` moves no read head, bit for bit
      against a run with no switch; a switch into or out of `sync` follows `time.change` and reads under the click bar at
-     four rates, as `time.sync` does today.
+     four rates, as `time.sync` does today. That is at a steady tempo: under a fast-moving one it reads over the bar at 192 kHz, as `time.sync` did; T-046 fixes that (D-050 A3).
   3. SPEC states the Hz reading of `time.ms` (Hz = 1000 / ms, 1000 - 0.083 Hz) and the time's exactness: a saved `time.ms`
      reads back bit for bit (RS-6.11).
   4. `route.mode`'s first label is `standard`; state, presets and the lab agree.
@@ -1084,6 +1084,15 @@ filings need the human's go-ahead each time.
   2. A refusal or no answer goes to the human with the options D-050 set aside; nothing is chosen for them.
   3. `./verify fast` green.
 - **Out of scope:** horde's side of it.
+
+### T-046 — M3: a move landing on a moving tempo stays under the bar (D-050 A3)
+- **Status:** open (T-044 is the base it builds on).
+- **Scope:** `engine.h` (the head's handover from a move to the tempo), SPEC §3.5 - §3.8, the lab and `tools/lab_smoke.mjs`, `plants.h`, `core_tests.cpp`.
+- **Acceptance criteria:**
+  1. T-044's critic's measurement is reproduced first: at 192 kHz, sec -> sync, tape, 120 ± 60 bpm at 1 Hz, `time.tempoMode` crossfade or follow, reads M2 3.925; a `time.div` move under ± 40 bpm up to 4.47.
+  2. `stepClick` gains rows combining a key move and a `time.mode` flip with a moving tempo, at 44.1, 48, 96 and 192 kHz, worst of 8 phases, under 2.5 with zero backstop hits. `kClickMax` does not move.
+  3. Each unfixed behaviour is a planted control its own gate catches. Every factory preset sounds as before; `./verify fast` green.
+- **Out of scope:** the time keys themselves (T-044); the row (T-045); tempo moves with no key move, already gated by `clickSweep`.
 
 ## Open questions (blocking — ask the human)
 

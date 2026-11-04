@@ -20,7 +20,7 @@ int main() {
   // A FRACTIONAL delay (90.37 ms is 4337.76 samples): at a whole-sample delay
   // every interpolation product is exact, so a fused op changes no bit and the
   // probe cannot see contraction (GCC's first CI runs: 167 fused ops, same hash).
-  for (auto [k, v] : {std::pair<const char*, double>{"time.sync", 0}, {"time.ms", 90.37}, {"time.offR", 7.3}, {"fb.amount", 70},
+  for (auto [k, v] : {std::pair<const char*, double>{"time.mode", 0}, {"time.ms", 90.37}, {"time.offR", 7.3}, {"fb.amount", 70},
                       {"mix", 60}, {"filt.in.on", 1}, {"filt.in.hpHz", 120}, {"filt.out.on", 1}, {"filt.out.lpHz", 7000}})
     e.setParam(k, v);
   const int n = 96000;
