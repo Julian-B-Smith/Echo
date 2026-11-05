@@ -20,7 +20,7 @@ namespace {
 using echo::IrInput;
 constexpr double kSr = 48000.0;
 
-const char* kModes[] = {"stereo", "ping-pong", "mid/side"};
+const char* kModes[] = {"standard", "ping-pong", "mid/side"};
 struct Stim {
   IrInput in;
   const char* name;
@@ -62,13 +62,13 @@ int main() {
       "decorrelated noise (mulberry32 seed 1, a burst of half the delay time); the S-only impulse (L = −R), which already folds to nothing\n"
       "at the input, so its rows read 0 *by construction* (Q-A4; ping-pong's mono encode removes it entirely).\n\n"
       "**The law (D-044), gated by `b408Gate` in `echo_tests`** on the equal-time patches, every generation, on the exact inputs only\n"
-      "(mono: ρ_in = 1; left, right: ρ_in = ½): stereo and mid/side keep ρ_out ≥ ρ_in; ping-pong has no cross term, ρ = ½ exactly: it\n"
+      "(mono: ρ_in = 1; left, right: ρ_in = ½): standard and mid/side keep ρ_out ≥ ρ_in; ping-pong has no cross term, ρ = ½ exactly: it\n"
       "sums the input to mono and hard-pans every repeat by design. Where ping-pong's repeats DO overlap (sustained material), its fold at\n"
       "1 kHz must equal the closed form (1 + g)² / (2 (1 + g²)), so a side inverted cannot hide. **Noise is reported, never judged:** a\n"
       "finite burst's ρ moves under the loop's filtering with no fault present, by more than any independent-sample margin (re-ruled by\n"
       "poll after the critic found 15 of 80 seeds breaking 3/(2√N)); its notches are mostly the burst's own sampling structure — read them\n"
       "against ρ_in. Offset patches are reported, not gated: an L/R offset is a requested widening.\n\n"
-      "**The colouring flag (SPEC §3.2, D-044):** raised in stereo mode exactly when 0 < |tL − tR| < 40 ms (whole microseconds). 40 ms is\n"
+      "**The colouring flag (SPEC §3.2, D-044):** raised in standard routing exactly when 0 < |tL − tR| < 40 ms (whole microseconds). 40 ms is\n"
       "a warning convention (the precedence-effect range), not a boundary this metric shows: a stereo offset combs the fold at low\n"
       "frequency at any size (see the +50 ms rows). Ping-pong's taps never coincide and mid/side's fold is exactly the M line, so an\n"
       "offset combs neither.\n";

@@ -15,14 +15,14 @@ decorrelated noise (mulberry32 seed 1, a burst of half the delay time); the S-on
 at the input, so its rows read 0 *by construction* (Q-A4; ping-pong's mono encode removes it entirely).
 
 **The law (D-044), gated by `b408Gate` in `echo_tests`** on the equal-time patches, every generation, on the exact inputs only
-(mono: ρ_in = 1; left, right: ρ_in = ½): stereo and mid/side keep ρ_out ≥ ρ_in; ping-pong has no cross term, ρ = ½ exactly: it
+(mono: ρ_in = 1; left, right: ρ_in = ½): standard and mid/side keep ρ_out ≥ ρ_in; ping-pong has no cross term, ρ = ½ exactly: it
 sums the input to mono and hard-pans every repeat by design. Where ping-pong's repeats DO overlap (sustained material), its fold at
 1 kHz must equal the closed form (1 + g)² / (2 (1 + g²)), so a side inverted cannot hide. **Noise is reported, never judged:** a
 finite burst's ρ moves under the loop's filtering with no fault present, by more than any independent-sample margin (re-ruled by
 poll after the critic found 15 of 80 seeds breaking 3/(2√N)); its notches are mostly the burst's own sampling structure — read them
 against ρ_in. Offset patches are reported, not gated: an L/R offset is a requested widening.
 
-**The colouring flag (SPEC §3.2, D-044):** raised in stereo mode exactly when 0 < |tL − tR| < 40 ms (whole microseconds). 40 ms is
+**The colouring flag (SPEC §3.2, D-044):** raised in standard routing exactly when 0 < |tL − tR| < 40 ms (whole microseconds). 40 ms is
 a warning convention (the precedence-effect range), not a boundary this metric shows: a stereo offset combs the fold at low
 frequency at any size (see the +50 ms rows). Ping-pong's taps never coincide and mid/side's fold is exactly the M line, so an
 offset combs neither.
@@ -43,21 +43,21 @@ Each in all three modes (`route.mode`), mix 100 %, the rest at the manifest defa
 
 | mode | patch | tL / tR | zone | input | ρ | dB | r | worst ⅓-octave notch | gate |
 |---|---|---|---|---|---|---|---|---|---|
-| stereo | defaults | 500.0 / 500.0 ms | — | mono impulse | 1.0000 | 0.00 | 1.0000 | flat | PASS |
-| stereo | defaults | 500.0 / 500.0 ms | — | seeded noise | 0.4996 | −3.01 | −0.0008 | −4.32 dB at 354 Hz | reported |
-| stereo | defaults | 500.0 / 500.0 ms | — | S-only impulse | 0.0000 | −∞ | −1.0000 | none: folds to nothing | ρ_in = 0: *by construction* |
-| stereo | dark | 300.0 / 300.0 ms | — | mono impulse | 1.0000 | 0.00 | 1.0000 | flat | PASS |
-| stereo | dark | 300.0 / 300.0 ms | — | seeded noise | 0.4978 | −3.03 | −0.0044 | −5.96 dB at 198 Hz | reported |
-| stereo | dark | 300.0 / 300.0 ms | — | S-only impulse | 0.0000 | −∞ | −1.0000 | none: folds to nothing | ρ_in = 0: *by construction* |
-| stereo | +1 ms | 500.0 / 501.0 ms | **in zone** | mono impulse | 0.4966 | −3.04 | −0.0068 | −9.45 dB at 500 Hz | reported |
-| stereo | +1 ms | 500.0 / 501.0 ms | **in zone** | seeded noise | 0.5113 | −2.91 | 0.0226 | −3.97 dB at 210 Hz | reported |
-| stereo | +1 ms | 500.0 / 501.0 ms | **in zone** | S-only impulse | 0.5034 | −2.98 | 0.0068 | −19.61 dB at 31 Hz | ρ_in = 0: *by construction* |
-| stereo | +20 ms | 500.0 / 520.0 ms | **in zone** | mono impulse | 0.5000 | −3.01 | 0.0000 | −8.64 dB at 74 Hz | reported |
-| stereo | +20 ms | 500.0 / 520.0 ms | **in zone** | seeded noise | 0.5072 | −2.95 | 0.0145 | −5.28 dB at 31 Hz | reported |
-| stereo | +20 ms | 500.0 / 520.0 ms | **in zone** | S-only impulse | 0.5000 | −3.01 | 0.0000 | −13.24 dB at 48 Hz | ρ_in = 0: *by construction* |
-| stereo | +50 ms | 500.0 / 550.0 ms | — | mono impulse | 0.5000 | −3.01 | 0.0000 | −7.85 dB at 31 Hz | reported |
-| stereo | +50 ms | 500.0 / 550.0 ms | — | seeded noise | 0.4972 | −3.03 | −0.0056 | −6.42 dB at 96 Hz | reported |
-| stereo | +50 ms | 500.0 / 550.0 ms | — | S-only impulse | 0.5000 | −3.01 | 0.0000 | −7.99 dB at 39 Hz | ρ_in = 0: *by construction* |
+| standard | defaults | 500.0 / 500.0 ms | — | mono impulse | 1.0000 | 0.00 | 1.0000 | flat | PASS |
+| standard | defaults | 500.0 / 500.0 ms | — | seeded noise | 0.4996 | −3.01 | −0.0008 | −4.32 dB at 354 Hz | reported |
+| standard | defaults | 500.0 / 500.0 ms | — | S-only impulse | 0.0000 | −∞ | −1.0000 | none: folds to nothing | ρ_in = 0: *by construction* |
+| standard | dark | 300.0 / 300.0 ms | — | mono impulse | 1.0000 | 0.00 | 1.0000 | flat | PASS |
+| standard | dark | 300.0 / 300.0 ms | — | seeded noise | 0.4978 | −3.03 | −0.0044 | −5.96 dB at 198 Hz | reported |
+| standard | dark | 300.0 / 300.0 ms | — | S-only impulse | 0.0000 | −∞ | −1.0000 | none: folds to nothing | ρ_in = 0: *by construction* |
+| standard | +1 ms | 500.0 / 501.0 ms | **in zone** | mono impulse | 0.4966 | −3.04 | −0.0068 | −9.45 dB at 500 Hz | reported |
+| standard | +1 ms | 500.0 / 501.0 ms | **in zone** | seeded noise | 0.5113 | −2.91 | 0.0226 | −3.97 dB at 210 Hz | reported |
+| standard | +1 ms | 500.0 / 501.0 ms | **in zone** | S-only impulse | 0.5034 | −2.98 | 0.0068 | −19.61 dB at 31 Hz | ρ_in = 0: *by construction* |
+| standard | +20 ms | 500.0 / 520.0 ms | **in zone** | mono impulse | 0.5000 | −3.01 | 0.0000 | −8.64 dB at 74 Hz | reported |
+| standard | +20 ms | 500.0 / 520.0 ms | **in zone** | seeded noise | 0.5072 | −2.95 | 0.0145 | −5.28 dB at 31 Hz | reported |
+| standard | +20 ms | 500.0 / 520.0 ms | **in zone** | S-only impulse | 0.5000 | −3.01 | 0.0000 | −13.24 dB at 48 Hz | ρ_in = 0: *by construction* |
+| standard | +50 ms | 500.0 / 550.0 ms | — | mono impulse | 0.5000 | −3.01 | 0.0000 | −7.85 dB at 31 Hz | reported |
+| standard | +50 ms | 500.0 / 550.0 ms | — | seeded noise | 0.4972 | −3.03 | −0.0056 | −6.42 dB at 96 Hz | reported |
+| standard | +50 ms | 500.0 / 550.0 ms | — | S-only impulse | 0.5000 | −3.01 | 0.0000 | −7.99 dB at 39 Hz | ρ_in = 0: *by construction* |
 | ping-pong | defaults | 500.0 / 500.0 ms | — | mono impulse | 0.5000 | −3.01 | 0.0000 | −3.11 dB at 37 Hz | PASS |
 | ping-pong | defaults | 500.0 / 500.0 ms | — | seeded noise | 0.5000 | −3.01 | 0.0000 | −3.20 dB at 68 Hz | reported |
 | ping-pong | defaults | 500.0 / 500.0 ms | — | S-only impulse | silent | silent | silent | silent | ρ_in = 0: *by construction* |
@@ -96,14 +96,14 @@ the law reads **FAIL**); the noise rows are reported only.
 
 | mode | patch | input | ρ_in | g1 | g2 | g3 | g4 | g5 | g6 | g7 | g8 | law |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| stereo | defaults | mono impulse | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | ≥ ρ_in |
-| stereo | defaults | left impulse | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | ≥ ρ_in |
-| stereo | defaults | right impulse | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | ≥ ρ_in |
-| stereo | defaults | seeded noise | 0.4988 | 0.4994 | 0.5012 | 0.5025 | 0.5033 | 0.5036 | 0.5037 | 0.5037 | 0.5036 | reported |
-| stereo | dark | mono impulse | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | ≥ ρ_in |
-| stereo | dark | left impulse | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | ≥ ρ_in |
-| stereo | dark | right impulse | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | ≥ ρ_in |
-| stereo | dark | seeded noise | 0.4968 | 0.4991 | 0.4965 | 0.4943 | 0.4927 | 0.4914 | 0.4903 | 0.4891 | 0.4880 | reported |
+| standard | defaults | mono impulse | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | ≥ ρ_in |
+| standard | defaults | left impulse | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | ≥ ρ_in |
+| standard | defaults | right impulse | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | ≥ ρ_in |
+| standard | defaults | seeded noise | 0.4988 | 0.4994 | 0.5012 | 0.5025 | 0.5033 | 0.5036 | 0.5037 | 0.5037 | 0.5036 | reported |
+| standard | dark | mono impulse | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 | ≥ ρ_in |
+| standard | dark | left impulse | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | ≥ ρ_in |
+| standard | dark | right impulse | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | ≥ ρ_in |
+| standard | dark | seeded noise | 0.4968 | 0.4991 | 0.4965 | 0.4943 | 0.4927 | 0.4914 | 0.4903 | 0.4891 | 0.4880 | reported |
 | ping-pong | defaults | mono impulse | 1.0000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | ½, no cross term |
 | ping-pong | defaults | left impulse | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | ½, no cross term |
 | ping-pong | defaults | right impulse | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | 0.5000 | ½, no cross term |
@@ -125,16 +125,16 @@ the law reads **FAIL**); the noise rows are reported only.
 
 | mode | patch | input | 31.5 | 63 | 125 | 250 | 500 | 1k | 2k | 4k | 8k | 16k |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| stereo | defaults | mono impulse | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |
-| stereo | defaults | seeded noise | −2.50 | −2.18 | −2.45 | −3.08 | −3.19 | −2.85 | −3.10 | −2.87 | −3.13 | −3.03 |
-| stereo | dark | mono impulse | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |
-| stereo | dark | seeded noise | −3.26 | −1.64 | −2.50 | −3.39 | −3.37 | −2.88 | −3.10 | −2.84 | −3.11 | −2.84 |
-| stereo | +1 ms | mono impulse | −0.06 | −0.26 | −1.05 | −3.78 | −7.71 | −1.95 | −3.65 | −2.94 | −2.82 | −3.17 |
-| stereo | +1 ms | seeded noise | −2.61 | −2.47 | −3.01 | −3.05 | −2.87 | −2.89 | −3.10 | −2.84 | −2.83 | −3.07 |
-| stereo | +20 ms | mono impulse | −4.06 | −3.74 | −2.80 | −2.90 | −2.98 | −3.01 | −3.04 | −3.00 | −3.01 | −3.02 |
-| stereo | +20 ms | seeded noise | −2.11 | −2.92 | −3.21 | −2.82 | −2.90 | −2.83 | −2.93 | −3.03 | −2.90 | −3.00 |
-| stereo | +50 ms | mono impulse | −2.40 | −3.05 | −3.20 | −3.01 | −2.96 | −3.04 | −3.00 | −3.02 | −3.01 | −3.01 |
-| stereo | +50 ms | seeded noise | −2.28 | −2.46 | −2.89 | −2.24 | −2.61 | −3.11 | −2.86 | −3.26 | −3.05 | −2.97 |
+| standard | defaults | mono impulse | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |
+| standard | defaults | seeded noise | −2.50 | −2.18 | −2.45 | −3.08 | −3.19 | −2.85 | −3.10 | −2.87 | −3.13 | −3.03 |
+| standard | dark | mono impulse | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |
+| standard | dark | seeded noise | −3.26 | −1.64 | −2.50 | −3.39 | −3.37 | −2.88 | −3.10 | −2.84 | −3.11 | −2.84 |
+| standard | +1 ms | mono impulse | −0.06 | −0.26 | −1.05 | −3.78 | −7.71 | −1.95 | −3.65 | −2.94 | −2.82 | −3.17 |
+| standard | +1 ms | seeded noise | −2.61 | −2.47 | −3.01 | −3.05 | −2.87 | −2.89 | −3.10 | −2.84 | −2.83 | −3.07 |
+| standard | +20 ms | mono impulse | −4.06 | −3.74 | −2.80 | −2.90 | −2.98 | −3.01 | −3.04 | −3.00 | −3.01 | −3.02 |
+| standard | +20 ms | seeded noise | −2.11 | −2.92 | −3.21 | −2.82 | −2.90 | −2.83 | −2.93 | −3.03 | −2.90 | −3.00 |
+| standard | +50 ms | mono impulse | −2.40 | −3.05 | −3.20 | −3.01 | −2.96 | −3.04 | −3.00 | −3.02 | −3.01 | −3.01 |
+| standard | +50 ms | seeded noise | −2.28 | −2.46 | −2.89 | −2.24 | −2.61 | −3.11 | −2.86 | −3.26 | −3.05 | −2.97 |
 | ping-pong | defaults | mono impulse | −3.02 | −2.99 | −3.00 | −3.02 | −3.01 | −3.01 | −3.01 | −3.01 | −3.01 | −3.01 |
 | ping-pong | defaults | seeded noise | −3.04 | −3.00 | −3.00 | −3.02 | −3.01 | −3.01 | −3.01 | −3.01 | −3.01 | −3.01 |
 | ping-pong | dark | mono impulse | −2.78 | −3.00 | −2.99 | −3.02 | −3.00 | −3.01 | −3.01 | −3.01 | −3.01 | −3.01 |

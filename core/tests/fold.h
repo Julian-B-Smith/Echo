@@ -39,7 +39,7 @@ using Vec = std::vector<double>;
 inline constexpr double kPi = 3.14159265358979323846;
 
 // The colouring zone (SPEC §3.2's "about 40 ms", ruled a strict 40 ms and
-// STEREO MODE ONLY by D-044: measured, ping-pong's taps never coincide and
+// standard routing only by D-044: measured, ping-pong's taps never coincide and
 // mid/side's fold is exactly the M line, so neither combs under an offset).
 // 40 ms is a WARNING CONVENTION (the precedence-effect range), not a boundary
 // this metric shows: a stereo offset combs the fold at low frequency at any
@@ -54,7 +54,7 @@ inline constexpr int kGridPerOctave = 24;
 inline constexpr int kMaxGenerations = 8;
 inline constexpr double kGenFloor = 1e-12;  // a generation below gen 1 by 120 dB is not read
 
-inline constexpr int kStereo = 0, kPingPong = 1, kMidSide = 2;  // route.mode's steps (SPEC §4)
+inline constexpr int kStandard = 0, kPingPong = 1, kMidSide = 2;  // route.mode's steps (SPEC §4)
 
 // ---- the energies ----------------------------------------------------------
 struct Energy {
@@ -249,14 +249,14 @@ inline double foldAt(const Vec& L, const Vec& R, double f, double sr) {
 }
 inline double pingPongFoldClosedForm(double g) { return (1 + g) * (1 + g) / (2 * (1 + g * g)); }
 
-// The colouring flag (SPEC §3.2 as ruled, D-044): stereo mode, the two resolved
+// The colouring flag (SPEC §3.2 as ruled, D-044): standard routing, the two resolved
 // times different and under 40 ms apart. Compared in whole microseconds: the
 // difference of two times already rounded to doubles lands either side of 40 ms
 // by an ulp (0.29 - 0.25 < 0.04 < 0.54 - 0.5; critic T-019 L1), so "exactly
 // 40 ms" would flag or not by accident.
 inline bool colouringZone(int mode, double tL, double tR) {
   const long us = std::lround(std::fabs(tL - tR) * 1e6);
-  if (!echo::plant::zoneAnyMode && mode != kStereo) return false;
+  if (!echo::plant::zoneAnyMode && mode != kStandard) return false;
   return (echo::plant::zoneAtEqual || us > 0) && us < kZoneUs;
 }
 
@@ -323,7 +323,7 @@ inline std::vector<NamedPatch> reportPatches() {
   return {
       {"defaults", "the manifest defaults: 1/4 synced at 120 bpm (500 ms), feedback 35 %, loop filter 60 Hz – 9 kHz", patchWith({}), true},
       {"dark", "300 ms free, feedback 70 %, loop low-pass 3 kHz, output filter on at 200 Hz – 6 kHz, 2 ms of sine modulation (spread 0)",
-       patchWith({{"time.sync", 0}, {"time.ms", 300}, {"fb.amount", 70}, {"filt.loop.lpHz", 3000}, {"filt.out.on", 1}, {"filt.out.hpHz", 200},
+       patchWith({{"time.mode", 0}, {"time.ms", 300}, {"fb.amount", 70}, {"filt.loop.lpHz", 3000}, {"filt.out.on", 1}, {"filt.out.hpHz", 200},
                   {"filt.out.lpHz", 6000}, {"mod.depthMs", 2}}),
        true},
       {"+1 ms", "the defaults with time.offR +0.2 %: the right line 1 ms later (inside the colouring zone)", patchWith({{"time.offR", 0.2}}), false},

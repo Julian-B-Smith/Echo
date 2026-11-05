@@ -206,6 +206,7 @@ const ECHO_DIVS = [
 // a seeded jump — the state that starts running is seeded from the value being
 // applied, so the value does not step and only its slope changes).
 const SW_TIME = "moves the read head: repitch = seeded jump of the read position (continuous, slope within the law's cap); crossfade = equal-gain crossfade, time.xfadeMs; jump = equal-gain crossfade, 3 ms";
+const SW_TIME_MODE = SW_TIME + "; deferred: a flip between sec and hz moves nothing: both read one time.ms and no signal-path state switches";
 const SW_DEFER = "deferred: no signal-path state switches at the flip; applies from the next time move";
 const SW_XF20 = "equal-gain crossfade, 20 ms";
 
@@ -220,7 +221,7 @@ const ECHO_PARAMS = [
   P("io.inGain", "Input Gain", "dB", "scalar", -24, 24, 0, "device", "io", "gain"),
   P("io.outGain", "Output Gain", "dB", "scalar", -24, 24, 0, "device", "io", "gain"),
   P("mix", "Mix", "%", "scalar", 0, 100, 30, "continuous", "lin", "gain"),
-  P("time.sync", "Sync", "", "stepped", 0, 1, 1, "jump", "step", "time", ["free", "sync"], SW_TIME),
+  P("time.mode", "Time Mode", "", "stepped", 0, 2, 2, "jump", "step", "time", ["sec", "hz", "sync"], SW_TIME_MODE),
   P("time.ms", "Time", "ms", "scalar", 1, 12000, 375, "continuous", "log", "time"),
   P("time.div", "Division", "", "stepped", 0, ECHO_DIVS.length - 1, 9, "jump", "step", "time", ECHO_DIVS.map(d => d[0]), SW_TIME),
   P("time.offL", "Left Offset", "%", "scalar", -50, 50, 0, "continuous", "lin", "time"),
@@ -231,7 +232,7 @@ const ECHO_PARAMS = [
   P("time.glide", "Glide", "s", "scalar", 0.01, 5, 0.3, "continuous", "log", "law"),
   P("time.xfadeMs", "Crossfade", "ms", "scalar", 2, 500, 60, "continuous", "log", "law"),
   P("fb.amount", "Feedback", "%", "scalar", 0, 120, 35, "continuous", "lin", "gain"),
-  P("route.mode", "Routing", "", "stepped", 0, 2, 0, "jump", "step", "crossfade", ["stereo", "pingpong", "midside"], SW_XF20),
+  P("route.mode", "Routing", "", "stepped", 0, 2, 0, "jump", "step", "crossfade", ["standard", "pingpong", "midside"], SW_XF20),
   P("filt.in.on", "Input Filter", "", "stepped", 0, 1, 0, "jump", "step", "crossfade", ["off", "on"], SW_XF20),
   P("filt.in.hpHz", "Input Low Cut", "Hz", "scalar", 20, 2000, 20, "continuous", "log", "filter"),
   P("filt.in.lpHz", "Input High Cut", "Hz", "scalar", 500, 20000, 20000, "continuous", "log", "filter"),
@@ -248,7 +249,6 @@ const ECHO_PARAMS = [
   P("mod.spread", "Mod Spread", "%", "scalar", 0, 100, 0, "continuous", "lin", "mod"),
   P("mod.seed", "Mod Seed", "", "stepped", 0, 65535, 1, "jump", "step", "mod", null,
     "seeded jump (contract §12.2): the new streams start from the value being applied"),
-  P("time.scale", "Time Scale", "×", "scalar", 0.25, 4, 1, "continuous", "log", "time"),   // T-038, D-048: appended
 ];
 const ECHO_PARAM_INDEX = Object.fromEntries(ECHO_PARAMS.map((p, i) => [p.key, i]));
 const EI = ECHO_PARAM_INDEX;
@@ -303,8 +303,8 @@ const LAB_DEFAULTS = {
 const ECHO_LAWS = ["varispeed", "logpole"];          // time.law: tape, exponential (Q-A1, D-015)
 const ECHO_TEMPO = ["xfade", "glide", "capped"];      // time.tempoMode: crossfade, glide, follow (Q-A2, D-015)
 
-// Routing (spec §4). Line 0 / line 1 carry L / R (stereo, ping-pong) or M / S
-// (mid/side, M = (L+R)/2, so a mono input runs the M line at the stereo mode's
+// Routing (spec §4). Line 0 / line 1 carry L / R (standard, ping-pong) or M / S
+// (mid/side, M = (L+R)/2, so a mono input runs the M line at standard routing's
 // level and meets the ceiling at the same input level). Ping-pong sums the
 // input to mono into line 0 and crosses the feedback. Mid/side never crosses M
 // and S, so its mono fold IS the M line's output (Q-A4, by construction).
@@ -420,13 +420,30 @@ class EchoLab {
   }
 
   _applied(key, v) {
-    if (key === "time.sync" || key === "time.ms" || key === "time.div" || key === "time.offL" || key === "time.offR") {
-      this.timeDirty = true; this.paramMoved = true;
-    } else if (key === "time.scale") {
-      // A scale send is a control move only if it MOVES a time (SPEC §3.5, D-048): a re-sent value, or a synced
-      // scale staying inside one octave's snap band, moves nothing and must not re-latch a tempo move in flight.
+    if (key === "time.ms" || key === "time.div" || key === "time.offL" || key === "time.offR" || key === "time.mode") {
+      // A time key's send is a control move only if it MOVES a time (SPEC §3.5, D-050), as the engine does: a re-sent value,
+      // time.ms while synced (stored, not read), and a flip between sec and hz (one stored time.ms) move nothing, and must not
+      // re-latch a move in flight (a move is latched to the time.change in force when it starts; a tempo move landing in the same
+      // sample would follow time.change instead of time.tempoMode). The plants: keyResendIsMove restores the unconditional mark on
+      // the four value keys; hzFlipIsMove lands the heads on a flip that moves nothing; modeFlipSwallowed marks no flip out of sync
+      // a move, modeFlipIntoSyncSwallowed none into sync; modeFlipAlwaysMove marks every flip.
+      const plantName = this.lab.plant;
       const t = this._timesNow(this.bpm);
-      if (t[0] !== this.Tt[0] || t[1] !== this.Tt[1]) { this.timeDirty = true; this.paramMoved = true; }
+      const moved = t[0] !== this.Tt[0] || t[1] !== this.Tt[1];
+      this.timeDirty = true;  // always: a send that moves no time can still change the fold flag, as the engine resolves on every send
+      if (key !== "time.mode") {
+        if (moved || plantName === "keyResendIsMove") this.paramMoved = true;
+      } else if (plantName === "hzFlipIsMove" && !moved) {          // the plant: a flip that moves nothing lands the heads at once (a bare jump)
+        for (let k = 0; k < 2; k++) {
+          const h = this.heads[k];
+          Object.assign(h, this._newHead());
+          h.D = h.T = h.dA = h.dB = h.lastPos = h.statPos = this.Tt[k]; h.vA = 0;
+          this._tapeRebuild(k, h);
+        }
+      } else {
+        const swallowed = plantName === (v === 2 ? "modeFlipIntoSyncSwallowed" : "modeFlipSwallowed");
+        if (!swallowed && (moved || plantName === "modeFlipAlwaysMove")) this.paramMoved = true;
+      }
     } else if (key === "route.mode") {
       this.routeFrom = this.routeTo; this.routeTo = v; this.routeW = this.lab.plant === "instantSwitch" ? 1 : 0;
       if (this.routeW === 1) this.routeFrom = v;
@@ -504,30 +521,17 @@ class EchoLab {
     this.resetStats();
   }
 
-  // ---- time resolution: base x scale x (1 + offset), the 12 s clamp -------
-  // time.scale (D-048) multiplies the base BEFORE the offsets and the clamp:
-  // free, the value itself; synced, the nearest octave. Synced times past the
-  // line FOLD by halving, BOTH lines together so the L/R ratio survives (the
-  // `folded` flag is for the display). Free times clamp. Both clamp below at
-  // minDelayS. Spec §3.4. _resolveBoth also refreshes the declared tail, which
-  // depends on the times, the feedback and the depth.
-  //
-  // The octave snap, exactly as the C++ (engine.h timeScale): the boundaries
-  // 2^(k + 1/2) are irrational, so no double sits on one; the double nearest
-  // each (SQRT2 x 2^k) lies just ABOVE it and snaps up. s = m x 2^e with
-  // m in [1, 2) and the boundary at m = SQRT2 whatever the octave. Not
-  // round(log2 s): log2 of the double nearest 2^-1.5 is exactly -1.5, which
-  // rounds to the wrong octave (critic T-038 L1).
-  _octaveScale(s) {
-    let e = Math.floor(Math.log2(s));            // an estimate, fixed up exactly below
-    if (Math.pow(2, e) > s) e--; else if (Math.pow(2, e + 1) <= s) e++;
-    return Math.pow(2, s / Math.pow(2, e) >= Math.SQRT2 ? e + 1 : e);
-  }
+  // ---- time resolution: base x (1 + offset), the 12 s clamp ----------------
+  // Sec and hz read the same time.ms (Hz = 1000 / ms, SPEC §3.1), so only the synced test appears here. Synced times past
+  // the line FOLD by halving, BOTH lines together so the L/R ratio survives (the `folded` flag is for the display). Free times
+  // clamp. Both clamp below at minDelayS. Spec §3.4. _resolveBoth also refreshes the declared tail, which depends on the
+  // times, the feedback and the depth.
+  // The synced test: time.mode == sync. The plant hzCountsAsSync reads the old >= 0.5, so hz plays the division.
+  _synced() { return this.lab.plant === "hzCountsAsSync" ? this.p[EI["time.mode"]] >= 0.5 : this.p[EI["time.mode"]] === 2; }
   // The resolved times in samples for this tempo: [L, R, folded]. Pure: _resolveBoth lands them.
   _timesNow(bpm) {
-    const p = this.p, sync = p[EI["time.sync"]] === 1;
-    const scale = sync ? this._octaveScale(p[EI["time.scale"]]) : p[EI["time.scale"]];
-    const base = (sync ? ECHO_DIVS[p[EI["time.div"]]][1] * 60 / (bpm > 1 ? bpm : 120) : p[EI["time.ms"]] / 1000) * scale;
+    const p = this.p, sync = this._synced();
+    const base = sync ? ECHO_DIVS[p[EI["time.div"]]][1] * 60 / (bpm > 1 ? bpm : 120) : p[EI["time.ms"]] / 1000;
     let tL = base * (1 + p[EI["time.offL"]] / 100), tR = base * (1 + p[EI["time.offR"]] / 100);
     let folded = false;
     if (sync) while (Math.max(tL, tR) > ECHO_K.maxDelayS) { tL *= 0.5; tR *= 0.5; folded = true; }
@@ -910,7 +914,7 @@ class EchoLab {
     const bpmStart = this.bpmPrev;
     const fin = this.filters[0], floop = this.filters[1], fout = this.filters[2];
     const L0 = this.line[0], L1 = this.line[1], dc = this.dc, smV = this.smV;
-    const syncOn = this.p[EI["time.sync"]] === 1;
+    const syncOn = this._synced();
     for (let i = 0; i < n; i++) {
       // input, guarded (RS-7.9: every repair is counted and latched)
       let xL = inL[i], xR = inR[i];
@@ -1207,7 +1211,7 @@ function echoQA1Spec(moveIdx, source, sr, opts) {
   if (t2 !== null) events.push({ t: t2, key: "time.ms", v: a * 1000 });
   return {
     sr, seconds: secs, srcL: src,
-    params: Object.assign({ "time.sync": 0, "time.ms": a * 1000, "fb.amount": opts.fb, mix: opts.mix, "filt.loop.on": 0,
+    params: Object.assign({ "time.mode": 0, "time.ms": a * 1000, "fb.amount": opts.fb, mix: opts.mix, "filt.loop.on": 0,
                             "time.glide": opts.glide }, opts.params || {}),
     lab: Object.assign({ capSt: opts.capSt, fallback: opts.fallback }, opts.lab || {}),
     events, trace: true,
@@ -1232,7 +1236,7 @@ function echoQA2Spec(tempoIdx, divIdx, source, sr, opts) {
   const n = Math.ceil(secs * sr / 128) * 128;
   return {
     sr, seconds: secs, srcL: echoSource(source, sr, n), bpmAt,
-    params: Object.assign({ "time.sync": 1, "time.div": ECHO_QA2_DIVS[divIdx][1], "fb.amount": opts.fb, mix: opts.mix,
+    params: Object.assign({ "time.mode": 2, "time.div": ECHO_QA2_DIVS[divIdx][1], "fb.amount": opts.fb, mix: opts.mix,
                             "filt.loop.on": opts.fb > 0 ? 1 : 0, "time.glide": opts.glide }, opts.params || {}),
     lab: Object.assign({ capSt: opts.capSt }, opts.lab || {}), trace: true,
   };
@@ -1255,10 +1259,10 @@ function echoQA5Spec(matIdx, source, sr, opts) {
   const secs = ECHO_QA5_MAT[matIdx][1], n = Math.ceil(secs * sr / 128) * 128, events = [];
   let params;
   if (matIdx === 0) {
-    params = { "time.sync": 1, "time.div": 9 };
+    params = { "time.mode": 2, "time.div": 9 };
     [10, 14, 12, 9, 10].forEach((d, i) => events.push({ t: 1.5 * (i + 1), key: "time.div", v: d }));
   } else {
-    params = { "time.sync": 0, "time.ms": 300 };
+    params = { "time.mode": 0, "time.ms": 300 };
     for (let t = 1; t < secs; t += 0.01) events.push({ t, key: "time.ms", v: 300 + 150 * Math.sin(2 * Math.PI * (t - 1)) });
   }
   return { sr, seconds: secs, srcL: echoSource(source, sr, n),

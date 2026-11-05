@@ -213,7 +213,7 @@ using Detail = std::string;
 // Time accuracy (SPEC §3, D-004): a whole-sample time lands every repeat on its
 // sample; the read's centroid equals the delay, whole or fractional.
 bool timeAccuracy(Detail& d) {
-  auto e = mk({{"filt.loop.on", 0}, {"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 50}, {"mix", 100}});
+  auto e = mk({{"filt.loop.on", 0}, {"time.mode", 0}, {"time.ms", 100}, {"fb.amount", 50}, {"mix", 100}});
   const auto o = run(*e, impulse(S(0.6), 0, 0.5), zeros(S(0.6)));
   for (int k = 1; k <= 5; ++k) {
     long arg = 0;
@@ -223,7 +223,7 @@ bool timeAccuracy(Detail& d) {
     REQUIRE(arg == k * 4800, "repeat %d at sample %ld, expected %d", k, arg, k * 4800);
   }
   for (double D : {4800.0, 4800.25, 4800.5, 4800.75}) {
-    auto f = mk({{"filt.loop.on", 0}, {"time.sync", 0}, {"time.ms", D / 48.0}, {"fb.amount", 0}, {"mix", 100}});
+    auto f = mk({{"filt.loop.on", 0}, {"time.mode", 0}, {"time.ms", D / 48.0}, {"fb.amount", 0}, {"mix", 100}});
     const auto q = run(*f, impulse(S(0.12)), zeros(S(0.12)));
     double s0 = 0, s1 = 0;
     for (long i = 4790; i < 4812; ++i) { s0 += q.L[i]; s1 += i * q.L[i]; }
@@ -237,7 +237,7 @@ bool timeAccuracy(Detail& d) {
 // At all four rates: the DC blocker's pole comes from 5 Hz at THAT rate.
 bool generationRatio(Detail& d) {
   for (double sr : {44100.0, 48000.0, 96000.0, 192000.0}) {
-    auto e = mk({{"filt.loop.on", 0}, {"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 50}, {"mix", 100}}, sr);
+    auto e = mk({{"filt.loop.on", 0}, {"time.mode", 0}, {"time.ms", 100}, {"fb.amount", 50}, {"mix", 100}}, sr);
     const long D = std::lround(0.1 * sr);
     const auto o = run(*e, impulse(8 * D, 0, 0.5), zeros(8 * D));
     const double R = std::exp(-2 * kPi * 5.0 / sr), g = 0.5;
@@ -259,7 +259,7 @@ bool ceilingLaw(Detail& d) {
   auto law = [](double x) { const double a = std::fabs(x); const double y = a <= 0.9 ? a : 0.9 + 0.1 * std::tanh((a - 0.9) / 0.1); return x < 0 ? -y : y; };
   const double cases[][2] = {{0.5, 1.2}, {0.95, 1.0}, {1.0, 1.2}, {-1.5, 1.0}, {0.8, 1.1}};
   for (const auto& c : cases) {
-    auto e = mk({{"filt.loop.on", 0}, {"time.sync", 0}, {"time.ms", 100}, {"fb.amount", c[1] * 100}, {"mix", 100}});
+    auto e = mk({{"filt.loop.on", 0}, {"time.mode", 0}, {"time.ms", 100}, {"fb.amount", c[1] * 100}, {"mix", 100}});
     const auto o = run(*e, impulse(S(0.25), 0, c[0]), zeros(S(0.25)));
     const double want = static_cast<float>(gn * law(c[1] * c[0]));
     REQUIRE(std::fabs(o.L[9600] - want) <= 1e-6 * std::fabs(want), "a=%.2f g=%.2f: generation 2 is %.7f, the law gives %.7f", c[0], c[1], o.L[9600], want);
@@ -272,7 +272,7 @@ bool ceilingLaw(Detail& d) {
 // and it does not die.
 bool ceilingPastUnity(Detail& d) {
   {
-    auto e = mk({{"time.sync", 0}, {"time.ms", 150}, {"fb.amount", 120}, {"mix", 100}});
+    auto e = mk({{"time.mode", 0}, {"time.ms", 150}, {"fb.amount", 120}, {"mix", 100}});
     Vec in = zeros(S(6));
     for (long i = 0; i < S(0.1); ++i) in[i] = 0.9;
     run(*e, in, in);
@@ -281,7 +281,7 @@ bool ceilingPastUnity(Detail& d) {
     REQUIRE(pk > 0.5, "the held loop died (line peak %.3f)", pk);
   }
   {
-    auto e = mk({{"time.sync", 0}, {"time.ms", 150}, {"fb.amount", 120}, {"mix", 100}});
+    auto e = mk({{"time.mode", 0}, {"time.ms", 150}, {"fb.amount", 120}, {"mix", 100}});
     Vec in(S(4));
     for (long i = 0; i < S(4); ++i) in[i] = ((i / 480) % 2) ? -0.9 : 0.9;  // a 50 Hz square
     run(*e, in, in);
@@ -294,7 +294,7 @@ bool ceilingPastUnity(Detail& d) {
 // Nothing limits the dry path (ADR-142): at mix 0 the output is the input
 // exactly, at any level and feedback.
 bool dryPathExact(Detail& d) {
-  auto e = mk({{"fb.amount", 120}, {"mix", 0}, {"time.sync", 0}, {"time.ms", 50}});
+  auto e = mk({{"fb.amount", 120}, {"mix", 0}, {"time.mode", 0}, {"time.ms", 50}});
   Vec in = sine(S(1), 220, 3.0);
   in[100] = 7.5;
   const auto o = run(*e, in, in);
@@ -304,7 +304,7 @@ bool dryPathExact(Detail& d) {
 
 // Mix 100 % is exactly the wet: nothing sounds before the first repeat (§8).
 bool mixFullNoDry(Detail& d) {
-  auto e = mk({{"mix", 100}, {"time.sync", 0}, {"time.ms", 100}});
+  auto e = mk({{"mix", 100}, {"time.mode", 0}, {"time.ms", 100}});
   const auto o = run(*e, sine(S(0.2), 300, 0.5), sine(S(0.2), 300, 0.5));
   REQUIRE(maxAbs(o.L, 0, 4798) == 0.0, "dry leak at mix 100: %.3g before the first repeat", maxAbs(o.L, 0, 4798));
   return true;
@@ -316,8 +316,8 @@ bool trueBypass(Detail& d) {
   g_rng = 7;
   Vec in(S(1));
   for (auto& v : in) v = 0.5 * noise();
-  auto a = mk({{"filt.in.on", 0}, {"filt.loop.on", 0}, {"filt.out.on", 0}, {"fb.amount", 60}, {"mix", 70}, {"time.sync", 0}});
-  auto b = mk({{"filt.in.on", 0}, {"filt.loop.on", 0}, {"filt.out.on", 0}, {"fb.amount", 60}, {"mix", 70}, {"time.sync", 0},
+  auto a = mk({{"filt.in.on", 0}, {"filt.loop.on", 0}, {"filt.out.on", 0}, {"fb.amount", 60}, {"mix", 70}, {"time.mode", 0}});
+  auto b = mk({{"filt.in.on", 0}, {"filt.loop.on", 0}, {"filt.out.on", 0}, {"fb.amount", 60}, {"mix", 70}, {"time.mode", 0},
                {"filt.in.hpHz", 2000}, {"filt.in.lpHz", 500}, {"filt.loop.hpHz", 2000}, {"filt.loop.lpHz", 500},
                {"filt.out.hpHz", 2000}, {"filt.out.lpHz", 500}});
   const auto oa = run(*a, in, in), ob = run(*b, in, in);
@@ -337,7 +337,7 @@ bool loopBound(Detail& d) {
   for (double sr : {44100.0, 48000.0, 96000.0, 192000.0}) {
     for (const auto& c : cases) {
       const double D = std::round(0.5 * sr) + c.frac;
-      auto e = mk({{"time.sync", 0}, {"time.ms", D / sr * 1000.0}, {"fb.amount", 100}, {"mix", 100},
+      auto e = mk({{"time.mode", 0}, {"time.ms", D / sr * 1000.0}, {"fb.amount", 100}, {"mix", 100},
                    {"filt.loop.on", c.on ? 1.0 : 0.0}, {"filt.loop.hpHz", c.hp}, {"filt.loop.lpHz", c.lp}}, sr);
       const long n = static_cast<long>(3.2 * D);
       const auto o = run(*e, impulse(n, 0, 0.25), zeros(n));
@@ -377,7 +377,7 @@ bool srIndependence(Detail& d) {
     const long n = S(0.25, sr);
     const long D = std::lround(0.1 * sr);
     {  // time: unfiltered, so the peak IS the delay (a low-pass moves a filtered peak)
-      auto t = mk({{"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 0}, {"mix", 100}, {"filt.loop.on", 0}}, sr);
+      auto t = mk({{"time.mode", 0}, {"time.ms", 100}, {"fb.amount", 0}, {"mix", 100}, {"filt.loop.on", 0}}, sr);
       const auto ot = run(*t, impulse(n), zeros(n));
       long arg = 0;
       double m = -1;
@@ -385,7 +385,7 @@ bool srIndependence(Detail& d) {
         if (std::fabs(ot.L[i]) > m) { m = std::fabs(ot.L[i]); arg = i; }
       REQUIRE(arg == D && ot.L[D] == 1.0, "at %.0f Hz the repeat lands at %ld (%.6f), expected %ld", sr, arg, ot.L[arg], D);
     }
-    auto e = mk({{"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 0}, {"mix", 100}, {"filt.loop.on", 1},
+    auto e = mk({{"time.mode", 0}, {"time.ms", 100}, {"fb.amount", 0}, {"mix", 100}, {"filt.loop.on", 1},
                  {"filt.loop.hpHz", 20}, {"filt.loop.lpHz", 2000}}, sr);
     const auto o = run(*e, impulse(n), zeros(n));
     for (int j = 0; j < 4; ++j) {
@@ -419,22 +419,24 @@ bool blockIndependence(Detail& d) {
                               // (blocks are cut at every event, so the event itself starts a block) time.ms 20 turns it over cap to
                               // cap, 1.5 units = ~7 bound samples at 48 kHz: patterns 1 and 7 cut inside that span, the random ones too.
                               set(68600, "time.ms", 1500), set(69300, "time.ms", 20),
-                              // time.scale (T-038): moves while free, then while synced (x2.2 snaps to x2, x0.45 to x1/2)
-                              set(14000, "time.scale", 1.7), set(36000, "time.scale", 0.6), set(56000, "time.sync", 1),
-                              set(57000, "time.scale", 2.2), set(62500, "time.scale", 0.45),
-                              // back to free and repitch, so the 68000 / 68001 pair is a live exponential-law move
+                              // time.mode (T-044, D-050): sec <-> hz flips move nothing (14000, 36000), a flip into sync moves
+                              // the time (56000), a division change while synced moves it (57000, 62500), and a flip out of sync
+                              // into hz moves it again (64500); hz -> sec at 67000 moves nothing
+                              set(14000, "time.mode", 1), set(36000, "time.mode", 0), set(56000, "time.mode", 2),
+                              set(57000, "time.div", 6), set(62500, "time.div", 12), set(64500, "time.mode", 1),
+                              // back to repitch, so the 68000 / 68001 pair is a live exponential-law move
                               // (synced from 56000 it moved nothing; under jump from 40000 the law never mattered)
-                              set(67000, "time.sync", 0), set(67500, "time.change", 0)};
+                              set(67000, "time.mode", 0), set(67500, "time.change", 0)};
   };
   // Modulation on (sine on line 0, spread to line 1) and a drift switch mid-render: M2's state must be block-size independent too.
-  auto ref = mk({{"time.sync", 0}, {"time.ms", 120}, {"fb.amount", 40}, {"mod.depthMs", 3}, {"mod.rateHz", 1.7}, {"mod.spread", 60}});
+  auto ref = mk({{"time.mode", 0}, {"time.ms", 120}, {"fb.amount", 40}, {"mod.depthMs", 3}, {"mod.rateHz", 1.7}, {"mod.spread", 60}});
   const auto o0 = run(*ref, inL, inR, evs(), 120.0, [](long) { return 4096; });
   std::uint32_t seed = 5;
   const std::vector<std::function<int(long)>> pats = {
       [](long) { return 1; }, [](long) { return 7; }, [](long) { return 64; }, [](long) { return 256; }, [](long) { return 333; },
       [&seed](long) { seed = seed * 1664525u + 1013904223u; return 1 + static_cast<int>(seed % 4096u); }};
   for (std::size_t p = 0; p < pats.size(); ++p) {
-    auto e = mk({{"time.sync", 0}, {"time.ms", 120}, {"fb.amount", 40}, {"mod.depthMs", 3}, {"mod.rateHz", 1.7}, {"mod.spread", 60}});
+    auto e = mk({{"time.mode", 0}, {"time.ms", 120}, {"fb.amount", 40}, {"mod.depthMs", 3}, {"mod.rateHz", 1.7}, {"mod.spread", 60}});
     const auto o = run(*e, inL, inR, evs(), 120.0, pats[p]);
     for (long i = 0; i < n; ++i)
       REQUIRE(o.L[i] == o0.L[i] && o.R[i] == o0.R[i], "block pattern %zu differs at sample %ld", p, i);
@@ -449,10 +451,10 @@ bool determinism(Detail& d) {
   const long n = S(1);
   Vec in(n);
   for (auto& v : in) v = 0.4 * noise();
-  auto solo = mk({{"fb.amount", 60}, {"time.sync", 0}, {"time.ms", 90}, {"mod.depthMs", 4}, {"mod.shape", 1}});
+  auto solo = mk({{"fb.amount", 60}, {"time.mode", 0}, {"time.ms", 90}, {"mod.depthMs", 4}, {"mod.shape", 1}});
   const auto os = run(*solo, in, in);
-  auto a = mk({{"fb.amount", 60}, {"time.sync", 0}, {"time.ms", 90}, {"mod.depthMs", 4}, {"mod.shape", 1}});
-  auto b = mk({{"fb.amount", 60}, {"time.sync", 0}, {"time.ms", 90}, {"mod.depthMs", 4}, {"mod.shape", 1}});
+  auto a = mk({{"fb.amount", 60}, {"time.mode", 0}, {"time.ms", 90}, {"mod.depthMs", 4}, {"mod.shape", 1}});
+  auto b = mk({{"fb.amount", 60}, {"time.mode", 0}, {"time.ms", 90}, {"mod.depthMs", 4}, {"mod.shape", 1}});
   Out oa{zeros(n), zeros(n)}, ob{zeros(n), zeros(n)};
   for (long p = 0; p < n; p += 256) {
     const int len = static_cast<int>(std::min<long>(256, n - p));
@@ -460,10 +462,10 @@ bool determinism(Detail& d) {
     b->process(in.data() + p, in.data() + p, ob.L.data() + p, ob.R.data() + p, len, 120);
   }
   for (long i = 0; i < n; ++i) REQUIRE(oa.L[i] == os.L[i] && ob.L[i] == os.L[i], "interleaved instance differs from solo at %ld", i);
-  auto r = mk({{"fb.amount", 60}, {"time.sync", 0}, {"time.ms", 90}});
+  auto r = mk({{"fb.amount", 60}, {"time.mode", 0}, {"time.ms", 90}});
   run(*r, in, in);
   r->reset();
-  auto f = mk({{"fb.amount", 60}, {"time.sync", 0}, {"time.ms", 90}});
+  auto f = mk({{"fb.amount", 60}, {"time.mode", 0}, {"time.ms", 90}});
   const Vec in2 = sine(n, 440, 0.3);
   const auto orr = run(*r, in2, in2), of = run(*f, in2, in2);
   for (long i = 0; i < n; ++i) REQUIRE(orr.L[i] == of.L[i], "reset() differs from a fresh instance at %ld", i);
@@ -484,14 +486,14 @@ bool silence(Detail& d) {
   for (int route = 0; route < 3; ++route)
     for (int ch = 0; ch < 3; ++ch) {
       auto e = mk({{"fb.amount", 50}, {"route.mode", static_cast<double>(route)}, {"time.change", static_cast<double>(ch)},
-                   {"time.sync", 0}, {"time.ms", 60}});
+                   {"time.mode", 0}, {"time.ms", 60}});
       const long n = S(4);
       const auto o = run(*e, impulse(n), impulse(n, 0, -0.5));
       const long z = finalZeroRun(o);
       REQUIRE(maxAbs(o.L, 0, z) + maxAbs(o.R, 0, z) > 0.1, "control: an impulse is inaudible (route %d, change %d)", route, ch);
       REQUIRE(e->atRest() && z < S(3.5), "route %d, change %d: no exact silence after the sound (from %ld)", route, ch, z);
     }
-  auto e = mk({{"filt.loop.on", 0}, {"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 0}, {"mix", 100}});
+  auto e = mk({{"filt.loop.on", 0}, {"time.mode", 0}, {"time.ms", 100}, {"fb.amount", 0}, {"mix", 100}});
   const auto o = run(*e, impulse(S(0.3)), zeros(S(0.3)));
   for (long i = 0; i < S(0.3); ++i)
     if (i != 4800) REQUIRE(o.L[i] == 0.0 && o.R[i] == 0.0, "residue %.3g at sample %ld (only 4800 may sound)", o.L[i], i);
@@ -501,7 +503,7 @@ bool silence(Detail& d) {
 // The tail (RS-7.3–7.6, SPEC §10): exact zero from the declared tail on,
 // audible before it; kInfiniteTail at g >= 1.
 bool tailExactZero(Detail& d) {
-  auto e = mk({{"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 50}, {"mix", 100}});
+  auto e = mk({{"time.mode", 0}, {"time.ms", 100}, {"fb.amount", 50}, {"mix", 100}});
   const long T = static_cast<long>(e->tail());
   const auto o = run(*e, impulse(T + S(0.5)), zeros(T + S(0.5)));
   REQUIRE(maxAbs(o.L, 0, T) > 1e-3, "control: the tail is inaudible before it ends");
@@ -519,7 +521,7 @@ bool tailExactZero(Detail& d) {
 // write leaves the line; the gate must wait for it.
 bool restNeverCuts(Detail& d) {
   for (double hp : {20.0, 60.0, 400.0}) {
-    auto e = mk({{"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 0}, {"mix", 100}, {"filt.loop.hpHz", hp},
+    auto e = mk({{"time.mode", 0}, {"time.ms", 100}, {"fb.amount", 0}, {"mix", 100}, {"filt.loop.hpHz", hp},
                  {"filt.out.on", 1}, {"filt.out.hpHz", 20}});
     const long n = S(1.5);
     const auto o = run(*e, impulse(n), zeros(n));
@@ -537,7 +539,7 @@ bool restNeverCuts(Detail& d) {
 bool tailFormula(Detail& d) {
   for (double fb : {50.0, 90.0, 99.0})
     for (double loopOn : {1.0, 0.0}) {
-      auto e = mk({{"time.sync", 0}, {"time.ms", 50}, {"fb.amount", fb}, {"mix", 100}, {"filt.loop.on", loopOn}});
+      auto e = mk({{"time.mode", 0}, {"time.ms", 50}, {"fb.amount", fb}, {"mix", 100}, {"filt.loop.on", loopOn}});
       const long T = static_cast<long>(e->tail());
       const auto o = run(*e, impulse(T + S(0.5)), zeros(T + S(0.5)));
       const long z = finalZeroRun(o);
@@ -552,7 +554,7 @@ bool tailFormula(Detail& d) {
 bool tailAfterChange(Detail& d) {
   struct Case { double from, to; };
   for (const Case c : {Case{120, 35}, Case{90, 10}}) {
-    auto e = mk({{"time.sync", 0}, {"time.ms", 150}, {"fb.amount", c.from}, {"mix", 100}});
+    auto e = mk({{"time.mode", 0}, {"time.ms", 150}, {"fb.amount", c.from}, {"mix", 100}});
     const long n = S(10), at = S(4);
     Vec in = zeros(n);
     for (long i = 0; i < S(0.1); ++i) in[i] = 0.8 * std::sin(2 * kPi * 220 * i / kSr);
@@ -568,7 +570,7 @@ bool tailAfterChange(Detail& d) {
 // 99.99999999999999) declares an enormous or infinite tail, never a negative
 // or small one, and the loop keeps sounding (critic H3).
 bool tailNearUnity(Detail& d) {
-  auto e = mk({{"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 99.99999999999999}, {"mix", 100}});
+  auto e = mk({{"time.mode", 0}, {"time.ms", 100}, {"fb.amount", 99.99999999999999}, {"mix", 100}});
   const auto t = e->tail();
   REQUIRE(t == echo::kInfiniteTail || t > static_cast<std::int64_t>(1e15), "tail() = %lld at 99.99999999999999 %%", static_cast<long long>(t));
   const auto o = run(*e, impulse(S(1)), zeros(S(1)));
@@ -581,7 +583,7 @@ bool tailNearUnity(Detail& d) {
 // sample across the line's wrap at 12.02 s, every lap.
 bool readAcrossWrap(Detail& d) {
   for (double sr : {44100.0, 48000.0}) {
-    auto e = mk({{"filt.loop.on", 0}, {"time.sync", 0}, {"time.ms", 70}, {"time.offL", sr == 48000.0 ? 10.0 : 0.0}, {"fb.amount", 0}, {"mix", 100}}, sr);
+    auto e = mk({{"filt.loop.on", 0}, {"time.mode", 0}, {"time.ms", 70}, {"time.offL", sr == 48000.0 ? 10.0 : 0.0}, {"fb.amount", 0}, {"mix", 100}}, sr);
     const long n = S(12.6, sr);
     const Vec in = sine(n, 431.7, 0.5, sr);
     const auto o = run(*e, in, in);
@@ -633,7 +635,7 @@ bool finiteInput(Detail& d) {
 // recovers at once. Zeroing one sample would leave the poison in the input
 // filter's state and silence the wet for seconds.
 bool loopRepair(Detail& d) {
-  auto e = mk({{"filt.in.on", 1}, {"fb.amount", 50}, {"mix", 100}, {"time.sync", 0}, {"time.ms", 100}});
+  auto e = mk({{"filt.in.on", 1}, {"fb.amount", 50}, {"mix", 100}, {"time.mode", 0}, {"time.ms", 100}});
   Vec in = sine(S(0.8), 300, 0.5);
   in[S(0.2)] = 1e300;  // finite input; float storage overflows: a non-finite write
   const auto o = run(*e, in, in);
@@ -672,7 +674,7 @@ bool noAlloc(Detail& d) {
   for (std::size_t i = 0; i < echo::kParams.size(); ++i) e->setParam(static_cast<int>(i), echo::kParams[i].def);
   e->setParam("route.mode", 2);
   e->setParam("filt.out.on", 1);
-  e->setParam("time.sync", 0);
+  e->setParam("time.mode", 0);
   e->setParam("time.ms", 250);
   e->setParam("mod.depthMs", 8);
   e->setParam("mod.shape", 1);
@@ -718,13 +720,13 @@ bool switchesClickFree(Detail& d) {
   const long n = S(1.2), at = S(0.8);
   const Vec L = sine(n, kProbeHz, 0.5), R = sine(n, kProbeHz, 0.5, kSr, kPi / 2);
   {
-    auto e = mk({{"mix", 100}, {"fb.amount", 0}, {"time.sync", 0}, {"time.ms", 100}});
+    auto e = mk({{"mix", 100}, {"fb.amount", 0}, {"time.mode", 0}, {"time.ms", 100}});
     const auto o = run(*e, L, R, {set(at, "route.mode", 2)});
     const double c = std::max(clickRatio(o.L, at, 960), clickRatio(o.R, at, 960));
     REQUIRE(c <= 4.0, "routing switch reads %.1f (a step reads tens)", c);
   }
   {
-    auto e = mk({{"mix", 100}, {"fb.amount", 0}, {"time.sync", 0}, {"time.ms", 100}, {"filt.out.hpHz", 1500}});
+    auto e = mk({{"mix", 100}, {"fb.amount", 0}, {"time.mode", 0}, {"time.ms", 100}, {"filt.out.hpHz", 1500}});
     const auto o = run(*e, L, R, {set(at, "filt.out.on", 1)});
     const double c = clickRatio(o.L, at, 960);
     REQUIRE(c <= 4.0, "filter switch reads %.1f", c);
@@ -735,7 +737,7 @@ bool switchesClickFree(Detail& d) {
 // Crossfade time changes are equal-gain (D-007): two correlated heads never
 // sum above the signal.
 bool crossfadeEqualGain(Detail& d) {
-  auto e = mk({{"filt.loop.on", 0}, {"fb.amount", 0}, {"mix", 100}, {"time.sync", 0}, {"time.ms", 100}, {"time.change", 1}});
+  auto e = mk({{"filt.loop.on", 0}, {"fb.amount", 0}, {"mix", 100}, {"time.mode", 0}, {"time.ms", 100}, {"time.change", 1}});
   const long n = S(1);
   const Vec in(n, 0.5);
   const auto o = run(*e, in, in, {set(S(0.5), "time.ms", 60)});
@@ -749,7 +751,7 @@ bool crossfadeEqualGain(Detail& d) {
 
 // Jump is a 3 ms equal-gain crossfade, never a bare jump (Q-A5, D-016).
 bool jumpIsShortFade(Detail& d) {
-  auto e = mk({{"mix", 100}, {"fb.amount", 0}, {"time.sync", 0}, {"time.ms", 500}, {"time.change", 2}});
+  auto e = mk({{"mix", 100}, {"fb.amount", 0}, {"time.mode", 0}, {"time.ms", 500}, {"time.change", 2}});
   const long n = S(1.4), at = S(1.0);
   const Vec in = sine(n, kProbeHz, 0.5);
   const auto o = run(*e, in, in, {set(at, "time.ms", 250)});
@@ -764,10 +766,10 @@ bool jumpIsShortFade(Detail& d) {
 bool fadeLengths(Detail& d) {
   for (double sr : {48000.0, 96000.0}) {
     const Vec in = sine(S(0.6, sr), 300, 0.3, sr);
-    auto j = mk({{"time.sync", 0}, {"time.ms", 100}, {"time.change", 2}, {"time.xfadeMs", 40}, {"fb.amount", 0}}, sr);
+    auto j = mk({{"time.mode", 0}, {"time.ms", 100}, {"time.change", 2}, {"time.xfadeMs", 40}, {"fb.amount", 0}}, sr);
     const long lj = fadeEnd(*j, in, S(0.3, sr), "time.ms", 200, 0.2 * sr);
     REQUIRE(lj - 1 == S(0.003, sr), "at %.0f Hz the jump sounded for %ld samples, 3 ms is %ld", sr, lj - 1, S(0.003, sr));
-    auto c = mk({{"time.sync", 0}, {"time.ms", 100}, {"time.change", 1}, {"time.xfadeMs", 40}, {"fb.amount", 0}}, sr);
+    auto c = mk({{"time.mode", 0}, {"time.ms", 100}, {"time.change", 1}, {"time.xfadeMs", 40}, {"fb.amount", 0}}, sr);
     const long lc = fadeEnd(*c, in, S(0.3, sr), "time.ms", 200, 0.2 * sr);
     REQUIRE(lc - 1 == S(0.040, sr), "at %.0f Hz the crossfade sounded for %ld samples, time.xfadeMs 40 is %ld", sr, lc - 1, S(0.040, sr));
   }
@@ -777,7 +779,7 @@ bool fadeLengths(Detail& d) {
 // The retrigger queue (SPEC §3.5): targets arriving mid-fade wait; at the
 // fade's end the head fades to the LATEST one (intermediates dropped).
 bool retriggerQueue(Detail& d) {
-  auto e = mk({{"fb.amount", 0}, {"time.sync", 0}, {"time.ms", 100}, {"time.change", 1}, {"time.xfadeMs", 60}});
+  auto e = mk({{"fb.amount", 0}, {"time.mode", 0}, {"time.ms", 100}, {"time.change", 1}, {"time.xfadeMs", 60}});
   const long n = S(1.0);
   const Vec in = sine(n, 300, 0.3);
   run(*e, in, in, {set(S(0.5), "time.ms", 200), set(S(0.51), "time.ms", 300), set(S(0.52), "time.ms", 400)});
@@ -791,8 +793,8 @@ bool retriggerQueue(Detail& d) {
 bool deferral(Detail& d) {
   const long n = S(1.2);
   const Vec in = sine(n, kProbeHz, 0.4);
-  auto a = mk({{"fb.amount", 30}, {"time.sync", 0}, {"time.ms", 100}, {"time.change", 1}, {"time.xfadeMs", 200}});
-  auto b = mk({{"fb.amount", 30}, {"time.sync", 0}, {"time.ms", 100}, {"time.change", 1}, {"time.xfadeMs", 200}});
+  auto a = mk({{"fb.amount", 30}, {"time.mode", 0}, {"time.ms", 100}, {"time.change", 1}, {"time.xfadeMs", 200}});
+  auto b = mk({{"fb.amount", 30}, {"time.mode", 0}, {"time.ms", 100}, {"time.change", 1}, {"time.xfadeMs", 200}});
   const auto oa = run(*a, in, in, {set(S(0.5), "time.ms", 300)});
   const auto ob = run(*b, in, in, {set(S(0.5), "time.ms", 300), set(S(0.55), "time.change", 2)});
   for (long i = 0; i < n; ++i) REQUIRE(oa.L[i] == ob.L[i], "a time.change flip mid-fade changed the output at %ld", i);
@@ -801,7 +803,7 @@ bool deferral(Detail& d) {
 
 // Synced time lands on the host tempo from the first block (SPEC §3.3).
 bool tempoSync(Detail& d) {
-  auto e = mk({{"filt.loop.on", 0}, {"time.sync", 1}, {"time.div", 9}, {"fb.amount", 0}, {"mix", 100}});
+  auto e = mk({{"filt.loop.on", 0}, {"time.mode", 2}, {"time.div", 9}, {"fb.amount", 0}, {"mix", 100}});
   const auto o = run(*e, impulse(S(1.2)), zeros(S(1.2)), {}, 60.0);
   long arg = 0;
   double m = -1;
@@ -822,22 +824,22 @@ bool clampFold(Detail& d) {
     run(*e, z, z, {}, bpm);
     return std::make_pair(e->resolvedTimes(), e->folded());
   };
-  auto [t1, f1] = at({{"time.sync", 1}, {"time.div", 0}}, 30.0);
+  auto [t1, f1] = at({{"time.mode", 2}, {"time.div", 0}}, 30.0);
   REQUIRE(std::fabs(t1[0] - 8.0) < 1e-9 && f1, "2/1 at 30 bpm plays at %.3f s (expected 8 s, folded)", t1[0]);
-  auto [t2, f2] = at({{"time.sync", 1}, {"time.div", 0}, {"time.offR", 50}}, 40.0);
+  auto [t2, f2] = at({{"time.mode", 2}, {"time.div", 0}, {"time.offR", 50}}, 40.0);
   REQUIRE(std::fabs(t2[0] - 6.0) < 1e-9 && std::fabs(t2[1] - 9.0) < 1e-9 && f2, "2/1 at 40 bpm, +50 %% R: %.3f / %.3f s (expected 6 / 9)", t2[0], t2[1]);
-  auto [t3, f3] = at({{"time.sync", 0}, {"time.ms", 12000}, {"time.offR", 50}}, 120.0);
+  auto [t3, f3] = at({{"time.mode", 0}, {"time.ms", 12000}, {"time.offR", 50}}, 120.0);
   REQUIRE(t3[1] == 12.0 && !f3, "free 12 s +50 %% R clamps to %.3f s (expected 12)", t3[1]);
-  auto [t4, f4] = at({{"time.sync", 0}, {"time.ms", 1}, {"time.offL", -50}}, 120.0);
+  auto [t4, f4] = at({{"time.mode", 0}, {"time.ms", 1}, {"time.offL", -50}}, 120.0);
   REQUIRE(t4[0] == 0.001 && !f4, "1 ms -50 %% L must floor at 1 ms, resolved %.6f s", t4[0]);
   return true;
 }
 
-// Routing (SPEC §4): ping-pong alternates from the left; stereo lines never
+// Routing (SPEC §4): ping-pong alternates from the left; standard lines never
 // cross; mid/side folds to its M line exactly (§4.1, by construction).
 bool routing(Detail& d) {
   {
-    auto e = mk({{"route.mode", 1}, {"filt.loop.on", 0}, {"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 50}, {"mix", 100}});
+    auto e = mk({{"route.mode", 1}, {"filt.loop.on", 0}, {"time.mode", 0}, {"time.ms", 100}, {"fb.amount", 50}, {"mix", 100}});
     const auto o = run(*e, impulse(S(0.4)), zeros(S(0.4)));
     REQUIRE(std::fabs(o.L[4800]) > 0.4 && o.R[4800] == 0.0, "ping-pong repeat 1 must be on the left (L %.3f R %.3f)", o.L[4800], o.R[4800]);
     // The far channel may carry the DC blocker's decaying tail (~1e-5), never a repeat.
@@ -845,15 +847,15 @@ bool routing(Detail& d) {
     REQUIRE(std::fabs(o.L[14400]) > 0.02 && std::fabs(o.R[14400]) < 1e-4, "ping-pong repeat 3 must be on the left (L %.3g R %.3g)", o.L[14400], o.R[14400]);
   }
   {
-    auto e = mk({{"route.mode", 0}, {"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 70}, {"mix", 100}});
+    auto e = mk({{"route.mode", 0}, {"time.mode", 0}, {"time.ms", 100}, {"fb.amount", 70}, {"mix", 100}});
     const auto o = run(*e, impulse(S(1)), zeros(S(1)));
-    REQUIRE(maxAbs(o.R) == 0.0, "stereo: a left impulse reached the right (%.3g)", maxAbs(o.R));
-    auto r = mk({{"route.mode", 0}, {"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 0}, {"mix", 100}, {"filt.loop.on", 0}});
+    REQUIRE(maxAbs(o.R) == 0.0, "standard: a left impulse reached the right (%.3g)", maxAbs(o.R));
+    auto r = mk({{"route.mode", 0}, {"time.mode", 0}, {"time.ms", 100}, {"fb.amount", 0}, {"mix", 100}, {"filt.loop.on", 0}});
     const auto orr = run(*r, zeros(S(0.2)), impulse(S(0.2)));
-    REQUIRE(orr.R[4800] == 1.0 && maxAbs(orr.L) == 0.0, "stereo: a right-only impulse must wake the instance and repeat on the right (R %.3f)", orr.R[4800]);
+    REQUIRE(orr.R[4800] == 1.0 && maxAbs(orr.L) == 0.0, "standard: a right-only impulse must wake the instance and repeat on the right (R %.3f)", orr.R[4800]);
   }
   {  // mid/side carries the side at its level: pure S in, M + S / M - S out
-    auto e = mk({{"route.mode", 2}, {"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 0}, {"mix", 100}, {"filt.loop.on", 0}});
+    auto e = mk({{"route.mode", 2}, {"time.mode", 0}, {"time.ms", 100}, {"fb.amount", 0}, {"mix", 100}, {"filt.loop.on", 0}});
     const auto o = run(*e, impulse(S(0.2)), impulse(S(0.2), 0, -1.0));
     REQUIRE(o.L[4800] == 1.0 && o.R[4800] == -1.0, "mid/side: pure side in gives L %.3f R %.3f, expected 1 / -1", o.L[4800], o.R[4800]);
   }
@@ -862,8 +864,8 @@ bool routing(Detail& d) {
     const long n = S(0.8);
     Vec L(n), R(n), M(n);
     for (long i = 0; i < n; ++i) { L[i] = 0.5 * noise(); R[i] = 0.5 * noise(); M[i] = (L[i] + R[i]) / 2; }
-    auto a = mk({{"route.mode", 2}, {"time.sync", 0}, {"time.ms", 70}, {"time.offL", 10}, {"time.offR", -20}, {"fb.amount", 50}, {"mix", 60}});
-    auto b = mk({{"route.mode", 2}, {"time.sync", 0}, {"time.ms", 70}, {"time.offL", 10}, {"time.offR", -20}, {"fb.amount", 50}, {"mix", 60}});
+    auto a = mk({{"route.mode", 2}, {"time.mode", 0}, {"time.ms", 70}, {"time.offL", 10}, {"time.offR", -20}, {"fb.amount", 50}, {"mix", 60}});
+    auto b = mk({{"route.mode", 2}, {"time.mode", 0}, {"time.ms", 70}, {"time.offL", 10}, {"time.offR", -20}, {"fb.amount", 50}, {"mix", 60}});
     const auto oa = run(*a, L, R), ob = run(*b, M, M);
     double diff = 0;
     for (long i = 0; i < n; ++i) diff = std::max(diff, std::fabs((oa.L[i] + oa.R[i]) / 2 - (ob.L[i] + ob.R[i]) / 2));
@@ -875,7 +877,7 @@ bool routing(Detail& d) {
 // Load (SPEC §10, D-016): the old repeats fade out over 20 ms and END; Device
 // keys are left alone.
 bool loadEnds(Detail& d) {
-  auto e = mk({{"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 80}, {"mix", 100}});
+  auto e = mk({{"time.mode", 0}, {"time.ms", 100}, {"fb.amount", 80}, {"mix", 100}});
   const long n = S(1.2), at = S(0.5);
   const std::array<echo::KeyValue, 3> patch{{{"fb.amount", 30}, {"time.ms", 200}, {"io.inGain", 6}}};
   const auto o = run(*e, impulse(n), zeros(n), {{at, [&patch](Echo& x) { x.loadState(patch); }}});
@@ -892,7 +894,7 @@ bool loadEnds(Detail& d) {
 bool loadClickFree(Detail& d) {
   const long n = S(1.2), at = S(0.8);
   const Vec L = sine(n, kProbeHz, 0.5), R = sine(n, kProbeHz, 0.5, kSr, kPi / 2);
-  auto e = mk({{"route.mode", 2}, {"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 60}, {"mix", 100}});
+  auto e = mk({{"route.mode", 2}, {"time.mode", 0}, {"time.ms", 100}, {"fb.amount", 60}, {"mix", 100}});
   const std::array<echo::KeyValue, 4> patch{{{"route.mode", 0}, {"filt.out.on", 1}, {"filt.out.hpHz", 1500}, {"time.ms", 200}}};
   const auto o = run(*e, L, R, {{at, [&patch](Echo& x) { x.loadState(patch); }}});
   const double c = std::max(clickRatio(o.L, at, 960), clickRatio(o.R, at, 960));
@@ -903,7 +905,7 @@ bool loadClickFree(Detail& d) {
 // A second load during the fade lands its values but never restarts the fade
 // (D-020): the old audio still ends 20 ms after the FIRST load.
 bool reloadNoRestart(Detail& d) {
-  auto e = mk({{"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 80}, {"mix", 100}});
+  auto e = mk({{"time.mode", 0}, {"time.ms", 100}, {"fb.amount", 80}, {"mix", 100}});
   const long n = S(1), at = S(0.5);
   const std::array<echo::KeyValue, 1> a{{{"fb.amount", 30}}}, b{{{"fb.amount", 40}}};
   const auto o = run(*e, impulse(n), zeros(n), {{at, [&a](Echo& x) { x.loadState(a); }}, {at + 480, [&b](Echo& x) { x.loadState(b); }}});
@@ -930,8 +932,8 @@ bool loadLeavesDevice(Detail& d) {
 // Sleep and wake (RS-7.6, A16): an instance horde stopped calling equals its
 // never-slept twin from the wake on, parameters changed while asleep landed.
 bool sleepTwin(Detail& d) {
-  auto a = mk({{"mix", 50}, {"fb.amount", 50}, {"time.sync", 0}, {"time.ms", 120}, {"mod.depthMs", 6}, {"mod.rateHz", 0.9}});
-  auto b = mk({{"mix", 50}, {"fb.amount", 50}, {"time.sync", 0}, {"time.ms", 120}, {"mod.depthMs", 6}, {"mod.rateHz", 0.9}});
+  auto a = mk({{"mix", 50}, {"fb.amount", 50}, {"time.mode", 0}, {"time.ms", 120}, {"mod.depthMs", 6}, {"mod.rateHz", 0.9}});
+  auto b = mk({{"mix", 50}, {"fb.amount", 50}, {"time.mode", 0}, {"time.ms", 120}, {"mod.depthMs", 6}, {"mod.rateHz", 0.9}});
   Vec burst = zeros(S(4));
   for (long i = 0; i < S(0.2); ++i) burst[i] = 0.5 * std::sin(2 * kPi * 330 * i / kSr);
   run(*a, burst, burst);  // real audio runs into rest in both
@@ -1001,7 +1003,7 @@ bool tapeLaw(Detail& d) {
   struct Move { double from, to; };
   for (double glide : {0.01, 0.03, 0.3})
     for (const Move mv : {Move{500, 250}, Move{250, 500}, Move{2, 1}}) {
-      auto e = mk({{"time.sync", 0}, {"time.ms", mv.from}, {"time.change", 0}, {"time.law", 0}, {"time.glide", glide}, {"fb.amount", 0},
+      auto e = mk({{"time.mode", 0}, {"time.ms", mv.from}, {"time.change", 0}, {"time.law", 0}, {"time.glide", glide}, {"fb.amount", 0},
                    {"filt.loop.on", 0}});
       const long n = S(2.5), at = S(1.0);
       const Vec in(n, 0.1);
@@ -1045,7 +1047,7 @@ bool tapeLaw(Detail& d) {
 // big one runs at the cap (+12 st: read speed exactly 2) and never past it.
 bool expLaw(Detail& d) {
   {
-    auto e = mk({{"time.sync", 0}, {"time.ms", 500}, {"time.law", 1}, {"time.glide", 0.3}, {"fb.amount", 0}, {"filt.loop.on", 0}});
+    auto e = mk({{"time.mode", 0}, {"time.ms", 500}, {"time.law", 1}, {"time.glide", 0.3}, {"fb.amount", 0}, {"filt.loop.on", 0}});
     const long n = S(2.0), at = S(0.5);
     const Vec in(n, 0.1);
     // The recurrence is EXACT here only because this move's first speed step (|V| = 0.176 per sample) is under the
@@ -1065,7 +1067,7 @@ bool expLaw(Detail& d) {
     REQUIRE(worst < 1e-6, "500 -> 450 ms: the exponential law departs from its recurrence by %.3g samples", worst);
   }
   {
-    auto e = mk({{"time.sync", 0}, {"time.ms", 500}, {"time.law", 1}, {"time.glide", 0.3}, {"fb.amount", 0}, {"filt.loop.on", 0}});
+    auto e = mk({{"time.mode", 0}, {"time.ms", 500}, {"time.law", 1}, {"time.glide", 0.3}, {"fb.amount", 0}, {"filt.loop.on", 0}});
     const long n = S(2.0), at = S(0.5);
     const Vec in(n, 0.1);
     e->resetStats();
@@ -1083,7 +1085,7 @@ bool expLaw(Detail& d) {
 bool repitchCents(Detail& d) {
   for (int law : {0, 1})
   for (double glide : {0.05, 1.0}) {
-    auto e = mk({{"time.sync", 0}, {"time.ms", 500}, {"time.law", static_cast<double>(law)}, {"time.glide", glide}, {"fb.amount", 0},
+    auto e = mk({{"time.mode", 0}, {"time.ms", 500}, {"time.law", static_cast<double>(law)}, {"time.glide", glide}, {"fb.amount", 0},
                  {"filt.loop.on", 0}, {"mix", 100}});
     const long n = S(3.0), at = S(0.8);
     const Vec in = sine(n, kProbeHz, 0.5);
@@ -1123,7 +1125,7 @@ bool speedInvariant(Detail& d) {
     for (const Move& mv : moves)
       for (const Mod& md : mods) {
         if (law >= 2 && mv.fallback) continue;  // a crossfade has no fallback to show
-        auto e = mk({{"time.sync", 0}, {"time.ms", mv.from}, {"time.law", law == 1 ? 1.0 : 0.0}, {"time.change", law >= 2 ? law - 1.0 : 0.0},
+        auto e = mk({{"time.mode", 0}, {"time.ms", mv.from}, {"time.law", law == 1 ? 1.0 : 0.0}, {"time.change", law >= 2 ? law - 1.0 : 0.0},
                      {"time.glide", 0.3}, {"fb.amount", 0},
                      {"mod.depthMs", md.depth}, {"mod.rateHz", md.rate}, {"mod.shape", md.shape}, {"mod.spread", md.spread}});
         const long n = S(mv.from > 1000 || mv.to > 1000 ? 13.5 : 3.0), at = n - S(1.4);
@@ -1150,7 +1152,7 @@ bool speedInvariant(Detail& d) {
 // 90 degrees later.
 bool modulation(Detail& d) {
   {  // depth and read
-    auto e = mk({{"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}, {"mod.depthMs", 5},
+    auto e = mk({{"time.mode", 0}, {"time.ms", 100}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}, {"mod.depthMs", 5},
                  {"mod.rateHz", 2}, {"mod.spread", 100}});
     const long n = S(2.0);
     const Vec in = sine(n, 100, 0.5);
@@ -1167,7 +1169,7 @@ bool modulation(Detail& d) {
     REQUIRE(std::fabs(r1AtPeak) < 3.0, "spread 100 %%: the right line's offset at the left's peak is %.2f, expected ~0 (90 degrees later)", r1AtPeak);
     REQUIRE(maxStep <= 0.25 + 1e-12, "the offset moved %.4f samples in one sample (slew limit 0.25)", maxStep);
     // the output is the input read at the moving position (Hermite at 100 Hz: < 1e-4)
-    auto g = mk({{"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}, {"mod.depthMs", 5}, {"mod.rateHz", 2}});
+    auto g = mk({{"time.mode", 0}, {"time.ms", 100}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}, {"mod.depthMs", 5}, {"mod.rateHz", 2}});
     Vec pos(static_cast<std::size_t>(n));
     const auto og = runEach(*g, in, in, {}, [](long) { return 120.0; }, [&](long i, Echo& x) { pos[static_cast<std::size_t>(i)] = x.readPosition(0); });
     for (long i = S(0.6); i < n; ++i) {
@@ -1177,7 +1179,7 @@ bool modulation(Detail& d) {
     REQUIRE(worst < 1e-4, "the output departs from the input read at the reported position by %.3g", worst);
   }
   {  // the slope limit: 20 ms at 10 Hz is capped at 0.25 / (2 pi 10 / fs)
-    auto e = mk({{"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 0}, {"mod.depthMs", 20}, {"mod.rateHz", 10}});
+    auto e = mk({{"time.mode", 0}, {"time.ms", 100}, {"fb.amount", 0}, {"mod.depthMs", 20}, {"mod.rateHz", 10}});
     const long n = S(1.5);
     const Vec in(n, 0.1);
     double hi = 0;
@@ -1186,7 +1188,7 @@ bool modulation(Detail& d) {
     REQUIRE(std::fabs(hi - A) < 0.01 * A, "a 20 ms sine at 10 Hz reaches %.1f samples, the slope limit is %.1f", hi, A);
   }
   {  // drift: inside its (slope-limited) depth, every sample
-    auto e = mk({{"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 0}, {"mod.depthMs", 20}, {"mod.rateHz", 10}, {"mod.shape", 1}, {"mod.seed", 7}});
+    auto e = mk({{"time.mode", 0}, {"time.ms", 100}, {"fb.amount", 0}, {"mod.depthMs", 20}, {"mod.rateHz", 10}, {"mod.shape", 1}, {"mod.seed", 7}});
     const long n = S(3.0);
     const Vec in(n, 0.1);
     double hi = 0;
@@ -1195,7 +1197,7 @@ bool modulation(Detail& d) {
     REQUIRE(hi <= A + 1e-9, "drift reached %.2f samples, its depth is %.2f (the Catmull-Rom overshoot must be clamped)", hi, A);
   }
   {  // a lifted depth limit (10 ms -> 100 ms) is slewed in, never stepped
-    auto e = mk({{"time.sync", 0}, {"time.ms", 10}, {"time.change", 1}, {"fb.amount", 0}, {"mod.depthMs", 20}, {"mod.rateHz", 0.05}, {"mod.shape", 1}});
+    auto e = mk({{"time.mode", 0}, {"time.ms", 10}, {"time.change", 1}, {"fb.amount", 0}, {"mod.depthMs", 20}, {"mod.rateHz", 0.05}, {"mod.shape", 1}});
     const long n = S(2.0);
     const Vec in(n, 0.1);
     double maxStep = 0, prev = 0;
@@ -1217,7 +1219,7 @@ bool modSeeded(Detail& d) {
   // moves the offset at most 2*240/12000 = 0.04 sample a sample; a switch with
   // no blend saturates the 0.25 slew instead.
   auto render = [](double seed, std::vector<Event> ev, double shape = 1) {
-    auto e = mk({{"time.sync", 0}, {"time.ms", 200}, {"fb.amount", 0}, {"mod.depthMs", 5}, {"mod.rateHz", 0.05}, {"mod.shape", shape}, {"mod.seed", seed}});
+    auto e = mk({{"time.mode", 0}, {"time.ms", 200}, {"fb.amount", 0}, {"mod.depthMs", 5}, {"mod.rateHz", 0.05}, {"mod.shape", shape}, {"mod.seed", seed}});
     const long n = S(2.0);
     const Vec in(n, 0.1);
     Vec m(static_cast<std::size_t>(n));
@@ -1249,7 +1251,7 @@ bool tempoModes(Detail& d) {
   auto ramp = [=](long i) { return i < r0 ? 120.0 : i < r1 ? 120.0 + 1.5 * (i - r0) / static_cast<double>(r1 - r0) : 121.5; };
   const Vec in(n, 0.1);
   for (int mode : {0, 1, 2}) {  // crossfade, glide, follow
-    auto e = mk({{"time.sync", 1}, {"time.div", 9}, {"time.tempoMode", static_cast<double>(mode)}, {"fb.amount", 0}, {"time.glide", 0.05}});
+    auto e = mk({{"time.mode", 2}, {"time.div", 9}, {"time.tempoMode", static_cast<double>(mode)}, {"fb.amount", 0}, {"time.glide", 0.05}});
     double worstFollow = 0;
     e->resetStats();
     runEach(*e, in, in, {}, ramp, [&](long i, Echo& x) {
@@ -1263,7 +1265,7 @@ bool tempoModes(Detail& d) {
     if (mode == 2) REQUIRE(fades == 0 && worstFollow < 1e-6, "follow: %llu fades, off the grid time by %.3g samples", static_cast<unsigned long long>(fades), worstFollow);
   }
   {  // follow: a 2x step crossfades; a key move glides
-    auto e = mk({{"time.sync", 1}, {"time.div", 9}, {"time.tempoMode", 2}, {"fb.amount", 0}});
+    auto e = mk({{"time.mode", 2}, {"time.div", 9}, {"time.tempoMode", 2}, {"fb.amount", 0}});
     e->resetStats();
     run(*e, in, in, {}, 120.0, [](long) { return 480; });
     run(*e, in, in, {}, 240.0, [](long) { return 480; });
@@ -1286,7 +1288,7 @@ bool tempoModes(Detail& d) {
 bool tailDuringGlide(Detail& d) {
   for (int law : {0, 1})
     for (double glide : {0.3, 2.0}) {
-      auto e = mk({{"time.sync", 0}, {"time.ms", 2900}, {"time.law", static_cast<double>(law)}, {"time.glide", glide}, {"fb.amount", 0}, {"mix", 100}});
+      auto e = mk({{"time.mode", 0}, {"time.ms", 2900}, {"time.law", static_cast<double>(law)}, {"time.glide", glide}, {"fb.amount", 0}, {"mix", 100}});
       const long n = S(10.0), at = S(3.0);
       Vec in = clickProbeUntil(n, at);
       const auto o = run(*e, in, in, {set(at, "time.ms", 300)});
@@ -1301,7 +1303,7 @@ bool tailDuringGlide(Detail& d) {
 // with different histories that load the same patch modulate identically.
 bool seedRules(Detail& d) {
   auto offsets = [](double seed0, bool resend, bool load) {
-    auto e = mk({{"time.sync", 0}, {"time.ms", 200}, {"fb.amount", 0}, {"mod.depthMs", 5}, {"mod.rateHz", 3}, {"mod.shape", 1}, {"mod.seed", seed0}});
+    auto e = mk({{"time.mode", 0}, {"time.ms", 200}, {"fb.amount", 0}, {"mod.depthMs", 5}, {"mod.rateHz", 3}, {"mod.shape", 1}, {"mod.seed", seed0}});
     const long n = S(2.0);
     const Vec in(n, 0.1);
     std::vector<Event> ev;
@@ -1326,7 +1328,7 @@ bool seedRules(Detail& d) {
 // it never keeps a residual off the grid.
 bool keyAndFollow(Detail& d) {
   {  // a key glide in flight under tempoMode crossfade, then a tempo ramp: no crossfade
-    auto e = mk({{"time.sync", 1}, {"time.div", 6}, {"time.tempoMode", 0}, {"time.glide", 0.5}, {"fb.amount", 0}});
+    auto e = mk({{"time.mode", 2}, {"time.div", 6}, {"time.tempoMode", 0}, {"time.glide", 0.5}, {"fb.amount", 0}});
     const long n = S(2.0);
     const Vec in(n, 0.1);
     runEach(*e, in, in, {set(S(0.3), "time.div", 9)}, [](long i) { return i < S(0.35) ? 120.0 : 120.0 + 2.0 * (i - S(0.35)) / kSr; },
@@ -1334,7 +1336,7 @@ bool keyAndFollow(Detail& d) {
     REQUIRE(e->fadeCount(0) == 0, "a key glide in flight crossfaded when the tempo moved (%llu fades)", static_cast<unsigned long long>(e->fadeCount(0)));
   }
   {  // follow: a 120 -> 130 step, then a +1 bpm/s ramp inside the cap
-    auto e = mk({{"time.sync", 1}, {"time.div", 9}, {"time.tempoMode", 2}, {"fb.amount", 0}});
+    auto e = mk({{"time.mode", 2}, {"time.div", 9}, {"time.tempoMode", 2}, {"fb.amount", 0}});
     const long n = S(4.0);
     const Vec in(n, 0.1);
     double worst = 0;
@@ -1347,7 +1349,7 @@ bool keyAndFollow(Detail& d) {
   {  // follow: a key glide, then a ramp, then a steady tempo: no residual left
     // glide 0.05: the key move's own law finishes it (D-025's key rule) well
     // before the steady stretch, so any offset left there is follow's.
-    auto e = mk({{"time.sync", 1}, {"time.div", 9}, {"time.tempoMode", 2}, {"time.glide", 0.05}, {"fb.amount", 0}});
+    auto e = mk({{"time.mode", 2}, {"time.div", 9}, {"time.tempoMode", 2}, {"time.glide", 0.05}, {"fb.amount", 0}});
     const long n = S(5.0);
     const Vec in(n, 0.1);
     runEach(*e, in, in, {set(S(0.2), "time.div", 12)},
@@ -1366,7 +1368,7 @@ bool floorAndWake(Detail& d) {
   for (double ch : {0.0, 1.0, 2.0}) {
     // The move lands at 2.5 s, where the 0.3 Hz sine's offset is at -A (the
     // read pulled TOWARD the write head): the only side the floor can bind.
-    auto e = mk({{"time.sync", 0}, {"time.ms", 500}, {"time.change", ch}, {"fb.amount", 0}, {"mod.depthMs", 20}, {"mod.rateHz", 0.3}});
+    auto e = mk({{"time.mode", 0}, {"time.ms", 500}, {"time.change", ch}, {"fb.amount", 0}, {"mod.depthMs", 20}, {"mod.rateHz", 0.3}});
     const long n = S(3.5);
     const Vec in(n, 0.1);
     e->resetStats();
@@ -1380,7 +1382,7 @@ bool floorAndWake(Detail& d) {
     for (long i = 0; i < S(0.3); ++i) in[i] = 0.1;
     for (long i = S(2.0); i < n; ++i) in[i] = 0.1;  // silence long enough to rest, then a wake
     // the speed right after the wake: from the speed statistics of a fresh window
-    auto g = mk({{"time.sync", 0}, {"time.ms", 30}, {"fb.amount", 0}, {"mod.depthMs", 10}, {"mod.rateHz", 0.6}});
+    auto g = mk({{"time.mode", 0}, {"time.ms", 30}, {"fb.amount", 0}, {"mod.depthMs", 10}, {"mod.rateHz", 0.6}});
     const Vec pre(in.begin(), in.begin() + S(2.0)), post(in.begin() + S(2.0), in.end());
     run(*g, pre, pre);
     REQUIRE(g->atRest(), "the instance did not come to rest before the wake");
@@ -1399,7 +1401,7 @@ bool movingTimeSr(Detail& d) {
   for (int law : {0, 1}) {
     std::vector<double> ref;
     for (double sr : {48000.0, 96000.0}) {
-      auto e = mk({{"time.sync", 0}, {"time.ms", 500}, {"time.law", static_cast<double>(law)}, {"time.glide", 0.2}, {"fb.amount", 0}}, sr);
+      auto e = mk({{"time.mode", 0}, {"time.ms", 500}, {"time.law", static_cast<double>(law)}, {"time.glide", 0.2}, {"fb.amount", 0}}, sr);
       const long n = S(2.0, sr);
       const Vec in(n, 0.1);
       std::vector<double> tr;
@@ -1512,44 +1514,40 @@ std::vector<ClickCase> clickCases() {
   };
   auto move = [](double at, double ms) { return [at, ms](long) { return std::vector<Event>{set(S(at), "time.ms", ms)}; }; };
   auto tempo = [](double i) { return 120.0 + 60.0 * std::sin(2 * kPi * i / kSr); };
-  // time.scale moves (T-038, D-048): a control move like any other, so judged by the same metric.
-  // A 1 Hz log sweep of the whole x1/4 .. x4 range (free: a continuous scale; synced: it crosses the
-  // snap boundaries, so the head takes octave steps) and single octave steps at fixed times.
-  auto scaleSweep = [](long n) {
+  // The gestures T-038 gated through time.scale, kept through the keys (D-050 removed the scale; its move was bit-identical to the same
+  // move through the time key, so the same time gestures stay reachable): a 1 Hz log sweep over x1/4 .. x4 of 500 ms (125 ms - 2 s) sent
+  // every 64 samples, and single octave steps of a synced 1/4 (1/2, back, 1/8, back) at the old times, each given time to settle.
+  auto octaveSweep = [](long n) {
     std::vector<Event> ev;
-    for (long i = 0; i < n; i += 64) ev.push_back(set(i, "time.scale", std::exp2(2.0 * std::sin(2 * kPi * 1.0 * i / kSr))));
+    for (long i = 0; i < n; i += 64) ev.push_back(set(i, "time.ms", 500.0 * std::exp2(2.0 * std::sin(2 * kPi * 1.0 * i / kSr))));
     return ev;
   };
-  auto octaveSteps = [](long) {  // single octaves (x2, back, x1/2, back), each given time to settle
-    return std::vector<Event>{set(S(0.7), "time.scale", 2), set(S(1.7), "time.scale", 1), set(S(2.7), "time.scale", 0.5), set(S(3.7), "time.scale", 1)};
+  auto divSteps = [](long) {
+    return std::vector<Event>{set(S(0.7), "time.div", 6), set(S(1.7), "time.div", 9), set(S(2.7), "time.div", 12), set(S(3.7), "time.div", 9)};
   };
   return {
-      {"full sweep, repitch tape", false, {{"time.sync", 0}, {"time.ms", 500}, {"time.change", 0}, {"time.law", 0}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, sweep(1, 12000), nullptr, 3.0},
-      {"full sweep, repitch exponential", false, {{"time.sync", 0}, {"time.ms", 500}, {"time.change", 0}, {"time.law", 1}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, sweep(1, 12000), nullptr, 3.0},
-      {"full sweep, crossfade", false, {{"time.sync", 0}, {"time.ms", 500}, {"time.change", 1}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, sweep(1, 12000), nullptr, 3.0},
-      {"full sweep, jump", true, {{"time.sync", 0}, {"time.ms", 500}, {"time.change", 2}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, sweep(1, 12000), nullptr, 3.0},
-      {"200-400 ms sweep, tape, glide 0.05", false, {{"time.sync", 0}, {"time.ms", 300}, {"time.law", 0}, {"time.glide", 0.05}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, sweep(200, 400), nullptr, 3.0},
-      {"200-400 ms sweep, exponential, glide 0.05", false, {{"time.sync", 0}, {"time.ms", 300}, {"time.law", 1}, {"time.glide", 0.05}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, sweep(200, 400), nullptr, 3.0},
-      {"tempo sweep, crossfade", false, {{"time.sync", 1}, {"time.div", 9}, {"time.tempoMode", 0}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, nullptr, tempo, 3.0},
-      {"tempo sweep, glide", false, {{"time.sync", 1}, {"time.div", 9}, {"time.tempoMode", 1}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, nullptr, tempo, 3.0},
-      {"tempo sweep, follow", false, {{"time.sync", 1}, {"time.div", 9}, {"time.tempoMode", 2}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, nullptr, tempo, 3.0},
-      {"move 250 -> 500 ms, exponential", false, {{"time.sync", 0}, {"time.ms", 250}, {"time.law", 1}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, move(1.0, 500), nullptr, 2.5},
-      {"move 300 -> 200 ms, exponential, glide 0.05", false, {{"time.sync", 0}, {"time.ms", 300}, {"time.law", 1}, {"time.glide", 0.05}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, move(1.0, 200), nullptr, 2.0},
-      {"move 500 -> 100 ms, tape, glide 0.05", false, {{"time.sync", 0}, {"time.ms", 500}, {"time.law", 0}, {"time.glide", 0.05}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, move(1.0, 100), nullptr, 2.0},
-      {"move 500 -> 250 ms, tape", false, {{"time.sync", 0}, {"time.ms", 500}, {"time.law", 0}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, move(1.0, 250), nullptr, 2.5},
-      {"move 500 -> 250 ms, jump", true, {{"time.sync", 0}, {"time.ms", 500}, {"time.change", 2}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, move(1.0, 250), nullptr, 1.5},
-      {"scale sweep, free, repitch tape", false, {{"time.sync", 0}, {"time.ms", 500}, {"time.change", 0}, {"time.law", 0}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, scaleSweep, nullptr, 3.0},
-      {"scale sweep, free, repitch exponential", false, {{"time.sync", 0}, {"time.ms", 500}, {"time.change", 0}, {"time.law", 1}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, scaleSweep, nullptr, 3.0},
-      {"scale sweep, free, crossfade", false, {{"time.sync", 0}, {"time.ms", 500}, {"time.change", 1}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, scaleSweep, nullptr, 3.0},
-      {"scale sweep, free, jump", true, {{"time.sync", 0}, {"time.ms", 500}, {"time.change", 2}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, scaleSweep, nullptr, 3.0},
-      {"scale sweep, synced, repitch tape", false, {{"time.sync", 1}, {"time.div", 9}, {"time.change", 0}, {"time.law", 0}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, scaleSweep, nullptr, 3.0},
-      {"scale sweep, synced, repitch exponential", false, {{"time.sync", 1}, {"time.div", 9}, {"time.change", 0}, {"time.law", 1}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, scaleSweep, nullptr, 3.0},
-      {"scale sweep, synced, crossfade", false, {{"time.sync", 1}, {"time.div", 9}, {"time.change", 1}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, scaleSweep, nullptr, 3.0},
-      {"scale sweep, synced, jump", true, {{"time.sync", 1}, {"time.div", 9}, {"time.change", 2}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, scaleSweep, nullptr, 3.0},
-      {"octave steps, synced 1/4, repitch tape", false, {{"time.sync", 1}, {"time.div", 9}, {"time.change", 0}, {"time.law", 0}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, octaveSteps, nullptr, 4.7},
-      {"octave steps, synced 1/4, repitch exponential", false, {{"time.sync", 1}, {"time.div", 9}, {"time.change", 0}, {"time.law", 1}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, octaveSteps, nullptr, 4.7},
-      {"octave steps, synced 1/4, crossfade", false, {{"time.sync", 1}, {"time.div", 9}, {"time.change", 1}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, octaveSteps, nullptr, 4.7},
-      {"octave steps, synced 1/4, jump", true, {{"time.sync", 1}, {"time.div", 9}, {"time.change", 2}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, octaveSteps, nullptr, 4.7},
+      {"full sweep, repitch tape", false, {{"time.mode", 0}, {"time.ms", 500}, {"time.change", 0}, {"time.law", 0}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, sweep(1, 12000), nullptr, 3.0},
+      {"full sweep, repitch exponential", false, {{"time.mode", 0}, {"time.ms", 500}, {"time.change", 0}, {"time.law", 1}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, sweep(1, 12000), nullptr, 3.0},
+      {"full sweep, crossfade", false, {{"time.mode", 0}, {"time.ms", 500}, {"time.change", 1}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, sweep(1, 12000), nullptr, 3.0},
+      {"full sweep, jump", true, {{"time.mode", 0}, {"time.ms", 500}, {"time.change", 2}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, sweep(1, 12000), nullptr, 3.0},
+      {"200-400 ms sweep, tape, glide 0.05", false, {{"time.mode", 0}, {"time.ms", 300}, {"time.law", 0}, {"time.glide", 0.05}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, sweep(200, 400), nullptr, 3.0},
+      {"200-400 ms sweep, exponential, glide 0.05", false, {{"time.mode", 0}, {"time.ms", 300}, {"time.law", 1}, {"time.glide", 0.05}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, sweep(200, 400), nullptr, 3.0},
+      {"tempo sweep, crossfade", false, {{"time.mode", 2}, {"time.div", 9}, {"time.tempoMode", 0}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, nullptr, tempo, 3.0},
+      {"tempo sweep, glide", false, {{"time.mode", 2}, {"time.div", 9}, {"time.tempoMode", 1}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, nullptr, tempo, 3.0},
+      {"tempo sweep, follow", false, {{"time.mode", 2}, {"time.div", 9}, {"time.tempoMode", 2}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, nullptr, tempo, 3.0},
+      {"move 250 -> 500 ms, exponential", false, {{"time.mode", 0}, {"time.ms", 250}, {"time.law", 1}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, move(1.0, 500), nullptr, 2.5},
+      {"move 300 -> 200 ms, exponential, glide 0.05", false, {{"time.mode", 0}, {"time.ms", 300}, {"time.law", 1}, {"time.glide", 0.05}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, move(1.0, 200), nullptr, 2.0},
+      {"move 500 -> 100 ms, tape, glide 0.05", false, {{"time.mode", 0}, {"time.ms", 500}, {"time.law", 0}, {"time.glide", 0.05}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, move(1.0, 100), nullptr, 2.0},
+      {"move 500 -> 250 ms, tape", false, {{"time.mode", 0}, {"time.ms", 500}, {"time.law", 0}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, move(1.0, 250), nullptr, 2.5},
+      {"move 500 -> 250 ms, jump", true, {{"time.mode", 0}, {"time.ms", 500}, {"time.change", 2}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, move(1.0, 250), nullptr, 1.5},
+      {"1 Hz sweep 125 ms - 2 s through time.ms, repitch tape", false, {{"time.mode", 0}, {"time.ms", 500}, {"time.change", 0}, {"time.law", 0}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, octaveSweep, nullptr, 3.0},
+      {"1 Hz sweep 125 ms - 2 s through time.ms, repitch exponential", false, {{"time.mode", 0}, {"time.ms", 500}, {"time.change", 0}, {"time.law", 1}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, octaveSweep, nullptr, 3.0},
+      {"1 Hz sweep 125 ms - 2 s through time.ms, crossfade", false, {{"time.mode", 0}, {"time.ms", 500}, {"time.change", 1}, {"time.law", 0}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, octaveSweep, nullptr, 3.0},
+      {"1 Hz sweep 125 ms - 2 s through time.ms, jump", true, {{"time.mode", 0}, {"time.ms", 500}, {"time.change", 2}, {"time.law", 0}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, octaveSweep, nullptr, 3.0},
+      {"division steps, synced 1/4 -> 1/2 -> 1/4 -> 1/8 -> 1/4, repitch tape", false, {{"time.mode", 2}, {"time.div", 9}, {"time.change", 0}, {"time.law", 0}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, divSteps, nullptr, 4.7},
+      {"division steps, synced 1/4 -> 1/2 -> 1/4 -> 1/8 -> 1/4, repitch exponential", false, {{"time.mode", 2}, {"time.div", 9}, {"time.change", 0}, {"time.law", 1}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, divSteps, nullptr, 4.7},
+      {"division steps, synced 1/4 -> 1/2 -> 1/4 -> 1/8 -> 1/4, crossfade", false, {{"time.mode", 2}, {"time.div", 9}, {"time.change", 1}, {"time.law", 0}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, divSteps, nullptr, 4.7},
+      {"division steps, synced 1/4 -> 1/2 -> 1/4 -> 1/8 -> 1/4, jump", true, {{"time.mode", 2}, {"time.div", 9}, {"time.change", 2}, {"time.law", 0}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, divSteps, nullptr, 4.7},
   };
 }
 
@@ -1570,10 +1568,10 @@ long phaseShift(int j, double sr) {
 }
 
 // One reversal gesture: a time move from A to B, reversed `revMs` into its glide (B back to A), through one
-// of the four ways a time moves. Octaves are exact (500 / 250 / 125 ms at 120 bpm: divisions 1/4, 1/8, 1/16).
-enum class RevKey { Ms, Div, ScaleFree, ScaleSync };
+// of the two ways a time moves. Octaves are exact (500 / 250 / 125 ms at 120 bpm: divisions 1/4, 1/8, 1/16).
+enum class RevKey { Ms, Div };
 const char* revKeyName(RevKey k) {
-  return k == RevKey::Ms ? "time.ms" : k == RevKey::Div ? "time.div" : k == RevKey::ScaleFree ? "time.scale free" : "time.scale synced";
+  return k == RevKey::Ms ? "time.ms" : "time.div";
 }
 struct RevCase { int law; RevKey key; int oct; bool up; double revMs; double sr; };
 
@@ -1586,31 +1584,20 @@ ClickRun reversalRun(const RevCase& c, long shift) {
   switch (c.key) {
     case RevKey::Ms: {
       const double A = c.up ? 500.0 / ratio : 500.0, B = c.up ? 500.0 : 500.0 / ratio;
-      kv.insert(kv.end(), {{"time.sync", 0}, {"time.ms", A}});
+      kv.insert(kv.end(), {{"time.mode", 0}, {"time.ms", A}});
       key = "time.ms"; first = B; back = A;
       break;
     }
     case RevKey::Div: {
       const int ia = c.up ? kDiv[c.oct] : kDiv[0], ib = c.up ? kDiv[0] : kDiv[c.oct];
-      kv.insert(kv.end(), {{"time.sync", 1}, {"time.div", static_cast<double>(ia)}});
+      kv.insert(kv.end(), {{"time.mode", 2}, {"time.div", static_cast<double>(ia)}});
       key = "time.div"; first = ib; back = ia;
-      break;
-    }
-    case RevKey::ScaleFree: {  // the same times as Ms, but moved by the scale from a base of A
-      const double A = c.up ? 500.0 / ratio : 500.0;
-      kv.insert(kv.end(), {{"time.sync", 0}, {"time.ms", A}, {"time.scale", 1}});
-      key = "time.scale"; first = c.up ? ratio : 1.0 / ratio; back = 1;
-      break;
-    }
-    case RevKey::ScaleSync: {  // an exact octave of the synced division
-      kv.insert(kv.end(), {{"time.sync", 1}, {"time.div", static_cast<double>(c.up ? kDiv[c.oct] : kDiv[0])}, {"time.scale", 1}});
-      key = "time.scale"; first = c.up ? ratio : 1.0 / ratio; back = 1;
       break;
     }
   }
   // The first move waits 0.7 s: the line holds the probe by then even at 500 ms (output starts at 0.5 s),
   // and 0.5 s after the reversal covers its cap entries and the settling. Shorter than the suite's older
-  // cases on purpose: this check renders 1536 cases (runtime).
+  // cases on purpose: this check renders 768 cases (runtime).
   const long n = S(0.7 + c.revMs / 1000.0 + 0.5, sr);
   const long t0 = S(0.7, sr) + shift, t1 = t0 + S(c.revMs / 1000.0, sr);
   const Vec in = clickProbeAt(n, sr);
@@ -1711,7 +1698,7 @@ bool clickSweep(Detail& d) {
       REQUIRE(w.m2 <= lim, "%s reads M2 %.3f at its worst of %d probe phases (threshold %.3f)", nm, w.m2, kPhases, lim);
     }
   }
-  auto e = mk({{"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}});
+  auto e = mk({{"time.mode", 0}, {"time.ms", 100}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}});
   const long n = S(2.0);
   auto o = run(*e, clickProbe(n), clickProbe(n));
   o.L[S(1.0)] += 0.02;
@@ -1788,15 +1775,15 @@ bool phaseSweepWorks(Detail& d) {
 // SPEC §3.6 (D-049): a move reversed mid-glide reads under the click bar at EVERY probe phase (worst of
 // kPhases), with zero backstop hits and the speed invariants. The unfixed exponential law steps its speed by
 // 1.5 in one sample at a reversal and reads up to 5.1; the unbounded law is the plant expSlewOff. The FULL
-// matrix (D-049 A2): both laws x time.ms / time.div / time.scale free / time.scale synced x 1 and 2 octaves x
-// down and up x reversed at 100 / 200 / 400 ms x 44.1, 48, 96 and 192 kHz (D-049 A4) = 384 cases x 8 phases (the tape
+// matrix (D-049 A2): both laws x time.ms / time.div x 1 and 2 octaves x
+// down and up x reversed at 100 / 200 / 400 ms x 44.1, 48, 96 and 192 kHz (D-049 A4) = 192 cases x 8 phases (the tape
 // law's reversals are gated too: T-041's braking catch-up is what keeps them under the bar at 96 and 192 kHz). The exponential
 // law goes first, so the plant expSlewOff fails after one law's renders, not both.
-constexpr int kReversalCases = 2 * 4 * 2 * 2 * 3 * 4;
+constexpr int kReversalCases = 2 * 2 * 2 * 2 * 3 * 4;
 bool reversalClick(Detail& d) {
   int cases = 0;
   for (const int law : {1, 0})
-    for (const RevKey key : {RevKey::Ms, RevKey::Div, RevKey::ScaleFree, RevKey::ScaleSync})
+    for (const RevKey key : {RevKey::Ms, RevKey::Div})
       for (const int oct : {1, 2})
         for (const bool up : {false, true})
           for (const double rv : {100.0, 200.0, 400.0}) {
@@ -1823,7 +1810,7 @@ bool reversalClick(Detail& d) {
 // (500 -> 250 ms down, 125 -> 500 ms up; the other glides and sizes read identically to 500 -> 250), each at
 // 8 half-period phases and at 44.1, 48, 96 and 192 kHz (D-049 A4). A separate check from the reversals so that the plant
 // expSlewOff fails it for ITS OWN reason too, and a count guard so an emptied selection cannot pass.
-constexpr int kExpClickCases = 7, kPlainOnsets = 2;
+constexpr int kExpClickCases = 6, kPlainOnsets = 2;
 bool onsetClick(Detail& d) {
   struct Onset { double from, to, glide; };
   std::vector<ClickCase> cases;
@@ -1832,7 +1819,7 @@ bool onsetClick(Detail& d) {
   REQUIRE(static_cast<int>(cases.size()) == kExpClickCases, "%zu exponential-law click cases selected, expected %d", cases.size(), kExpClickCases);
   for (const Onset m : {Onset{500, 250, 0.3}, Onset{125, 500, 0.3}})
     cases.push_back(ClickCase{m.from == 500 ? "plain onset 500 -> 250 ms" : "plain onset 125 -> 500 ms", false,
-                              {{"time.sync", 0}, {"time.ms", m.from}, {"time.law", 1}, {"time.glide", m.glide}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}},
+                              {{"time.mode", 0}, {"time.ms", m.from}, {"time.law", 1}, {"time.glide", m.glide}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}},
                               [m](long) { return std::vector<Event>{set(S(1.0), "time.ms", m.to)}; }, nullptr, 3.0});
   REQUIRE(static_cast<int>(cases.size()) == kExpClickCases + kPlainOnsets, "%zu onset cases built", cases.size());
   int ran = 0;
@@ -1869,7 +1856,7 @@ const char* keepName(std::string s) {
 struct StepEv { double at; const char* key; double v; };
 ClickCase stepCase(const std::string& what, int law, int change, double from, std::vector<StepEv> ev, double seconds, bool jump = false) {
   return ClickCase{keepName(std::string(law ? "exponential: " : "tape: ") + what), jump,
-                   {{"time.sync", 0}, {"time.ms", from}, {"time.law", static_cast<double>(law)}, {"time.change", static_cast<double>(change)}, {"time.glide", 0.3},
+                   {{"time.mode", 0}, {"time.ms", from}, {"time.law", static_cast<double>(law)}, {"time.change", static_cast<double>(change)}, {"time.glide", 0.3},
                     {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}},
                    [ev](long) { std::vector<Event> v; for (const StepEv& e : ev) v.push_back(set(S(e.at), e.key, e.v)); return v; }, nullptr, seconds};
 }
@@ -1974,9 +1961,25 @@ std::vector<ClickCase> stepCases() {
   }
   cs.push_back(stepCase("crossfade retargeted mid-fade", 0, 1, 500, {{1.0, "time.ms", 250}, {1.010, "time.ms", 1000}}, 3.0));
   cs.push_back(stepCase("jump retargeted mid-fade", 0, 2, 500, {{1.0, "time.ms", 250}, {1.001, "time.ms", 1000}}, 3.0, true));
+  // T-044 (D-050): a flip into or out of sync is a time move that follows time.change, and reads under the bar like any other, at
+  // the four rates (the old sync key was only ever covered by switchesClickFree, at 48 kHz). time.ms 500 and the division 1/8 (250 ms at
+  // 120 bpm) differ, so every flip moves the time: sec / hz -> sync shortens it (the head runs at speed 2 under repitch),
+  // sync -> sec / hz lengthens it (speed 0.5). Last in the list, so every older plant still stops the gate at its own row.
+  struct Flip { const char* what; double from, to; };
+  const Flip flips[] = {{"sec -> sync", 0, 2}, {"sync -> sec", 2, 0}, {"hz -> sync", 1, 2}, {"sync -> hz", 2, 1}};
+  struct Mode { int law, change; };
+  for (const Mode m : {Mode{0, 0}, Mode{1, 0}, Mode{0, 1}, Mode{0, 2}})
+    for (const Flip& f : flips) {
+      const char* const changeName[3] = {"repitch", "crossfade", "jump"};
+      ClickCase c = stepCase(std::string("time.mode ") + f.what + ", 500 ms / 1/8 (250 ms), " + changeName[m.change], m.law, m.change, 500, {{1.0, "time.mode", f.to}}, 3.0, m.change == 2);
+      for (auto& kv : c.kv)
+        if (std::string_view(kv.first) == "time.mode") kv.second = f.from;
+      c.kv.push_back({"time.div", 12});
+      cs.push_back(c);
+    }
   return cs;
 }
-constexpr int kStepCases = kModRows + 2 + 2 * 7 + 2;
+constexpr int kStepCases = kModRows + 2 + 2 * 7 + 2 + 4 * 4;
 
 // Each modulated row's LFO label is a claim about the offset at the row's first move: read it there, at every rate, on the engine itself
 // (one fresh engine per distinct LFO rate and place: the offset does not depend on the gesture). A crest is +A, a trough -A, a crossing is 0
@@ -1994,7 +1997,7 @@ bool lfoLands(Detail& d) {
   parallelFor(res.size(), [&](std::size_t i) {
     const double sr = kClickRates[i / lfoAts.size()];
     const LfoAt& p = lfoAts[i % lfoAts.size()];
-    auto e = mk({{"time.sync", 0}, {"time.ms", 100}, {"time.change", 0}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}, {"mod.depthMs", 20}, {"mod.rateHz", p.hz}}, sr);
+    auto e = mk({{"time.mode", 0}, {"time.ms", 100}, {"time.change", 0}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}, {"mod.depthMs", 20}, {"mod.rateHz", p.hz}}, sr);
     const long at = std::lround(p.at * sr);
     const Vec in = clickProbeAt(at + 2, sr);
     Vec oL(64), oR(64);
@@ -2081,7 +2084,7 @@ StressRun stressRun(double sr, double depth, double rateHz, int seed) {
   Mulberry r{0x9E3779B9u * static_cast<std::uint32_t>(seed) + static_cast<std::uint32_t>(sr) + static_cast<std::uint32_t>(depth) + static_cast<std::uint32_t>(rateHz * 100)};
   Echo e;
   e.prepare(sr, 4096);
-  const std::pair<const char*, double> kv[] = {{"time.sync", 0}, {"time.ms", 400}, {"time.change", 0}, {"time.glide", 0.3}, {"fb.amount", 0}, {"mod.depthMs", depth},
+  const std::pair<const char*, double> kv[] = {{"time.mode", 0}, {"time.ms", 400}, {"time.change", 0}, {"time.glide", 0.3}, {"fb.amount", 0}, {"mod.depthMs", depth},
                                                {"mod.rateHz", rateHz}, {"mod.shape", 0}, {"filt.loop.on", 0}, {"mix", 100}};
   for (const auto& [k, v] : kv)
     if (!e.setParam(k, v)) { std::fprintf(stderr, "speed stress: setParam(%s) refused\n", k); std::abort(); }
@@ -2162,7 +2165,7 @@ struct OutgoingRun { double worst = 0, worstInFade = 0; };
 OutgoingRun outgoingWorstStep(double sr, int law, double x) {
   Echo e;
   e.prepare(sr, 4096);
-  const std::pair<const char*, double> kv[] = {{"time.sync", 0}, {"time.ms", 20}, {"time.law", static_cast<double>(law)}, {"time.change", 0}, {"time.glide", 0.3}, {"fb.amount", 0},
+  const std::pair<const char*, double> kv[] = {{"time.mode", 0}, {"time.ms", 20}, {"time.law", static_cast<double>(law)}, {"time.change", 0}, {"time.glide", 0.3}, {"fb.amount", 0},
                                                {"filt.loop.on", 0}, {"mix", 100}, {"mod.depthMs", 20}, {"mod.rateHz", 1.25}};
   for (const auto& [k, v] : kv)
     if (!e.setParam(k, v)) { std::fprintf(stderr, "outgoing bound: setParam(%s) refused\n", k); std::abort(); }
@@ -2200,7 +2203,7 @@ OutgoingRun outgoingWorstStep(double sr, int law, double x) {
 double contactWorstStep(double sr, long shift) {
   Echo e;
   e.prepare(sr, 4096);
-  const std::pair<const char*, double> kv[] = {{"time.sync", 0}, {"time.ms", 20}, {"time.law", 0}, {"time.change", 0}, {"time.glide", 0.3}, {"fb.amount", 0},
+  const std::pair<const char*, double> kv[] = {{"time.mode", 0}, {"time.ms", 20}, {"time.law", 0}, {"time.change", 0}, {"time.glide", 0.3}, {"fb.amount", 0},
                                                {"filt.loop.on", 0}, {"mix", 100}, {"mod.depthMs", 20}, {"mod.rateHz", 1.25}};
   for (const auto& [k, v] : kv)
     if (!e.setParam(k, v)) { std::fprintf(stderr, "contact bound: setParam(%s) refused\n", k); std::abort(); }
@@ -2273,7 +2276,7 @@ constexpr long kCatchCapMin = 50;
 struct CatchCase { double from, to, glide; };
 struct CatchRun { long capSamples = 0; double speed = 0, overshoot = 0; std::uint64_t catchUps = 0; };  // speed: the min (shortening) or max (lengthening) after the release
 CatchRun catchUpRun(const CatchCase& c, double sr) {
-  auto e = mk({{"time.sync", 0}, {"time.ms", c.from}, {"time.change", 0}, {"time.law", 0}, {"time.glide", c.glide}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, sr);
+  auto e = mk({{"time.mode", 0}, {"time.ms", c.from}, {"time.change", 0}, {"time.law", 0}, {"time.glide", c.glide}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, sr);
   const long n = S(3.0, sr), at = S(1.0, sr);
   const Vec in(n, 0.1);  // not silent: a silent engine rests, and a resting head lands
   std::vector<double> D(static_cast<std::size_t>(n)), M(static_cast<std::size_t>(n), 0.0);
@@ -2364,7 +2367,7 @@ struct BindSeg { long start, last; };  // a segment's first sample (-1: before a
 struct BindRun { std::vector<BindSeg> segs; };
 
 BindRun renderBinds(const BindJob& j) {
-  auto e = mk({{"time.sync", 0}, {"time.ms", j.scn.startMs}, {"time.change", 0}, {"time.law", 1}, {"time.glide", j.glide}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100},
+  auto e = mk({{"time.mode", 0}, {"time.ms", j.scn.startMs}, {"time.change", 0}, {"time.law", 1}, {"time.glide", j.glide}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100},
                {"mod.depthMs", j.mod ? 20 : 0}, {"mod.rateHz", 10}}, j.sr);
   const long n = S(1.6, j.sr);
   const Vec in = clickProbeAt(n, j.sr);
@@ -2428,31 +2431,15 @@ bool expSlewBinds(Detail& d) {
   return true;
 }
 
-// ---- M3 B4, T-038: time.scale (SPEC §3.1, §3.4, §3.5; D-048) ----------------------
+// ---- M3 B4, T-044: time.mode, Time in Sec, Hz or Sync (SPEC §3.1, §3.4, §3.5; D-050) ----------------------
 
-// An independent reading of SPEC §3 with the scale, written here from the spec and not from the
-// engine: base x scale, x (1 + offset), then §3.4 (synced: halve both until the longer fits;
-// free: 12 s; 1 ms below). While synced the scale is the NEAREST octave of the five (x1/4 ... x4):
-// it snaps up past the boundary 2^(k + 1/2) iff s^2 > 2^(2k + 1). The square is compared EXACTLY
-// (the rounded product p and its fma residual r, s^2 = p + r), so the reference shares neither the
-// engine's mantissa compare nor any log2 (critic T-038 L1: log2's last bit is a libm's).
+// An independent reading of SPEC §3, written here from the spec and not from the engine: the base time (time.ms / 1000
+// in sec and hz, §3.1: Hz is only how time.ms is read; the division's beats at the host tempo in sync), x (1 + offset),
+// then §3.4 (synced: halve both until the longer fits; free: 12 s; 1 ms below).
 struct RefTimes { double tL, tR; bool folded; };
-int refOctave(double s) {
-  int oct = -2;
-  for (int k = -2; k <= 1; ++k) {
-    const double b = std::ldexp(1.0, 2 * k + 1);  // the square of the boundary, a power of two
-    const double p = s * s;
-    const double r = std::fma(s, s, -p);
-    const double dp = p - b;                      // exact: p and b are within a factor of two
-    if (dp > 0 || (dp == 0 && r > 0)) oct = k + 1;  // an exact tie is impossible (the boundary is irrational)
-  }
-  return oct;
-}
-RefTimes refTimes(bool sync, double ms, int div, double bpm, double scale, double offL, double offR) {
-  double base = sync ? echo::kDivisions[static_cast<std::size_t>(div)].beats * 60.0 / bpm : ms / 1000.0;
-  double sc = scale;
-  if (sync) sc = std::ldexp(1.0, refOctave(scale));
-  base *= sc;
+RefTimes refTimes(int mode, double ms, int div, double bpm, double offL, double offR) {
+  const bool sync = mode == 2;
+  const double base = sync ? echo::kDivisions[static_cast<std::size_t>(div)].beats * 60.0 / bpm : ms / 1000.0;
   RefTimes r{base * (1.0 + offL / 100.0), base * (1.0 + offR / 100.0), false};
   if (sync)
     while (std::max(r.tL, r.tR) > 12.0) { r.tL *= 0.5; r.tR *= 0.5; r.folded = true; }
@@ -2461,184 +2448,303 @@ RefTimes refTimes(bool sync, double ms, int div, double bpm, double scale, doubl
   return r;
 }
 
-// SPEC §3.1 / §3.4 (D-048): base x scale, then the offsets, then the clamp. Free: the scale itself;
-// synced: the nearest octave. Every octave and both sides of every snap boundary, then a clamp
-// that only the order scale-then-clamp gets right, at 44.1 and 96 kHz.
-bool scaleResolution(Detail& d) {
-  struct Cfg { bool sync; double ms; int div; double bpm; double scale, offL, offR; const char* what; };
+// SPEC §3.1 / §3.4 (D-050): the resolved times in all three modes against the independent reading above: the offsets,
+// then the 12 s fold (synced) or clamp (free) and the 1 ms floor. Sec and hz read one time.ms; sync reads the division
+// at the host tempo. Every case sets time.ms AND the division so that they differ, so a mode that reads the wrong one
+// (the plant hzCountsAsSync plays the division in hz) resolves a different time. At 44.1 and 96 kHz.
+bool timeResolution(Detail& d) {
+  struct Cfg { int mode; double ms; int div; double bpm, offL, offR; const char* what; };
+  static const char* const kModeName[3] = {"sec", "hz", "sync"};
   auto engineTimes = [](const Cfg& c, double sr) {
-    auto e = mk({{"time.sync", c.sync ? 1.0 : 0.0}, {"time.ms", c.ms}, {"time.div", static_cast<double>(c.div)}, {"time.offL", c.offL},
-                 {"time.offR", c.offR}, {"time.scale", c.scale}}, sr);
+    auto e = mk({{"time.mode", static_cast<double>(c.mode)}, {"time.ms", c.ms}, {"time.div", static_cast<double>(c.div)}, {"time.offL", c.offL},
+                 {"time.offR", c.offR}}, sr);
     const Vec z = zeros(64);
     run(*e, z, z, {}, c.bpm);
     return std::make_pair(e->resolvedTimes(), e->folded());
   };
   auto same = [](double a, double b) { return std::fabs(a - b) <= 1e-12 * std::max(1.0, std::fabs(b)); };
   std::vector<Cfg> cases;
-  // 1. the five octaves exactly, free and synced (1/4 at 120 bpm is 0.5 s).
-  for (double s : {0.25, 0.5, 1.0, 2.0, 4.0}) {
-    cases.push_back({false, 100, 9, 120, s, 0, 0, "free octave"});
-    cases.push_back({true, 100, 9, 120, s, 0, 0, "synced octave"});
+  // 1. sec and hz read time.ms: the knob's Hz reading (Hz = 1000 / ms) over its range, 1000 Hz to 0.083 Hz, at a tempo and a division
+  //    that give another time (1/8 at 97 bpm is 309.28 ms)
+  for (const int mode : {0, 1})
+    for (const double ms : {1.0, 2.0, 1000.0 / 440.0, 100.0, 1000.0 / 3.0, 375.0, 1000.0, 5000.0, 12000.0})
+      cases.push_back({mode, ms, 12, 97, 0, 0, "time.ms with the offsets at zero"});
+  // 2. offsets come first; the clamp and the floor come after them
+  for (const int mode : {0, 1}) {
+    cases.push_back({mode, 12000, 9, 120, 0, 50, "12 s, +50 % R (clamped to 12 s)"});
+    cases.push_back({mode, 8000, 9, 120, -25, 40, "8 s, -25 / +40 % (the right line clamped)"});
+    cases.push_back({mode, 1, 9, 120, -50, 0, "1 ms, -50 % L (floored at 1 ms)"});
+    cases.push_back({mode, 100, 9, 120, 10, -20, "100 ms, +10 / -20 %"});
   }
-  // 2. both sides of each snap boundary 2^(k + 1/2): just under snaps down, just over snaps up;
-  //    and the extremes of the range.
-  for (int k = -2; k <= 1; ++k) {
-    const double edge = std::pow(2.0, k + 0.5);
-    cases.push_back({true, 100, 9, 120, edge * (1.0 - 1e-6), 0, 0, "synced just under a snap boundary"});
-    cases.push_back({true, 100, 9, 120, edge * (1.0 + 1e-6), 0, 0, "synced just over a snap boundary"});
+  // 3. sync reads the division at the host tempo, every division, and folds past 12 s (never clamps)
+  for (int div = 0; div < 22; ++div) cases.push_back({2, 123, div, 120, 0, 0, "every division at 120 bpm"});
+  for (const double bpm : {30.0, 40.0, 61.0, 133.3, 240.0}) {
+    cases.push_back({2, 123, 0, bpm, 0, 0, "2/1 across the fold's edge"});
+    cases.push_back({2, 123, 3, bpm, 0, 50, "1/1, +50 % R"});
+    cases.push_back({2, 123, 12, bpm, -25, 40, "1/8, -25 / +40 %"});
   }
-  // 2b. the DOUBLES nearest each boundary and their neighbours: sqrt2 x 2^k is the double nearest 2^(k + 1/2) and lies just
-  //     above it, so it snaps up; one ulp below it snaps down (round(log2 s) gets the first wrong: log2 returns exactly k + 1/2).
-  for (int k = -2; k <= 1; ++k) {
-    const double edge = std::ldexp(std::numbers::sqrt2, k);
-    cases.push_back({true, 100, 9, 120, std::nextafter(edge, 0.0), 0, 0, "synced one ulp under the double nearest a boundary"});
-    cases.push_back({true, 100, 9, 120, edge, 0, 0, "synced the double nearest a boundary"});
-    cases.push_back({true, 100, 9, 120, std::nextafter(edge, 8.0), 0, 0, "synced one ulp over the double nearest a boundary"});
-  }
-  // 3. a free scale is continuous.
-  for (double s : {0.3, 0.7, 1.3, 1.5, 3.1}) cases.push_back({false, 140, 9, 120, s, 0, 0, "free continuous"});
-  // 4. offsets come after the scale; the clamp comes after both.
-  cases.push_back({false, 12000, 9, 120, 0.5, 0, 50, "free 12 s x1/2, +50 % R"});
-  cases.push_back({true, 100, 0, 30, 2.0, 0, 0, "synced 2/1 at 30 bpm x2"});
-  cases.push_back({false, 2, 9, 120, 0.25, 0, 0, "free 2 ms x1/4"});
-  cases.push_back({false, 5000, 9, 120, 4.0, 0, 0, "free 5 s x4"});
-  cases.push_back({true, 100, 0, 40, 0.25, 0, 50, "synced 2/1 at 40 bpm x1/4, +50 % R"});
-  cases.push_back({true, 100, 0, 40, 4.0, 0, 50, "synced 2/1 at 40 bpm x4, +50 % R"});
-  cases.push_back({true, 100, 12, 90, 2.0, -25, 40, "synced 1/8 at 90 bpm x2, -25 / +40 %"});
+  cases.push_back({2, 123, 0, 40, 0, 50, "2/1 at 40 bpm, +50 % R (18 s, halved once)"});
   for (double sr : {44100.0, 96000.0})
     for (const auto& c : cases) {
       const auto [t, folded] = engineTimes(c, sr);
-      const RefTimes r = refTimes(c.sync, c.ms, c.div, c.bpm, c.scale, c.offL, c.offR);
+      const RefTimes r = refTimes(c.mode, c.ms, c.div, c.bpm, c.offL, c.offR);
       REQUIRE(same(t[0], r.tL) && same(t[1], r.tR) && folded == r.folded,
-              "%s (x%.9g) at %.0f Hz: resolved %.9f / %.9f s%s, SPEC gives %.9f / %.9f s%s", c.what, c.scale, sr, t[0], t[1], folded ? " folded" : "", r.tL,
-              r.tR, r.folded ? " folded" : "");
+              "%s, %s (time.ms %.9g, division %d, %g bpm, offsets %g / %g %%) at %.0f Hz: resolved %.9f / %.9f s%s, SPEC gives %.9f / %.9f s%s", kModeName[c.mode],
+              c.what, c.ms, c.div, c.bpm, c.offL, c.offR, sr, t[0], t[1], folded ? " folded" : "", r.tL, r.tR, r.folded ? " folded" : "");
     }
-  // The three clamp cases by hand (the independent reading above could share a slip with the engine).
+  // By hand (the independent reading above could share a slip with the engine).
   {
-    const auto [t, f] = engineTimes({false, 12000, 9, 120, 0.5, 0, 50, ""}, 48000);
-    REQUIRE(same(t[0], 6.0) && same(t[1], 9.0) && !f, "free 12 s x1/2 with +50 %% R plays %.6f / %.6f s, expected 6 / 9", t[0], t[1]);
-    const auto [u, g] = engineTimes({true, 100, 0, 30, 2.0, 0, 0, ""}, 48000);
-    REQUIRE(same(u[0], 8.0) && g, "2/1 at 30 bpm x2 (32 s) plays %.6f s, expected 8 (halved twice)", u[0]);
-    const auto [v, h] = engineTimes({false, 2, 9, 120, 0.25, 0, 0, ""}, 48000);
-    REQUIRE(v[0] == 0.001 && !h, "2 ms x1/4 (0.5 ms) must floor at 1 ms, resolved %.6f s", v[0]);
-  }
-  {  // horde's log law at knob 0.125 gives 0.35355339059327379, above the boundary: x1/2 (0.25 s), not x1/4
-    const auto [t, f] = engineTimes({true, 100, 9, 120, 0.35355339059327379, 0, 0, ""}, 48000);
-    REQUIRE(same(t[0], 0.25) && !f, "synced 1/4 at 120 bpm, scale 0.35355339059327379 (above the 2^-1.5 boundary) plays %.9f s, expected 0.25 (x1/2)", t[0]);
-  }
-  // A tempo change keeps the snapped scale: x2 on 1/4 follows the host's tempo.
-  {
-    auto e = mk({{"time.sync", 1}, {"time.div", 9}, {"time.scale", 1.6}});
-    const Vec z = zeros(64);
-    run(*e, z, z, {}, 60.0);
-    REQUIRE(same(e->resolvedTimes()[0], 2.0), "1/4 at 60 bpm, scale 1.6 (snaps to x2) resolves %.6f s, expected 2", e->resolvedTimes()[0]);
+    const auto [t, f] = engineTimes({0, 12000, 9, 120, 0, 50, ""}, 48000);
+    REQUIRE(same(t[0], 12.0) && same(t[1], 12.0) && !f, "sec 12 s with +50 %% R plays %.6f / %.6f s, expected 12 / 12", t[0], t[1]);
+    const auto [u, g] = engineTimes({2, 100, 0, 30, 0, 0, ""}, 48000);
+    REQUIRE(same(u[0], 8.0) && g, "2/1 at 30 bpm (16 s) plays %.6f s, expected 8 (halved once)", u[0]);
+    const auto [v, h] = engineTimes({0, 1, 9, 120, -50, 0, ""}, 48000);
+    REQUIRE(v[0] == 0.001 && !h, "1 ms with -50 %% L (0.5 ms) must floor at 1 ms, resolved %.6f s", v[0]);
+    const auto [w, k] = engineTimes({1, 1000, 12, 97, 0, 0, ""}, 48000);  // hz: 1 s is 1 Hz, whatever the division and the tempo
+    REQUIRE(same(w[0], 1.0) && !k, "hz with time.ms 1000 (1 Hz) plays %.9f s, expected 1 (the division and the tempo are not read)", w[0]);
   }
   return true;
 }
 
-// SPEC §3.5 (D-048): a scale move is a control move. It follows time.change (repitch by the law,
-// crossfade over time.xfadeMs, jump over 3 ms) and is latched like any time move. Proven by twins:
-// the same move made through time.ms (free) or time.div (synced) to the same resulting time must be
-// bit-identical, whatever the mode; and a time.change flip while the move is in flight changes nothing.
-// The synced twins run twice: at a steady tempo, and (critic T-038 H1) after a tempo STEP, with a
-// time.tempoMode that differs from the time.change under test. At a steady tempo the head's last move is
-// never a tempo move, so a scale move that never marks itself a control move (never clears the head's
-// tempo flag) is invisible; after a tempo step the head is latched to tempoMode and only a real control
-// move re-latches it to time.change.
-bool scaleControlMove(Detail& d) {
+// SPEC §3.5 (D-050): a mode flip that moves a time is a control move. It follows time.change (repitch by the law,
+// crossfade over time.xfadeMs, jump over 3 ms) and is latched like any time move. Proven by twins: the same move made
+// through time.ms (from sec or hz) or time.div (from sync) to the same resulting time must be bit-identical, and a
+// time.change flip while the move is in flight changes nothing. The sync -> sec / hz flips run twice: at a steady tempo,
+// and after a tempo STEP, with a time.tempoMode that differs from the time.change under test. At a steady tempo the
+// head's last move is never a tempo move, so a flip that never marks itself a control move (never clears the head's tempo
+// flag: the plant modeFlipSwallowed) is invisible; after a tempo step the head is latched to tempoMode and only a real
+// control move re-latches it to time.change.
+bool modeFlipControlMove(Detail& d) {
   struct Mode { int change, law; const char* name; };
+  // A flip, with the tempo it runs at: from / to are time.mode values. Into sync the flip lands on division 9 (1/4: 500 ms
+  // at 120 bpm, 400 ms at 150) and the twin's time.ms move lands on the same instant; out of sync the flip lands on a
+  // time.ms of that instant and the twin's time.div move on division 9. The start is division 12 (1/8) or time.ms 100.
+  struct Flip { int from, to; bool stepped; const char* what; };
+  const Flip flips[] = {{0, 2, false, "sec -> sync"},  {1, 2, false, "hz -> sync"},  {2, 1, false, "sync -> hz"},
+                        {0, 2, true, "sec -> sync after a tempo step"},  {2, 1, true, "sync -> hz after a tempo step"},
+                        {2, 0, true, "sync -> sec after a tempo step"}};
   const long n = S(2.0);
-  for (int variant = 0; variant < 3; ++variant) {  // 0 free, 1 synced at a steady tempo, 2 synced after a tempo step
-    const bool synced = variant > 0, stepped = variant == 2;
-    const char* where = !synced ? "free" : stepped ? "synced after a tempo step" : "synced";
+  for (const Flip& f : flips) {
     for (const Mode m : {Mode{0, 0, "repitch tape"}, Mode{0, 1, "repitch exponential"}, Mode{1, 0, "crossfade"}, Mode{2, 0, "jump"}}) {
       g_rng = 31 + static_cast<std::uint32_t>(m.change * 3 + m.law);
       Vec in = zeros(n);
       for (long i = 0; i < S(0.8); ++i) in[static_cast<std::size_t>(i)] = 0.4 * noise();
       // tempoMode: 0 crossfade, 1 glide. Never the behaviour time.change is set to (crossfade or jump under change 1 / 2, repitch under 0).
       const double tempoMode = m.change == 1 ? 1.0 : 0.0;
+      const double landMs = f.stepped ? 400.0 : 500.0;  // division 9 at the tempo the flip runs at
+      const bool fromSync = f.from == 2;
       auto make = [&] {
-        return synced ? mk({{"time.sync", 1}, {"time.div", 12}, {"time.change", static_cast<double>(m.change)}, {"time.law", static_cast<double>(m.law)},
-                            {"time.tempoMode", tempoMode}, {"time.glide", 0.2}, {"fb.amount", 50}, {"mix", 100}})
-                      : mk({{"time.sync", 0}, {"time.ms", 100}, {"time.change", static_cast<double>(m.change)}, {"time.law", static_cast<double>(m.law)},
-                            {"time.glide", 0.2}, {"fb.amount", 50}, {"mix", 100}});
+        return mk({{"time.mode", static_cast<double>(f.from)}, {"time.div", fromSync ? 12.0 : 9.0}, {"time.ms", fromSync ? landMs : 100.0},
+                   {"time.change", static_cast<double>(m.change)}, {"time.law", static_cast<double>(m.law)}, {"time.tempoMode", tempoMode},
+                   {"time.glide", 0.2}, {"fb.amount", 50}, {"mix", 100}});
       };
-      const long at = stepped ? S(1.2) : S(0.9);
-      auto bpmAt = [stepped](long i) { return stepped && i >= S(0.5) ? 140.0 : 120.0; };
-      auto go = [&](Echo& e, std::vector<Event> ev) {
-        return stepped ? runEach(e, in, in, std::move(ev), bpmAt, [](long, Echo&) {}) : run(e, in, in, std::move(ev));
-      };
-      auto viaScale = make(), viaKey = make(), flipped = make(), still = make();
-      const auto oScale = go(*viaScale, {set(at, "time.scale", 2)});
-      // The same resulting time through a key that is already known to be a time move: 1/8 -> 1/4 and 100 -> 200 ms.
-      const auto oKey = go(*viaKey, {synced ? set(at, "time.div", 9) : set(at, "time.ms", 200)});
-      const auto oFlip = go(*flipped, {set(at, "time.scale", 2), set(at + S(0.02), "time.change", m.change == 2 ? 1.0 : 2.0)});
+      const long at = f.stepped ? S(1.2) : S(0.9);
+      auto bpmAt = [stepped = f.stepped](long i) { return stepped && i >= S(0.5) ? 150.0 : 120.0; };
+      auto go = [&](Echo& e, std::vector<Event> ev) { return runEach(e, in, in, std::move(ev), bpmAt, [](long, Echo&) {}); };
+      auto viaFlip = make(), viaKey = make(), flipped = make(), still = make();
+      const auto oFlip = go(*viaFlip, {set(at, "time.mode", static_cast<double>(f.to))});
+      // The same resulting time through a key that is already known to be a time move.
+      const auto oKey = go(*viaKey, {fromSync ? set(at, "time.div", 9) : set(at, "time.ms", landMs)});
+      const auto oChg = go(*flipped, {set(at, "time.mode", static_cast<double>(f.to)), set(at + S(0.02), "time.change", m.change == 2 ? 1.0 : 2.0)});
       const auto oStill = go(*still, {});
       for (long i = 0; i < n; ++i)
-        REQUIRE(oScale.L[i] == oKey.L[i] && oScale.R[i] == oKey.R[i],
-                "%s, %s: a time.scale move differs from the same move through the time key at sample %ld (%.17g vs %.17g): it does not follow time.change",
-                where, m.name, i, oScale.L[i], oKey.L[i]);
+        REQUIRE(oFlip.L[i] == oKey.L[i] && oFlip.R[i] == oKey.R[i],
+                "%s, %s: a time.mode flip differs from the same move through the time key at sample %ld (%.17g vs %.17g): it does not follow time.change",
+                f.what, m.name, i, oFlip.L[i], oKey.L[i]);
       for (long i = 0; i < n; ++i)
-        REQUIRE(oScale.L[i] == oFlip.L[i] && oScale.R[i] == oFlip.R[i],
-                "%s, %s: flipping time.change 20 ms into a scale move changed sample %ld: the move was not latched at its start", where, m.name, i);
+        REQUIRE(oFlip.L[i] == oChg.L[i] && oFlip.R[i] == oChg.R[i],
+                "%s, %s: flipping time.change 20 ms into a mode flip changed sample %ld: the move was not latched at its start", f.what, m.name, i);
       double moved = 0;
-      for (long i = at; i < n; ++i) moved = std::max(moved, std::fabs(oScale.L[i] - oStill.L[i]));
-      REQUIRE(moved > 1e-3, "%s, %s: the case is vacuous: the scale move leaves the render unchanged (%.3g)", where, m.name, moved);
+      for (long i = at; i < n; ++i) moved = std::max(moved, std::fabs(oFlip.L[i] - oStill.L[i]));
+      REQUIRE(moved > 1e-3, "%s, %s: the case is vacuous: the flip leaves the render unchanged (%.3g)", f.what, m.name, moved);
     }
+  }
+  // A flip that lands on the time already playing moves nothing (SPEC §3.5), so in the sample a tempo step lands it must not re-latch the
+  // tempo move to time.change: sec / hz -> sync with time.ms 500 = 1/4 at 120 bpm, the tempo stepping to 150 in that very sample, is
+  // bit-identical to a patch synced all along. (The plant modeFlipAlwaysMove marks every flip a move.)
+  for (const int from : {0, 1})
+    for (const Mode m : {Mode{0, 0, "repitch tape"}, Mode{0, 1, "repitch exponential"}, Mode{1, 0, "crossfade"}, Mode{2, 0, "jump"}}) {
+      g_rng = 91 + static_cast<std::uint32_t>(m.change * 3 + m.law);
+      Vec in = zeros(n);
+      for (long i = 0; i < S(0.8); ++i) in[static_cast<std::size_t>(i)] = 0.4 * noise();
+      const double tempoMode = m.change == 1 ? 1.0 : 0.0;
+      auto make = [&](int mode) {
+        return mk({{"time.mode", static_cast<double>(mode)}, {"time.div", 9}, {"time.ms", 500}, {"time.change", static_cast<double>(m.change)},
+                   {"time.law", static_cast<double>(m.law)}, {"time.tempoMode", tempoMode}, {"time.glide", 0.2}, {"fb.amount", 50}, {"mix", 100}});
+      };
+      const long at = S(0.9);
+      auto bpmAt = [at](long i) { return i >= at ? 150.0 : 120.0; };
+      auto go = [&](Echo& e, std::vector<Event> ev) { return runEach(e, in, in, std::move(ev), bpmAt, [](long, Echo&) {}); };
+      auto flip = make(from), synced = make(2), steady = make(2);
+      const auto oFlip = go(*flip, {set(at, "time.mode", 2)}), oSync = go(*synced, {});
+      const auto oSteady = runEach(*steady, in, in, {}, [](long) { return 120.0; }, [](long, Echo&) {});
+      for (long i = 0; i < n; ++i)
+        REQUIRE(oFlip.L[i] == oSync.L[i] && oFlip.R[i] == oSync.R[i],
+                "%s -> sync at the same time (500 ms) in the sample a tempo step lands, %s: differs from a patch synced all along at sample %ld (%.17g vs %.17g): the flip was counted as a move",
+                from ? "hz" : "sec", m.name, i, oFlip.L[i], oSync.L[i]);
+      double stepped = 0;
+      for (long i = at; i < n; ++i) stepped = std::max(stepped, std::fabs(oSync.L[i] - oSteady.L[i]));
+      REQUIRE(stepped > 1e-3, "%s: the case is vacuous: the tempo step leaves the render unchanged (%.3g)", m.name, stepped);
+    }
+  // The stale latch: a synced head latched to time.tempoMode by a tempo step keeps that latch through a same-time flip to sec (a
+  // non-move) and through a tempo move nobody follows, so the flip back INTO sync is a real move that must follow time.change. Against
+  // the twin that stays in sec and makes the same move through time.ms. sec never sets the tempo latch, so the row "sec -> sync after
+  // a tempo step" above cannot see a flip into sync that goes unmarked (the plant modeFlipIntoSyncSwallowed); this one can.
+  for (const Mode m : {Mode{0, 0, "repitch tape"}, Mode{0, 1, "repitch exponential"}, Mode{1, 0, "crossfade"}, Mode{2, 0, "jump"}}) {
+    g_rng = 111 + static_cast<std::uint32_t>(m.change * 3 + m.law);
+    const long nn = S(2.6);
+    Vec in = zeros(nn);
+    for (long i = 0; i < S(0.8); ++i) in[static_cast<std::size_t>(i)] = 0.4 * noise();
+    const double tempoMode = m.change == 1 ? 1.0 : 0.0;
+    auto make = [&] {
+      return mk({{"time.mode", 2}, {"time.div", 9}, {"time.ms", 400}, {"time.change", static_cast<double>(m.change)}, {"time.law", static_cast<double>(m.law)},
+                 {"time.tempoMode", tempoMode}, {"time.glide", 0.2}, {"fb.amount", 50}, {"mix", 100}});
+    };
+    // 120 -> 150 bpm at 0.5 s (1/4 = 400 ms), the flip to sec at 1.2 s lands on that same 400 ms, the tempo falls to 100 bpm at 1.5 s
+    // (unheard in sec), and at 1.8 s the flip into sync lands on 1/4 at 100 bpm = 600 ms.
+    auto bpmAt = [](long i) { return i < S(0.5) ? 120.0 : i < S(1.5) ? 150.0 : 100.0; };
+    auto go = [&](Echo& e, std::vector<Event> ev) { return runEach(e, in, in, std::move(ev), bpmAt, [](long, Echo&) {}); };
+    auto viaFlip = make(), viaKey = make(), still = make();
+    const auto oFlip = go(*viaFlip, {set(S(1.2), "time.mode", 0), set(S(1.8), "time.mode", 2)});
+    const auto oKey = go(*viaKey, {set(S(1.2), "time.mode", 0), set(S(1.8), "time.ms", 600)});
+    const auto oStill = go(*still, {set(S(1.2), "time.mode", 0)});
+    for (long i = 0; i < nn; ++i)
+      REQUIRE(oFlip.L[i] == oKey.L[i] && oFlip.R[i] == oKey.R[i],
+              "stale latch, %s: the flip into sync after a tempo step, a same-time flip to sec and a tempo move differs from the same move through time.ms at sample %ld (%.17g vs %.17g): it did not follow time.change",
+              m.name, i, oFlip.L[i], oKey.L[i]);
+    double moved = 0;
+    for (long i = S(1.8); i < nn; ++i) moved = std::max(moved, std::fabs(oFlip.L[i] - oStill.L[i]));
+    REQUIRE(moved > 1e-3, "stale latch, %s: the case is vacuous: the flip into sync leaves the render unchanged (%.3g)", m.name, moved);
   }
   return true;
 }
 
-// At x1 nothing changes (D-048, criterion 3): a fixed set of renders (each routing mode, free and synced,
-// a moving time under each time.change mode, the host tempo sweeping while synced and tempoMode on
-// crossfade) is bit-identical with the key absent, with x1 sent at the start and re-sent every 64
-// samples, and (synced) with a scale wandering inside one octave's snap band, which moves no time.
-// The last two are the traps: a send that moves nothing must not count as a control move, or a tempo
-// move in flight is re-latched to time.change.
-bool scaleUnity(Detail& d) {
-  const long n = S(1.0);
-  for (int route = 0; route < 3; ++route)
-    for (int sync = 0; sync < 2; ++sync)
-      for (int change = 0; change < 3; ++change)
-        for (int moving = 0; moving < 2; ++moving) {
-          g_rng = 11 + static_cast<std::uint32_t>(route * 17 + sync * 5 + change);
-          Vec inL(static_cast<std::size_t>(n), 0.0), inR = inL;
-          for (long i = 0; i < S(0.3); ++i) { inL[static_cast<std::size_t>(i)] = 0.4 * noise(); inR[static_cast<std::size_t>(i)] = 0.4 * noise(); }
-          auto bpmAt = [sync](long i) { return sync ? 100.0 + 40.0 * std::sin(2 * kPi * static_cast<double>(i) / kSr) : 120.0; };
-          auto render = [&](int variant) {
-            auto e = mk({{"route.mode", static_cast<double>(route)}, {"time.sync", static_cast<double>(sync)}, {"time.change", static_cast<double>(change)},
-                         {"time.tempoMode", 0}, {"time.ms", 150}, {"time.div", 12}, {"fb.amount", 60}, {"mix", 60}, {"time.offR", 12},
-                         {"mod.depthMs", 2}, {"mod.shape", 1}});
-            std::vector<Event> ev;
-            if (moving) ev.push_back(sync ? set(S(0.5), "time.div", 9) : set(S(0.5), "time.ms", 260));
-            if (variant == 1) {
-              e->setParam("time.scale", 1.0);
-              for (long i = 0; i < n; i += 64) ev.push_back(set(i, "time.scale", 1.0));
-            }
-            if (variant == 2)  // ripples through 0.8 .. 1.2: inside the x1 band (0.7071 .. 1.4142) while synced
-              for (long i = 0; i < n; i += 64) ev.push_back(set(i, "time.scale", 1.0 + 0.2 * std::sin(2 * kPi * static_cast<double>(i) / 5000.0)));
-            return runEach(*e, inL, inR, ev, bpmAt, [](long, Echo&) {});
-          };
-          const Out absent = render(0);
-          REQUIRE(maxAbs(absent.L) > 0.01, "the case is vacuous: no output (route %d, sync %d, change %d)", route, sync, change);
-          for (int variant = 1; variant <= (sync ? 2 : 1); ++variant) {
-            const Out o = render(variant);
-            for (long i = 0; i < n; ++i)
-              REQUIRE(o.L[i] == absent.L[i] && o.R[i] == absent.R[i],
-                      "route %d, %s, time.change %d, %s: %s differs from the key absent at sample %ld (%.17g vs %.17g)", route, sync ? "synced" : "free", change,
-                      moving ? "moving" : "steady", variant == 1 ? "x1 re-sent every 64 samples" : "a scale inside the x1 band", i, o.L[i], absent.L[i]);
-          }
-        }
+// SPEC §3.5 (D-050): a key send that moves no time is not a move. time.ms while synced is stored, not read; a re-sent value, and a
+// division or an offset that lands on the time already playing, move nothing. A move landing in the same sample (a tempo step) must
+// keep its time.tempoMode latch instead of following time.change. (1) In the sample a tempo step lands, on a synced patch under time.change
+// jump and each time.tempoMode: time.ms moved or re-sent, time.div and time.offL re-sent, each bit-identical to no send. (2) The realistic
+// host: 512-sample blocks, a tempo ramp, time.ms automated every block: bit-identical to no automation, at every time.tempoMode.
+// (The plant keyResendIsMove restores the unconditional mark.)
+bool resendIsNoMove(Detail& d) {
+  struct Send { const char* what; const char* key; double v; };
+  const Send sends[] = {{"time.ms moved (100 -> 250)", "time.ms", 250}, {"time.ms re-sent (100)", "time.ms", 100}, {"time.div re-sent (1/4)", "time.div", 9},
+                        {"time.offL re-sent (0)", "time.offL", 0}, {"time.offR re-sent (0)", "time.offR", 0}};
+  const long n = S(2.0), at = S(1.0);
+  for (int tempoMode = 0; tempoMode < 3; ++tempoMode) {
+    g_rng = 121 + static_cast<std::uint32_t>(tempoMode);
+    Vec in = zeros(n);
+    for (long i = 0; i < S(0.8); ++i) in[static_cast<std::size_t>(i)] = 0.4 * noise();
+    auto make = [&] {
+      return mk({{"time.mode", 2}, {"time.div", 9}, {"time.ms", 100}, {"time.change", 2}, {"time.tempoMode", static_cast<double>(tempoMode)},
+                 {"time.glide", 0.2}, {"fb.amount", 50}, {"mix", 100}});
+    };
+    auto bpmAt = [at](long i) { return i >= at ? 150.0 : 120.0; };
+    auto go = [&](Echo& e, std::vector<Event> ev) { return runEach(e, in, in, std::move(ev), bpmAt, [](long, Echo&) {}); };
+    auto base = make(), steady = make();
+    const auto o0 = go(*base, {});
+    const auto oSteady = runEach(*steady, in, in, {}, [](long) { return 120.0; }, [](long, Echo&) {});
+    double stepped = 0;
+    for (long i = at; i < n; ++i) stepped = std::max(stepped, std::fabs(o0.L[i] - oSteady.L[i]));
+    REQUIRE(stepped > 1e-3, "tempoMode %d: the case is vacuous: the tempo step leaves the render unchanged (%.3g)", tempoMode, stepped);
+    for (const Send& sd : sends) {
+      auto e = make();
+      const auto o = go(*e, {set(at, sd.key, sd.v)});
+      for (long i = 0; i < n; ++i)
+        REQUIRE(o.L[i] == o0.L[i] && o.R[i] == o0.R[i],
+                "tempoMode %d, %s in the sample a tempo step lands: differs from no send at sample %ld (%.17g vs %.17g): the send was counted as a move and the tempo move followed time.change",
+                tempoMode, sd.what, i, o.L[i], o0.L[i]);
+    }
+    // (2) the host: blocks of 512, the tempo ramping 120 -> 150 bpm over 0.5 - 1.5 s, time.ms automated at every block start
+    auto host = [&](bool automate) {
+      auto e = make();
+      Out o{zeros(n), zeros(n)};
+      for (long pos = 0, blk = 0; pos < n; pos += 512, ++blk) {
+        const long len = std::min<long>(512, n - pos);
+        if (automate) e->setParam("time.ms", 100.0 + 50.0 * std::sin(static_cast<double>(blk)));
+        const double t = static_cast<double>(pos) / kSr, bpm = 120.0 + 30.0 * std::clamp((t - 0.5) / 1.0, 0.0, 1.0);
+        const auto u = static_cast<std::size_t>(pos);
+        e->process(in.data() + u, in.data() + u, o.L.data() + u, o.R.data() + u, static_cast<int>(len), bpm);
+      }
+      return o;
+    };
+    const Out h0 = host(false), h1 = host(true);
+    for (long i = 0; i < n; ++i)
+      REQUIRE(h1.L[i] == h0.L[i] && h1.R[i] == h0.R[i],
+              "tempoMode %d: time.ms automated every 512-sample block on a synced patch under a tempo ramp differs from no automation at sample %ld (%.17g vs %.17g)",
+              tempoMode, i, h1.L[i], h0.L[i]);
+  }
+  // (3) and the other side of it: an offset that DOES move a time is a move, whichever line it moves. After a tempo step the heads are
+  // latched to the tempo's mode (glide: no fade), so a move that goes unmarked keeps gliding, where a marked one follows time.change
+  // (jump: one fade on the line that moved).
+  for (const int line : {0, 1}) {
+    auto e = mk({{"time.mode", 2}, {"time.div", 9}, {"time.change", 2}, {"time.tempoMode", 1}, {"time.glide", 0.2}, {"fb.amount", 0}, {"mix", 100}});
+    g_rng = 131;
+    Vec in = zeros(S(2.0));
+    for (auto& x : in) x = 0.4 * noise();  // sounding throughout: an instance at rest lands its heads, and nothing fades
+    (void)runEach(*e, in, in, {set(S(1.5), line == 0 ? "time.offL" : "time.offR", 10)}, [](long i) { return i >= S(1.0) ? 150.0 : 120.0; }, [](long, Echo&) {});
+    const auto moved = e->fadeCount(line), other = e->fadeCount(1 - line);
+    REQUIRE(moved == 1 && other == 0, "a move of the offset on line %d after a tempo step fades %llu times on that line and %llu on the other, expected 1 and 0: it did not follow time.change",
+            line, static_cast<unsigned long long>(moved), static_cast<unsigned long long>(other));
+  }
   return true;
 }
 
-// At x1 the resolved times are the PRE-T-038 expression, bit for bit, with no libm in the argument (critic
-// T-038 L2: the A/B against the old engine ran once, by hand; this one stays). preScaleTimes is main's
-// resolveBoth (312d70e) written out as it was: base, then base x (1 + offset / 100), the synced halving past
-// 12 s, the clamp to [1 ms, 12 s], then x sr and back / sr as resolvedTimes() reads it. A grid of every
-// division, tempi (40 bpm puts 2/1 on the fold's edge, 30 past it), offsets and free times (the 12 s clamp and
-// the 1 ms floor included), at 44.1, 48 and 96 kHz.
-std::array<double, 2> preScaleTimes(bool sync, double ms, int div, double bpm, double offL, double offR, double sr) {
+// SPEC §3.1, §3.5 (D-050): sec and hz are two readings of one time.ms, so a flip between them moves nothing: a run that
+// flips sec -> hz -> sec every 2500 samples is bit-identical, on both channels, to a run that never flips. Each routing, each
+// time.change (and both repitch laws), steady and moving: the move starts a glide / fade, and 20 ms in time.change is flipped
+// to ANOTHER mode (deferred, §3.5: it must change nothing for the move in flight), then the mode flips: a flip that re-latched
+// the move in flight (the plant hzFlipIsMove) would start it again under the new time.change. Modulation runs throughout, and
+// the host tempo sweeps, which neither sec nor hz follows (a patch set to hz from the start equals the same patch in sec, too).
+bool timeModeFlip(Detail& d) {
+  struct Mode { int change, law; const char* name; };
+  const long n = S(1.6);
+  Vec inL(static_cast<std::size_t>(n), 0.0), inR = inL;
+  for (const Mode m : {Mode{0, 0, "repitch tape"}, Mode{0, 1, "repitch exponential"}, Mode{1, 0, "crossfade"}, Mode{2, 0, "jump"}})
+    for (int route = 0; route < 3; ++route)
+      for (int moving = 0; moving < 2; ++moving) {
+        g_rng = 71 + static_cast<std::uint32_t>(route * 7 + m.change * 3 + m.law);
+        for (long i = 0; i < S(0.3); ++i) { inL[static_cast<std::size_t>(i)] = 0.4 * noise(); inR[static_cast<std::size_t>(i)] = 0.4 * noise(); }
+        auto bpmAt = [](long i) { return 120.0 + 30.0 * std::sin(2 * kPi * static_cast<double>(i) / kSr); };
+        auto render = [&](int variant) {  // 0: never flips, 1: flips sec <-> hz, 2: hz throughout
+          auto e = mk({{"route.mode", static_cast<double>(route)}, {"time.mode", variant == 2 ? 1.0 : 0.0}, {"time.change", static_cast<double>(m.change)},
+                       {"time.law", static_cast<double>(m.law)}, {"time.ms", 400}, {"time.div", 12}, {"fb.amount", 60}, {"mix", 60}, {"time.offR", 12},
+                       {"time.glide", 0.15}, {"mod.depthMs", 3}, {"mod.rateHz", 1.7}, {"mod.shape", 1}});
+          std::vector<Event> ev;
+          if (moving) {
+            ev.push_back(set(S(0.4), "time.ms", 130));
+            ev.push_back(set(S(0.4) + S(0.02), "time.change", m.change == 2 ? 1.0 : m.change + 1.0));
+          }
+          if (variant == 1) {
+            double mode = 1.0;
+            for (long i = 1000; i < n - 1; i += 2500, mode = 1.0 - mode) ev.push_back(set(i, "time.mode", mode));
+            ev.push_back(set(S(0.4) + S(0.02) + 1, "time.mode", 1.0));  // inside the move, right after the time.change flip
+            ev.push_back(set(S(0.4) + S(0.02) + 2, "time.mode", 0.0));
+            ev.push_back(set(S(0.4) + 50, "time.mode", 1.0));  // and inside the first 3 ms of a jump's fade
+            ev.push_back(set(S(0.4) + 100, "time.mode", 0.0));
+          }
+          return runEach(*e, inL, inR, ev, bpmAt, [](long, Echo&) {});
+        };
+        const Out base = render(0), flip = render(1), hz = render(2);
+        REQUIRE(maxAbs(base.L, S(0.4)) > 0.01, "the case is vacuous: no output (route %d, %s)", route, m.name);
+        for (long i = 0; i < n; ++i) {
+          REQUIRE(flip.L[i] == base.L[i] && flip.R[i] == base.R[i],
+                  "route %d, %s, %s: the sec <-> hz flips changed sample %ld (%.17g vs %.17g without them): a flip between sec and hz moved something", route,
+                  m.name, moving ? "moving" : "steady", i, flip.L[i], base.L[i]);
+          REQUIRE(hz.L[i] == base.L[i] && hz.R[i] == base.R[i],
+                  "route %d, %s, %s: hz differs from sec at sample %ld (%.17g vs %.17g): hz is not reading time.ms alone, or follows the tempo", route, m.name,
+                  moving ? "moving" : "steady", i, hz.L[i], base.L[i]);
+        }
+      }
+  return true;
+}
+
+// The resolved times are main's expression for the offset, bit for bit, with no libm in the argument (critic T-038 L2:
+// a rewrite of base x (1 + offset / 100) as base + base x offset / 100 can round another way at a nonzero offset (at 0 both are exactly base), and
+// nothing else would see it; kept after the scale key left, D-050). offsetTimes is resolveBoth as it was before the scale key (312d70e) written out: base, then
+// base x (1 + offset / 100), the synced halving past 12 s, the clamp to [1 ms, 12 s], then x sr and back / sr as
+// resolvedTimes() reads it. A grid of every division, tempi (40 bpm puts 2/1 on the fold's edge, 30 past it), offsets
+// and free times (the 12 s clamp and the 1 ms floor included), in each of the three modes, at 44.1, 48 and 96 kHz.
+std::array<double, 2> offsetTimes(bool sync, double ms, int div, double bpm, double offL, double offR, double sr) {
   const double b = (bpm > 1.0) ? bpm : 120.0;
   const double base = sync ? echo::kDivisions[static_cast<std::size_t>(div)].beats * 60.0 / b : ms / 1000.0;
   double tL = base * (1.0 + offL / 100.0), tR = base * (1.0 + offR / 100.0);
@@ -2647,7 +2753,7 @@ std::array<double, 2> preScaleTimes(bool sync, double ms, int div, double bpm, d
   const double cL = std::clamp(tL, 0.001, 12.0) * sr, cR = std::clamp(tR, 0.001, 12.0) * sr;
   return {cL / sr, cR / sr};
 }
-bool scaleUnityBits(Detail& d) {
+bool offsetExpressionBits(Detail& d) {
   const double bpms[] = {30, 40, 60, 90, 120, 133.3, 240};
   const double offs[] = {-50, -33.3, 0, 12, 50};
   const double mss[] = {1, 2, 17.5, 375, 5000, 12000};
@@ -2656,7 +2762,8 @@ bool scaleUnityBits(Detail& d) {
     auto e = mk({}, sr);
     const Vec z = zeros(1);
     double o[2];
-    for (int sync = 0; sync < 2; ++sync)
+    for (int mode = 0; mode < 3; ++mode) {
+      const bool sync = mode == 2;
       for (int div = 0; div < (sync ? 22 : 1); ++div)
         for (double ms : mss) {
           if (sync && ms != mss[0]) continue;
@@ -2664,66 +2771,164 @@ bool scaleUnityBits(Detail& d) {
             for (double oL : offs)
               for (double oR : offs) {
                 if (!sync && bpm != bpms[0]) continue;  // free time ignores the tempo
-                e->setParam("time.sync", sync);
+                e->setParam("time.mode", mode);
                 e->setParam("time.div", div);
                 e->setParam("time.ms", ms);
                 e->setParam("time.offL", oL);
                 e->setParam("time.offR", oR);
                 e->process(z.data(), z.data(), &o[0], &o[1], 1, bpm);  // at rest: the tempo lands, the times resolve
                 const auto got = e->resolvedTimes();
-                const auto want = preScaleTimes(sync, ms, div, bpm, oL, oR, sr);
+                const auto want = offsetTimes(sync, ms, div, bpm, oL, oR, sr);
                 ++cases;
                 REQUIRE(got[0] == want[0] && got[1] == want[1],
-                        "%s at %.0f Hz (div %d, %g ms, %g bpm, offsets %g / %g %%): x1 resolves %.17g / %.17g s, the pre-T-038 expression gives %.17g / %.17g",
-                        sync ? "synced" : "free", sr, div, ms, bpm, oL, oR, got[0], got[1], want[0], want[1]);
+                        "%s at %.0f Hz (div %d, %g ms, %g bpm, offsets %g / %g %%): resolves %.17g / %.17g s, the offset expression gives %.17g / %.17g",
+                        sync ? "synced" : mode == 1 ? "hz" : "sec", sr, div, ms, bpm, oL, oR, got[0], got[1], want[0], want[1]);
               }
         }
+    }
   }
   REQUIRE(cases > 10000, "the grid is vacuous: %ld cases", cases);
   return true;
 }
 
-// Criterion 5 (D-048): the tail declaration, the rest gate and the IR renderer use the scaled times. A
-// scaled patch declares exactly the tail of the unscaled patch with the same resulting time (free x4,
-// synced x2 and a scale that snaps to x2), sounds until it and is at exact zero from it; the offline
-// renderer reports that tail and those times.
-bool scaleTail(Detail& d) {
-  struct Cfg { const char* what; std::vector<std::pair<const char*, double>> scaled, twin; };
-  const std::vector<Cfg> cfgs = {
-      {"free x4", {{"time.sync", 0}, {"time.ms", 100}, {"time.scale", 4}}, {{"time.sync", 0}, {"time.ms", 400}}},
-      {"synced 1/8 x2", {{"time.sync", 1}, {"time.div", 12}, {"time.scale", 2}}, {{"time.sync", 1}, {"time.div", 9}}},
-      {"synced 1/8, scale 1.9 snapped to x2", {{"time.sync", 1}, {"time.div", 12}, {"time.scale", 1.9}}, {{"time.sync", 1}, {"time.div", 9}}},
-  };
-  for (double sr : {44100.0, 96000.0})
-    for (const auto& c : cfgs) {
-      auto build = [&](const std::vector<std::pair<const char*, double>>& kv) {
-        auto e = mk({{"fb.amount", 50}, {"mix", 100}}, sr);
-        for (const auto& [k, v] : kv) e->setParam(k, v);
-        return e;
-      };
-      auto e = build(c.scaled), twin = build(c.twin);
-      REQUIRE(e->tail() == twin->tail(), "%s at %.0f Hz declares a tail of %lld samples; the same resulting time unscaled declares %lld", c.what, sr,
-              static_cast<long long>(e->tail()), static_cast<long long>(twin->tail()));
-      const long T = static_cast<long>(e->tail());
-      const auto o = run(*e, impulse(T + S(0.5, sr)), zeros(T + S(0.5, sr)));
-      REQUIRE(maxAbs(o.L, 0, T) > 1e-3, "%s at %.0f Hz: the case is vacuous: nothing sounds", c.what, sr);
-      REQUIRE(maxAbs(o.L, T + 1) == 0.0 && maxAbs(o.R, T + 1) == 0.0 && e->atRest(),
-              "%s at %.0f Hz: after the declared tail (%ld samples) the output is %.3g, at rest %d", c.what, sr, T, maxAbs(o.L, T + 1), e->atRest() ? 1 : 0);
+// D-050 (replaces T-038's scaleTail): the declared tail, the rest gate and the offline renderer in each mode. (a) A sec patch and the
+// same patch in hz declare the identical tail, and a sync patch declares that of a sec twin with the same resulting time (1/4 at 120 bpm
+// is 500 ms); each sounds until its tail, is at exact zero from it, and rests. The division is set to something else in sec and hz, so a
+// tail built from the wrong time (the plant tailReadsDivInHz) differs. (b) A sec <-> hz flip while the tail rings changes nothing: the
+// output is bit-identical to no flips and the rest comes at the same sample. Its control is hzFlipDelaysRest (the flip restarts the quiet
+// count). A flip restarting the tail clock instead changes nothing observable: the clock is a backstop the quiet gate preempts in every
+// ordinary case (measured: rest at 68 % of the declared tail).
+// (c) The offline renderer renders hz as sec and sync at its division's time, and reports the matching times and tail.
+bool timeModesTail(Detail& d) {
+  struct Cfg { const char* what; int mode; double ms; int div; };
+  const Cfg secP{"sec", 0, 100, 9}, hzP{"hz", 1, 100, 9}, syncP{"sync", 2, 375, 9}, twinP{"sec twin of 1/4 at 120 bpm", 0, 500, 12};
+  for (const double sr : {44100.0, 96000.0}) {
+    auto build = [&](const Cfg& c) {
+      return mk({{"time.mode", static_cast<double>(c.mode)}, {"time.ms", c.ms}, {"time.div", static_cast<double>(c.div)}, {"fb.amount", 40}, {"mix", 100}}, sr);
+    };
+    // (a)
+    for (const auto& [x, y] : {std::pair<Cfg, Cfg>{secP, hzP}, std::pair<Cfg, Cfg>{syncP, twinP}}) {
+      auto ex = build(x), ey = build(y);
+      REQUIRE(ex->tail() == ey->tail(), "%s declares a tail of %lld samples, %s declares %lld, at %.0f Hz", x.what, static_cast<long long>(ex->tail()), y.what,
+              static_cast<long long>(ey->tail()), sr);
+      const long T = static_cast<long>(ex->tail());
+      const auto ox = run(*ex, impulse(T + S(0.5, sr)), zeros(T + S(0.5, sr))), oy = run(*ey, impulse(T + S(0.5, sr)), zeros(T + S(0.5, sr)));
+      REQUIRE(maxAbs(ox.L, 0, T) > 1e-3, "%s at %.0f Hz: the case is vacuous: nothing sounds", x.what, sr);
+      REQUIRE(maxAbs(ox.L, T + 1) == 0.0 && maxAbs(ox.R, T + 1) == 0.0 && ex->atRest(),
+              "%s at %.0f Hz: after the declared tail (%ld samples) the output is %.3g, at rest %d", x.what, sr, T, maxAbs(ox.L, T + 1), ex->atRest() ? 1 : 0);
+      for (long i = 0; i < static_cast<long>(ox.L.size()); ++i)
+        REQUIRE(ox.L[i] == oy.L[i] && ox.R[i] == oy.R[i], "%s and %s render differently at sample %ld at %.0f Hz", x.what, y.what, i, sr);
     }
-  {  // the offline renderer (the display's drawing) renders the scaled times and declares the scaled tail
-    echo::IrRequest r;
-    r.patch[echo::kSync] = 0;
-    r.patch[echo::kTimeMs] = 100;
-    r.patch[echo::kTimeScale] = 4;
-    r.patch[echo::kFb] = 50;
-    r.length = S(12.0);  // the declared tail is 8.7 s
-    const auto got = echo::renderIr(r);
-    auto twin = mk({{"time.sync", 0}, {"time.ms", 400}, {"fb.amount", 50}});
-    REQUIRE(got.ok, "the offline render of a scaled patch was refused");
-    REQUIRE(std::fabs(got.info.times[0] - 0.4) < 1e-12 && got.info.tail == twin->tail(), "the offline render reports times %.9f s and tail %lld (expected 0.4 s and %lld)",
-            got.info.times[0], static_cast<long long>(got.info.tail), static_cast<long long>(twin->tail()));
-    REQUIRE(got.info.restAt >= 0 && maxAbs(got.L, got.info.restAt) == 0.0, "the offline render of a scaled patch never rests (restAt %lld)",
-            static_cast<long long>(got.info.restAt));
+    // (b)
+    {
+      const long T = static_cast<long>(build(secP)->tail());
+      const long n = T + S(0.5, sr);
+      auto render = [&](bool flips, long& restAt) {
+        auto e = build(secP);
+        std::vector<Event> ev;
+        double mode = 1.0;
+        if (flips)
+          for (long i = S(0.2, sr); i < T - S(0.05, sr); i += S(0.37, sr), mode = 1.0 - mode) ev.push_back(set(i, "time.mode", mode));
+        restAt = -1;
+        return runEach(*e, impulse(n), zeros(n), ev, [](long) { return 120.0; }, [&restAt](long i, Echo& en) { if (restAt < 0 && en.atRest()) restAt = i; });
+      };
+      long r0 = -1, r1 = -1;
+      const Out base = render(false, r0), flip = render(true, r1);
+      REQUIRE(r0 > 0 && r0 <= T + 2, "sec at %.0f Hz: the rest came at sample %ld, the declared tail is %ld", sr, r0, T);
+      for (long i = 0; i < n; ++i)
+        REQUIRE(flip.L[i] == base.L[i] && flip.R[i] == base.R[i], "at %.0f Hz the sec <-> hz flips changed sample %ld of a ringing tail (%.17g vs %.17g)", sr, i, flip.L[i], base.L[i]);
+      REQUIRE(r1 == r0, "at %.0f Hz the sec <-> hz flips moved the rest from sample %ld to %ld: a flip restarted the tail clock", sr, r0, r1);
+    }
+    // (c)
+    {
+      auto request = [&](const Cfg& c) {
+        echo::IrRequest r;
+        r.sampleRate = sr;
+        r.patch[echo::kTimeMode] = c.mode;
+        r.patch[echo::kTimeMs] = c.ms;
+        r.patch[echo::kDiv] = c.div;
+        r.patch[echo::kFb] = 40;
+        r.length = S(10.0, sr);  // the declared tails here are under 9 s
+        return echo::renderIr(r);
+      };
+      const auto a = request(secP), b = request(hzP), c = request(syncP), t = request(twinP);
+      REQUIRE(a.ok && b.ok && c.ok && t.ok, "the offline render of a time.mode patch was refused at %.0f Hz", sr);
+      REQUIRE(b.info.tail == a.info.tail && b.info.times == a.info.times && b.L == a.L && b.R == a.R,
+              "the offline render of hz differs from sec at %.0f Hz: times %.9f / %.9f s vs %.9f s, tail %lld vs %lld", sr, b.info.times[0], b.info.times[1],
+              a.info.times[0], static_cast<long long>(b.info.tail), static_cast<long long>(a.info.tail));
+      REQUIRE(std::fabs(c.info.times[0] - 0.5) < 1e-12 && c.info.tail == t.info.tail && c.L == t.L,
+              "the offline render of sync (1/4 at 120 bpm) reports times %.9f s and tail %lld at %.0f Hz (expected 0.5 s and %lld)", c.info.times[0],
+              static_cast<long long>(c.info.tail), sr, static_cast<long long>(t.info.tail));
+      REQUIRE(a.info.restAt >= 0 && maxAbs(a.L, a.info.restAt) == 0.0 && c.info.restAt >= 0 && maxAbs(c.L, c.info.restAt) == 0.0,
+              "an offline render of a time.mode patch never rests at %.0f Hz (restAt %lld / %lld)", sr, static_cast<long long>(a.info.restAt), static_cast<long long>(c.info.restAt));
+    }
+  }
+  return true;
+}
+
+// D-050: a patch in each of the three modes is deterministic, block-size independent and sample-rate independent. All three
+// patches play 100 ms: time.ms 100 in sec and hz (10 Hz), 1/16 at 150 bpm in sync, and the key the mode does not read is set
+// to something else (so a mode that reads the wrong one, the plant hzCountsAsSync, lands elsewhere).
+bool timeModesIndependence(Detail& d) {
+  struct M { int mode; const char* name; };
+  const double bpm = 150.0;
+  for (const M m : {M{0, "sec"}, M{1, "hz"}, M{2, "sync"}}) {
+    const double ms = m.mode == 2 ? 250.0 : 100.0, div = m.mode == 2 ? 15.0 : 12.0;  // 1/16 = 100 ms, 1/8 = 200 ms at 150 bpm
+    // 1. determinism: two instances driven alternately each equal a solo render
+    g_rng = 17 + static_cast<std::uint32_t>(m.mode);
+    const long n = S(1.2);
+    Vec in(static_cast<std::size_t>(n));
+    for (auto& v : in) v = 0.3 * noise();
+    auto patch = [&] {
+      return mk({{"time.mode", static_cast<double>(m.mode)}, {"time.ms", ms}, {"time.div", div}, {"fb.amount", 60}, {"mix", 70}, {"mod.depthMs", 2},
+                 {"mod.shape", 1}, {"mod.seed", 9}});
+    };
+    auto solo = patch(), a = patch(), b = patch();
+    const auto os = run(*solo, in, in, {}, bpm);
+    Out oa{zeros(n), zeros(n)}, ob = oa;
+    for (long p = 0; p < n; p += 256) {
+      const int len = static_cast<int>(std::min<long>(256, n - p));
+      a->process(in.data() + p, in.data() + p, oa.L.data() + p, oa.R.data() + p, len, bpm);
+      b->process(in.data() + p, in.data() + p, ob.L.data() + p, ob.R.data() + p, len, bpm);
+    }
+    for (long i = 0; i < n; ++i)
+      REQUIRE(oa.L[i] == os.L[i] && ob.L[i] == os.L[i] && oa.R[i] == os.R[i] && ob.R[i] == os.R[i], "%s: an interleaved instance differs from solo at %ld", m.name, i);
+    // reset identity (A2): the instance that just played, reset(), renders what a freshly built one does after its own reset() (as
+    // a2ResetIdentity: the reset lands the ramps a fresh instance would still be gliding, the modulation depth's 250 ms among them)
+    solo->reset();
+    auto fresh = patch();
+    fresh->reset();
+    const auto orr = run(*solo, in, in, {}, bpm), orf = run(*fresh, in, in, {}, bpm);
+    for (long i = 0; i < n; ++i)
+      REQUIRE(orr.L[i] == orf.L[i] && orr.R[i] == orf.R[i], "%s: reset() differs from a fresh instance at %ld", m.name, i);
+    // 2. block independence: a time move, then a time.change flip and a second move, under every block pattern
+    auto evs = [&] {
+      return m.mode == 2 ? std::vector<Event>{set(S(0.3), "time.div", 12), set(S(0.5), "time.change", 2), set(S(0.55), "time.div", 9)}
+                         : std::vector<Event>{set(S(0.3), "time.ms", 250), set(S(0.5), "time.change", 2), set(S(0.55), "time.ms", 130)};
+    };
+    auto ref = patch();
+    const auto o0 = run(*ref, in, in, evs(), bpm, [](long) { return 4096; });
+    std::uint32_t seed = 5;
+    const std::vector<std::function<int(long)>> pats = {
+        [](long) { return 1; }, [](long) { return 7; }, [](long) { return 333; },
+        [&seed](long) { seed = seed * 1664525u + 1013904223u; return 1 + static_cast<int>(seed % 4096u); }};
+    for (std::size_t pi = 0; pi < pats.size(); ++pi) {
+      auto e = patch();
+      const auto o = run(*e, in, in, evs(), bpm, pats[pi]);
+      for (long i = 0; i < n; ++i)
+        REQUIRE(o.L[i] == o0.L[i] && o.R[i] == o0.R[i], "%s: block pattern %zu differs at sample %ld", m.name, pi, i);
+    }
+    // 3. sample-rate independence: the one repeat of an impulse lands at 100 ms whatever the rate
+    for (const double sr : {44100.0, 48000.0, 96000.0, 192000.0}) {
+      auto e = mk({{"time.mode", static_cast<double>(m.mode)}, {"time.ms", ms}, {"time.div", div}, {"fb.amount", 0}, {"mix", 100}, {"filt.loop.on", 0}}, sr);
+      const long len = S(0.3, sr);
+      const auto o = run(*e, impulse(len), zeros(len), {}, bpm);
+      long at = 0;
+      for (long i = 0; i < len; ++i)
+        if (std::fabs(o.L[i]) > std::fabs(o.L[at])) at = i;
+      REQUIRE(at == S(0.1, sr) && o.L[at] > 0.9, "%s at %.0f Hz: the repeat lands at sample %ld (%.6f s), expected %ld (0.1 s)", m.name, sr, at,
+              static_cast<double>(at) / sr, S(0.1, sr));
+    }
   }
   return true;
 }
@@ -2741,7 +2946,7 @@ bool abiProperties(Detail& d) {
     REQUIRE(!fresh.properties().validate(), "an unprepared instance's properties() validated");
   }
   for (double sr : {44100.0, 48000.0, 96000.0, 192000.0}) {
-    auto e = mk({{"time.sync", 0}, {"time.ms", 250}, {"fb.amount", 50}}, sr);
+    auto e = mk({{"time.mode", 0}, {"time.ms", 250}, {"fb.amount", 50}}, sr);
     const auto p = e->properties();
     const auto v = p.validate();
     REQUIRE(static_cast<bool>(v), "validate() refused at %.0f Hz (violation %d)", sr, static_cast<int>(v.violation));
@@ -2755,7 +2960,7 @@ bool abiProperties(Detail& d) {
     // cannot catch a fade that outlasts it. Ringing repeats, a load, then exact
     // zero from the declared bound on, and sound just before it.
     REQUIRE(p.load, "no load bound declared at %.0f Hz", sr);
-    auto r = mk({{"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 80}, {"mix", 100}}, sr);
+    auto r = mk({{"time.mode", 0}, {"time.ms", 100}, {"fb.amount", 80}, {"mix", 100}}, sr);
     const long n = S(1.0, sr), at = S(0.5, sr), b = static_cast<long>(p.load->transition_samples);
     const std::array<echo::KeyValue, 1> patch{{{"fb.amount", 30}}};
     const auto o = run(*r, impulse(n), zeros(n), {{at, [&patch](Echo& x) { x.loadState(patch); }}});
@@ -2781,7 +2986,7 @@ bool abiTail32(Detail& d) {
   using foundations::kInfiniteTail;
   constexpr std::int64_t kMax32 = 0xFFFFFFFFLL;
   {
-    auto e = mk({{"time.sync", 0}, {"time.ms", 12000}, {"fb.amount", 99.99}}, 192000.0);
+    auto e = mk({{"time.mode", 0}, {"time.ms", 12000}, {"fb.amount", 99.99}}, 192000.0);
     REQUIRE(e->tail() > kMax32, "the case is vacuous: the engine tail %lld fits 32 bits", static_cast<long long>(e->tail()));
     const auto p = e->properties();
     REQUIRE(p.tail && p.tail->samples == kInfiniteTail, "99.99 %%, 12 s, 192 kHz declares %u samples, not kInfiniteTail",
@@ -2831,8 +3036,8 @@ bool abiInPlace(Detail& d) {
       const long n = S(0.5);
       Vec inL = zeros(n), inR = zeros(n);
       for (long i = S(0.05); i < S(0.3); ++i) { inL[i] = 0.5 * noise(); inR[i] = 0.5 * noise(); }
-      auto a = mk({{"route.mode", static_cast<double>(route)}, {"time.sync", 0}, {"time.ms", 40}, {"fb.amount", 60}, {"mix", 50}});
-      auto b = mk({{"route.mode", static_cast<double>(route)}, {"time.sync", 0}, {"time.ms", 40}, {"fb.amount", 60}, {"mix", 50}});
+      auto a = mk({{"route.mode", static_cast<double>(route)}, {"time.mode", 0}, {"time.ms", 40}, {"fb.amount", 60}, {"mix", 50}});
+      auto b = mk({{"route.mode", static_cast<double>(route)}, {"time.mode", 0}, {"time.ms", 40}, {"fb.amount", 60}, {"mix", 50}});
       const Out ref = run(*a, inL, inR, {}, 120.0, [block](long) { return block; });
       Vec L = inL, R = inR;
       for (long pos = 0; pos < n; pos += block) {
@@ -2916,9 +3121,9 @@ bool ioTest5Placement(Detail& d) {
   const char* fb = "fb.amount";
   // The loop filter off, so the pulses return at full height: 0.9 x 1.19 = 1.07,
   // past the ceiling's 0.9 knee at +12 dB, while 0.9 x 0.3 stays linear at 0 dB.
-  auto base = mk({{fb, 90}, {"mix", 50}, {"time.sync", 0}, {"time.ms", 50}, {"filt.loop.on", 0}});
-  auto inG = mk({{fb, 90}, {"mix", 50}, {"time.sync", 0}, {"time.ms", 50}, {"filt.loop.on", 0}});
-  auto outG = mk({{fb, 90}, {"mix", 50}, {"time.sync", 0}, {"time.ms", 50}, {"filt.loop.on", 0}});
+  auto base = mk({{fb, 90}, {"mix", 50}, {"time.mode", 0}, {"time.ms", 50}, {"filt.loop.on", 0}});
+  auto inG = mk({{fb, 90}, {"mix", 50}, {"time.mode", 0}, {"time.ms", 50}, {"filt.loop.on", 0}});
+  auto outG = mk({{fb, 90}, {"mix", 50}, {"time.mode", 0}, {"time.ms", 50}, {"filt.loop.on", 0}});
   inG->setParam("io.inGain", 12);
   outG->setParam("io.outGain", 12);
   // Land the 20 ms ramps before the first pulse (they started at setParam).
@@ -2934,7 +3139,7 @@ bool ioTest5Placement(Detail& d) {
   // Input Gain is a TRUE trim before everything (critic T-014 H1): the render at
   // +12 dB equals a 0 dB instance fed the input pre-scaled by G, bit for bit
   // (x*G then *1.0 is the same product), so it reaches the loop, not only the dry.
-  auto pre12 = mk({{fb, 90}, {"mix", 50}, {"time.sync", 0}, {"time.ms", 50}, {"filt.loop.on", 0}});
+  auto pre12 = mk({{fb, 90}, {"mix", 50}, {"time.mode", 0}, {"time.ms", 50}, {"filt.loop.on", 0}});
   pre12->process(pre.data(), pre.data(), sink.data(), sink.data(), static_cast<int>(pre.size()), 120.0);
   Vec inG12 = in;
   for (auto& v : inG12) v *= std::pow(10.0, 12.0 / 20.0);
@@ -2997,7 +3202,7 @@ bool metersTaps(Detail& d) {
   REQUIRE(e->inputMeter().peak == 0.0 && e->outputMeter().peak == 0.0, "a silent block left a peak: the peak is not per block");
   // The output tap is after EVERY path and the tail (H2): input stopped, the
   // repeats still sound, so the input tap reads 0 and the output tap does not.
-  auto w = mk({{"mix", 100}, {"time.sync", 0}, {"time.ms", 10}, {"fb.amount", 50}});
+  auto w = mk({{"mix", 100}, {"time.mode", 0}, {"time.ms", 10}, {"fb.amount", 50}});
   block(*w, impulse(256, 0, 0.5), zeros(256));
   block(*w, zeros(2048), zeros(2048));
   REQUIRE(w->inputMeter().peak == 0.0 && w->outputMeter().peak > 0.05, "after the input stops the output tap reads %.3g: blind to the wet tail",
@@ -3080,7 +3285,7 @@ bool stateFormat(Detail& d) {
   auto e = mk({});
   const std::string t = saveText(*e);
   REQUIRE(t.rfind("echo-state 1\n", 0) == 0, "the state does not open with its version line");
-  for (const char* want : {"\ntime.sync sync\n", "\ntime.div 1/4\n", "\nroute.mode stereo\n", "\ntime.ms 375\n", "\nmix 30\n", "\nmod.seed 1\n",
+  for (const char* want : {"\ntime.mode sync\n", "\ntime.div 1/4\n", "\nroute.mode standard\n", "\ntime.ms 375\n", "\nmix 30\n", "\nmod.seed 1\n",
                            "\nfilt.loop.on on\n"})
     REQUIRE(t.find(want) != std::string::npos, "the default state lacks the line `%.*s`", static_cast<int>(std::strlen(want)) - 2, want + 1);
   const std::string_view dev = "\n[device]\nio.inGain 0\nio.outGain 0\n";
@@ -3151,12 +3356,32 @@ bool stateExact(Detail& d) {
   return true;
 }
 
+// RS-6.11, SPEC §3.1 / §16.2 (D-050): a saved time.ms reads back bit for bit. The knob's Hz reading sets time.ms from
+// 1000 / Hz, a double that is almost never a short decimal (1000 / 3 is 333.33333333333331), so a writer that rounds it
+// (the plant stateFloat6g writes %.6g) would move a saved Time on every reload. Values a Hz reading produces, the range's
+// ends and the double after 1 ms, in sec and in hz, through save -> load -> save and into a fresh instance.
+bool stateTimeExact(Detail& d) {
+  const double vs[] = {1000.0 / 3.0, 1000.0 / 0.0834, 1000.0 / 440.0, 1000.0 / 7.0, 1.0000000000000002, 11999.999999999998, 12000.0, 1.0, 375.0};
+  for (const int mode : {0, 1})
+    for (const double v : vs) {
+      auto a = mk({{"time.mode", static_cast<double>(mode)}});
+      REQUIRE(a->setParam("time.ms", v), "time.ms %.17g was refused", v);
+      const std::string t1 = saveText(*a);
+      auto b = mk({});
+      const char* why = "";
+      REQUIRE(restore(*b, t1, &why), "time.ms %.17g: its own state was refused (%s)", v, why);
+      REQUIRE(b->getParam(echo::kTimeMs) == v, "time.ms %.17g in %s read back as %.17g: the saved text rounds the time", v, mode ? "hz" : "sec", b->getParam(echo::kTimeMs));
+      REQUIRE(saveText(*b) == t1, "time.ms %.17g: save -> load -> save differs", v);
+    }
+  return true;
+}
+
 // A17: a state saved mid-session, loaded into a fresh instance, renders
 // bit-identically to the original after its reset(): nothing outside the saved
 // state and reset() shapes the sound.
 bool stateComplete(Detail& d) {
   g_rng = 5;
-  auto a = mk({{"time.sync", 0}, {"time.ms", 80}, {"fb.amount", 70}, {"mod.depthMs", 2}, {"mod.shape", 1}, {"mod.seed", 77}});
+  auto a = mk({{"time.mode", 0}, {"time.ms", 80}, {"fb.amount", 70}, {"mod.depthMs", 2}, {"mod.shape", 1}, {"mod.seed", 77}});
   const long n = S(0.6);
   Vec in(n);
   for (auto& v : in) v = 0.3 * noise();
@@ -3213,13 +3438,13 @@ bool stateSize(Detail& d) {
 // A20: a state saved during a ringing tail, ramps in flight and a set latch
 // equals one saved at rest with the same parameters.
 bool stateLiveExcluded(Detail& d) {
-  auto x = mk({{"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 80}, {"mix", 50}});
+  auto x = mk({{"time.mode", 0}, {"time.ms", 100}, {"fb.amount", 80}, {"mix", 50}});
   run(*x, impulse(S(0.3), 0, 1.5), zeros(S(0.3)));  // ringing, and an over at the input tap
   x->setParam("io.outGain", 6);
   x->setParam("mix", 60);
   block(*x, zeros(100), zeros(100));  // both 20 ms ramps mid-flight
   REQUIRE(x->inputMeter().clip && !x->atRest(), "the case is vacuous: no latch, or already at rest");
-  auto y = mk({{"time.sync", 0}, {"time.ms", 100}, {"fb.amount", 80}, {"mix", 60}, {"io.outGain", 6}});
+  auto y = mk({{"time.mode", 0}, {"time.ms", 100}, {"fb.amount", 80}, {"mix", 60}, {"io.outGain", 6}});
   REQUIRE(saveText(*x) == saveText(*y), "the state saved while live differs from one saved at rest");
   return true;
 }
@@ -3230,7 +3455,7 @@ bool stateLiveExcluded(Detail& d) {
 bool stateUndo(Detail& d) {
   for (int i = 0; i < echo::kNumParams; ++i) {
     const auto& p = echo::kParams[static_cast<std::size_t>(i)];
-    auto a = mk({{"time.sync", 0}, {"time.ms", 90}, {"fb.amount", 60}, {"mod.depthMs", 1}});
+    auto a = mk({{"time.mode", 0}, {"time.ms", 90}, {"fb.amount", 60}, {"mod.depthMs", 1}});
     const std::string s0 = saveText(*a);
     const double cur = a->getParam(i);
     double v = p.stepped ? (cur + 1 > p.max ? p.min : cur + 1) : p.min + (p.max - p.min) * 0.37;
@@ -3263,9 +3488,9 @@ bool stateAdoptLive(Detail& d) {
   const long n = S(0.8), at = S(0.3);
   Vec in(n);
   for (long i = 0; i < S(0.25); ++i) in[static_cast<std::size_t>(i)] = 0.4 * noise();
-  auto a = mk({{"time.sync", 0}, {"time.ms", 90}, {"fb.amount", 75}, {"mix", 50}});
-  auto b = mk({{"time.sync", 0}, {"time.ms", 90}, {"fb.amount", 75}, {"mix", 50}});
-  auto target = mk({{"time.sync", 0}, {"time.ms", 200}, {"fb.amount", 30}, {"mix", 70}, {"io.outGain", -6}});
+  auto a = mk({{"time.mode", 0}, {"time.ms", 90}, {"fb.amount", 75}, {"mix", 50}});
+  auto b = mk({{"time.mode", 0}, {"time.ms", 90}, {"fb.amount", 75}, {"mix", 50}});
+  auto target = mk({{"time.mode", 0}, {"time.ms", 200}, {"fb.amount", 30}, {"mix", 70}, {"io.outGain", -6}});
   const std::string t = saveText(*target);
   std::array<echo::KeyValue, echo::kNumParams> kv{};
   std::size_t nk = 0;
@@ -3299,7 +3524,12 @@ bool stateRefusals(Detail& d) {
       {"a duplicated key", replace("mix 30\n", "mix 30\nmix 30\n")},
       {"a missing key", replace("mix 30\n", "")},
       {"out of range", replace("time.ms 375\n", "time.ms 13000\n")},
-      {"a bad label", replace("route.mode stereo\n", "route.mode sideways\n")},
+      {"a bad label", replace("route.mode standard\n", "route.mode sideways\n")},
+      {"the retired label stereo (route.mode's first label is standard)", replace("route.mode standard\n", "route.mode stereo\n")},
+      {"the retired key time.sync", replace("time.mode sync\n", "time.sync sync\n")},
+      {"the retired key time.scale", replace("mix 30\n", "mix 30\ntime.scale 1\n")},
+      {"the retired labels free and sync as time.mode's own (free)", replace("time.mode sync\n", "time.mode free\n")},
+      {"a time mode by index", replace("time.mode sync\n", "time.mode 2\n")},
       {"a division by index", replace("time.div 1/4\n", "time.div 9\n")},
       {"a fractional seed", replace("mod.seed 1\n", "mod.seed 1.5\n")},
       {"non-finite", replace("mix 30\n", "mix nan\n")},
@@ -3325,8 +3555,8 @@ bool stateRefusals(Detail& d) {
     REQUIRE(!e->stageState(b.text, &why), "%s was accepted", b.what);
     REQUIRE(!e->adoptStaged() && saveText(*e) == s, "%s changed the instance or staged something", b.what);
   }
-  // Every patch key, omitted in turn, refuses the whole text: all or nothing has no exception, time.scale
-  // (D-048, the human's ruling) included. The line must be there to be removed, so a writer that leaves a
+  // Every patch key, omitted in turn, refuses the whole text: all or nothing has no exception: the reader
+  // does not default a key (D-048 A1, D-050 ruling 2; the plant stateMissingKeyDefaults). The line must be there to be removed, so a writer that leaves a
   // key out (stateKeyMissing) fails here too.
   for (int i = 0; i < echo::kNumParams; ++i) {
     const auto& pd = echo::kParams[static_cast<std::size_t>(i)];
@@ -3342,6 +3572,10 @@ bool stateRefusals(Detail& d) {
   const char* why = "";
   REQUIRE(restore(*e, replace("time.div 1/4\n", "time.div 1/8D\n"), &why), "the alias 1/8D was refused (%s)", why);
   REQUIRE(saveText(*e).find("\ntime.div 3/16\n") != std::string::npos, "the alias was not written back as its name 3/16");
+  for (const char* mode : {"sec", "hz", "sync"}) {  // each label reads, and is written back by name
+    REQUIRE(restore(*e, replace("time.mode sync\n", std::string("time.mode ") + mode + "\n"), &why), "time.mode %s was refused (%s)", mode, why);
+    REQUIRE(saveText(*e).find(std::string("\ntime.mode ") + mode + "\n") != std::string::npos, "time.mode %s was not written back by name", mode);
+  }
   REQUIRE(e->stageState(s) && !e->stageState(s, &why), "a second stage while one is pending was accepted");
   e->adoptStaged();
   return true;
@@ -3391,8 +3625,8 @@ bool clearFade(Detail& d) {
   const long n = S(0.6, sr), T = S(0.35, sr) + 37, N = S(0.02, sr);
   Vec in = zeros(n);
   for (long i = 0; i < S(0.25, sr); ++i) in[static_cast<std::size_t>(i)] = 0.3 * noise();
-  auto a = mk({{"time.sync", 0}, {"time.ms", 90}, {"fb.amount", 75}, {"mix", 50}}, sr);
-  auto b = mk({{"time.sync", 0}, {"time.ms", 90}, {"fb.amount", 75}, {"mix", 50}}, sr);
+  auto a = mk({{"time.mode", 0}, {"time.ms", 90}, {"fb.amount", 75}, {"mix", 50}}, sr);
+  auto b = mk({{"time.mode", 0}, {"time.ms", 90}, {"fb.amount", 75}, {"mix", 50}}, sr);
   const auto oa = runActions(*a, in, in, {{T, kClear}}, 512), ob = runActions(*b, in, in, {}, 512);
   for (long i = 0; i < T; ++i) REQUIRE(oa.L[i] == ob.L[i] && oa.R[i] == ob.R[i], "the Clear changed sample %ld, before its offset %ld", i, T);
   REQUIRE(maxAbs(ob.L, T, T + N) > 1e-3, "the case is vacuous: nothing rings at the Clear");
@@ -3413,8 +3647,8 @@ bool clearFade(Detail& d) {
 // Clear has it, sample for sample, and each move in its own mode.
 bool clearMovingHeads(Detail& d) {
   {  // a key move gliding by the tape law
-    auto a = mk({{"time.sync", 0}, {"time.ms", 20}, {"time.change", 0}, {"time.law", 0}, {"time.glide", 1}, {"fb.amount", 60}});
-    auto b = mk({{"time.sync", 0}, {"time.ms", 20}, {"time.change", 0}, {"time.law", 0}, {"time.glide", 1}, {"fb.amount", 60}});
+    auto a = mk({{"time.mode", 0}, {"time.ms", 20}, {"time.change", 0}, {"time.law", 0}, {"time.glide", 1}, {"fb.amount", 60}});
+    auto b = mk({{"time.mode", 0}, {"time.ms", 20}, {"time.change", 0}, {"time.law", 0}, {"time.glide", 1}, {"fb.amount", 60}});
     const Vec in(S(0.8), 0.05);
     const std::vector<SetAt> sets{{64 * 300, "time.ms", 200}};
     Out oa{zeros(S(0.8)), zeros(S(0.8))}, ob{zeros(S(0.8)), zeros(S(0.8))};
@@ -3425,7 +3659,7 @@ bool clearMovingHeads(Detail& d) {
             "a Clear moved a gliding head: %.6f vs %.6f samples without it", a->headDelay(0), b->headDelay(0));
   }
   {  // a tempo move in tempoMode crossfade, while time.change is repitch
-    auto mkS = [] { return mk({{"time.sync", 1}, {"time.div", 9}, {"time.change", 0}, {"time.tempoMode", 0}, {"fb.amount", 60}}); };
+    auto mkS = [] { return mk({{"time.mode", 2}, {"time.div", 9}, {"time.change", 0}, {"time.tempoMode", 0}, {"fb.amount", 60}}); };
     auto a = mkS(), b = mkS();
     double x[64], y[64], z[64];
     for (double& v : x) v = 0.05;
@@ -3451,8 +3685,8 @@ bool clearLiveWet(Detail& d) {
   Vec in = zeros(n);
   for (long i = 0; i < S(0.25); ++i) in[static_cast<std::size_t>(i)] = 0.3 * noise();
   const std::vector<SetAt> sets{{T0, "mix", 90}};  // the 20 ms mix ramp starts 5 samples before the Clear
-  auto a = mk({{"time.sync", 0}, {"time.ms", 90}, {"fb.amount", 75}, {"mix", 30}});
-  auto b = mk({{"time.sync", 0}, {"time.ms", 90}, {"fb.amount", 75}, {"mix", 30}});
+  auto a = mk({{"time.mode", 0}, {"time.ms", 90}, {"fb.amount", 75}, {"mix", 30}});
+  auto b = mk({{"time.mode", 0}, {"time.ms", 90}, {"fb.amount", 75}, {"mix", 30}});
   const auto oa = runActions(*a, in, in, {{T, kClear}}, 64, sets), ob = runActions(*b, in, in, {}, 64, sets);
   REQUIRE(maxAbs(ob.L, T, T + N) > 1e-3, "the case is vacuous: nothing rings at the Clear");
   for (long j = 0; j < N; ++j) {
@@ -3472,8 +3706,8 @@ bool clearDryNoLand(Detail& d) {
   Vec L(n), R(n);
   for (long i = 0; i < n; ++i) { L[i] = 0.4 * noise(); R[i] = 0.4 * noise(); }
   const std::vector<SetAt> sets{{64 * 302, "mix", 80}};  // a 20 ms mix ramp, still running when the Clear's fade ends
-  auto a = mk({{"time.sync", 0}, {"time.ms", 2000}, {"fb.amount", 50}, {"mix", 40}});
-  auto b = mk({{"time.sync", 0}, {"time.ms", 2000}, {"fb.amount", 50}, {"mix", 40}});
+  auto a = mk({{"time.mode", 0}, {"time.ms", 2000}, {"fb.amount", 50}, {"mix", 40}});
+  auto b = mk({{"time.mode", 0}, {"time.ms", 2000}, {"fb.amount", 50}, {"mix", 40}});
   const auto oa = runActions(*a, L, R, {{T, kClear}}, 64, sets), ob = runActions(*b, L, R, {}, 64, sets);
   for (long i = 0; i < n; ++i)
     REQUIRE(oa.L[i] == ob.L[i] && oa.R[i] == ob.R[i], "the dry path differs at sample %ld (%.17g vs %.17g): a Clear touched it", i, oa.L[i], ob.L[i]);
@@ -3487,7 +3721,7 @@ bool clearNoRestart(Detail& d) {
   const long n = S(0.6), T = S(0.35) + 11, N = S(0.02);
   Vec in = zeros(n);
   for (long i = 0; i < S(0.25); ++i) in[static_cast<std::size_t>(i)] = 0.3 * noise();
-  auto mkRing = [] { return mk({{"time.sync", 0}, {"time.ms", 90}, {"fb.amount", 75}, {"mix", 50}}); };
+  auto mkRing = [] { return mk({{"time.mode", 0}, {"time.ms", 90}, {"fb.amount", 75}, {"mix", 50}}); };
   auto one = mkRing(), two = mkRing();
   const auto o1 = runActions(*one, in, in, {{T, kClear}}, 64), o2 = runActions(*two, in, in, {{T, kClear}, {T + 300, kClear}}, 64);
   for (long i = 0; i < n; ++i) REQUIRE(o1.L[i] == o2.L[i], "a second Clear mid-fade changed sample %ld: it restarted the fade", i);
@@ -3502,7 +3736,7 @@ bool clearNoRestart(Detail& d) {
   }
   REQUIRE(maxAbs(ol.L, T + N) == 0.0, "a load mid-Clear restarted the fade: sound %.3g after the Clear's 20 ms", maxAbs(ol.L, T + N));
   REQUIRE(ld->getParam(echo::kFb) == 30.0 && ld->headDelay(0) == 0.2 * kSr, "the load that joined the Clear's fade did not land its patch");
-  auto rest = mk({{"time.sync", 0}, {"time.ms", 90}, {"fb.amount", 75}}), twin = mk({{"time.sync", 0}, {"time.ms", 90}, {"fb.amount", 75}});
+  auto rest = mk({{"time.mode", 0}, {"time.ms", 90}, {"fb.amount", 75}}), twin = mk({{"time.mode", 0}, {"time.ms", 90}, {"fb.amount", 75}});
   const Vec pulse = impulse(S(0.3), 100, 0.5);
   const auto orest = runActions(*rest, pulse, pulse, {{0, kClear}}, 64), otwin = runActions(*twin, pulse, pulse, {}, 64);
   for (long i = 0; i < S(0.3); ++i) REQUIRE(orest.L[i] == otwin.L[i], "a Clear at rest changed sample %ld", i);
@@ -3512,7 +3746,7 @@ bool clearNoRestart(Detail& d) {
 // Criterion 3: a performance event: the saved state is byte-identical before
 // and after a Clear (ADR-267 A1).
 bool clearState(Detail& d) {
-  auto e = mk({{"time.sync", 0}, {"time.ms", 90}, {"fb.amount", 75}, {"mix", 50}});
+  auto e = mk({{"time.mode", 0}, {"time.ms", 90}, {"fb.amount", 75}, {"mix", 50}});
   run(*e, impulse(S(0.2), 0, 0.5), zeros(S(0.2)));
   const std::string before = saveText(*e);
   runActions(*e, zeros(S(0.1)), zeros(S(0.1)), {{5, kClear}}, 256);
@@ -3532,7 +3766,7 @@ bool clearA23(Detail& d) {
   // Two Clears in one 4096 block, the second after the first's fade has ended
   // (critic T-037 L5), and one on a block's last sample.
   const std::vector<Fire> fires{{3001, kClear}, {9000, kClear}, {10200, kClear}, {15000 + 4095, kClear}};
-  auto mkE = [] { return mk({{"time.sync", 0}, {"time.ms", 45}, {"fb.amount", 70}, {"mix", 50}}); };
+  auto mkE = [] { return mk({{"time.mode", 0}, {"time.ms", 45}, {"fb.amount", 70}, {"mix", 50}}); };
   REQUIRE(echo::Echo::resolveAction("clear") == kClear && !echo::Echo::resolveAction("freeze"), "the action keys resolve wrongly");
   auto ref = mkE();
   const auto oref = runActions(*ref, L, R, fires, 1);
@@ -3565,7 +3799,7 @@ bool clearA23(Detail& d) {
 
 namespace P = echo::presets;
 
-// A fixture exercising the whole value set: the fixed row's keys (time.scale, fb.amount, mix, and route.mode,
+// A fixture exercising the whole value set: the fixed row's keys (time.ms, fb.amount, mix, and route.mode,
 // D-050's Type) and a few more all off their defaults, so A12 shows its values exact. It also sets time.change,
 // time.law, time.glide, mod.depthMs and time.offR off their defaults: every bank preset is repitch / tape at
 // the default glide, so without these A13's corners would not differ in those keys.
@@ -3574,7 +3808,7 @@ P::ModulePreset valuesFixture() {
   p.id = "fx-values";
   p.label = "Values";
   p.description = "a test fixture: values off their defaults";
-  p.defaults[echo::kTimeScale] = 2;
+  p.defaults[echo::kTimeMs] = 250;
   p.defaults[echo::kFb] = 40;
   p.defaults[echo::kLoopLp] = 6000;
   p.defaults[echo::kModDepth] = 3;
@@ -3840,7 +4074,7 @@ bool presetFactoryStereo(Detail& d) {
 // the running state rest holds, so A2 can see a reset that skips it), every
 // filter on.
 std::unique_ptr<Echo> mkStress(double sr = kSr) {
-  return mk({{"time.sync", 0}, {"time.ms", 37}, {"time.offR", 30}, {"fb.amount", 110}, {"route.mode", 1}, {"time.law", 0}, {"mod.depthMs", 20},
+  return mk({{"time.mode", 0}, {"time.ms", 37}, {"time.offR", 30}, {"fb.amount", 110}, {"route.mode", 1}, {"time.law", 0}, {"mod.depthMs", 20},
              {"mod.rateHz", 7}, {"mod.shape", 0}, {"mod.spread", 100}, {"filt.in.on", 1}, {"filt.out.on", 1}, {"filt.out.hpHz", 80}, {"mix", 70}}, sr);
 }
 
@@ -3872,7 +4106,7 @@ bool a2ResetIdentity(Detail& d) {
 // the output must be the input times the dry gain, sample for sample.
 bool a4Latency(Detail& d) {
   REQUIRE(mk({})->properties().latency->samples == 0, "the declared latency is not 0");
-  auto e = mk({{"time.sync", 0}, {"time.ms", 500}, {"fb.amount", 0}, {"mix", 30}});
+  auto e = mk({{"time.mode", 0}, {"time.ms", 500}, {"fb.amount", 0}, {"mix", 30}});
   const double dg = std::cos(0.3 * kPi / 2);
   const long n = S(0.4);
   Vec imp = impulse(n, 1000, 1.0), sw(n);
@@ -3886,7 +4120,7 @@ bool a4Latency(Detail& d) {
     if (oi.L[i] != 0.0) first = i;
   REQUIRE(first == 1000 && std::fabs(oi.L[1000] - dg) < 1e-15 && std::fabs(oi.R[1000] - dg) < 1e-15,
           "the impulse at 1000 comes out first at %ld (%.6f): the dry path is not on time", first, first >= 0 ? oi.L[first] : 0.0);
-  auto f = mk({{"time.sync", 0}, {"time.ms", 500}, {"fb.amount", 0}, {"mix", 30}});
+  auto f = mk({{"time.mode", 0}, {"time.ms", 500}, {"fb.amount", 0}, {"mix", 30}});
   const auto os = run(*f, sw, sw);
   for (long i = 0; i < n; ++i)
     REQUIRE(std::fabs(os.L[i] - dg * sw[i]) < 1e-15 && std::fabs(os.R[i] - dg * sw[i]) < 1e-15, "the swept sine's dry path is off at %ld (%.9g vs %.9g)",
@@ -3894,7 +4128,7 @@ bool a4Latency(Detail& d) {
   return true;
 }
 
-// A8: L 220 Hz and R 330 Hz, decorrelated: in stereo routing |L - R| does not
+// A8: L 220 Hz and R 330 Hz, decorrelated: in standard routing |L - R| does not
 // collapse (Echo declares changes_image for ping-pong and mid/side only).
 bool a8Image(Detail& d) {
   const long n = S(1.0);
@@ -3908,7 +4142,7 @@ bool a8Image(Detail& d) {
   }
   const double ratio = std::sqrt(dout / din);
   // Clean reads ~1.18 (the repeats add level); a 25 % crossfeed reads 0.59 (critic T-018 L), a mono sum 0.
-  REQUIRE(ratio > 0.9, "stereo routing narrows the image: rms |L - R| is %.3f of the input's", ratio);
+  REQUIRE(ratio > 0.9, "standard routing narrows the image: rms |L - R| is %.3f of the input's", ratio);
   return true;
 }
 
@@ -3918,7 +4152,7 @@ bool a8Image(Detail& d) {
 // Zero allocations. (Locks and syscalls are checked by review only: no
 // RealtimeSanitizer on this toolchain; the engine calls nothing that locks.)
 bool a10Session(Detail& d) {
-  auto e = mk({{"time.sync", 0}, {"mod.depthMs", 3}});
+  auto e = mk({{"time.mode", 0}, {"mod.depthMs", 3}});
   const auto cs = fourCorners();
   std::vector<std::vector<echo::KeyValue>> corners;
   for (const auto& c : cs) corners.push_back(P::patchOf(c.defaults));  // patchOf allocates; the host's, off the audio thread: done before arming
@@ -4028,7 +4262,7 @@ bool b265Port(Detail& d) {
 // defaults mod.depthMs is 0, so the seeded-jump keys mod.shape and mod.seed would
 // read 0 by construction; critic T-018 M3). Beside each, an ideal offline
 // equal-gain crossfade of the two steady renders over the key's DECLARED length
-// (params.json): 20 ms for the routing and filter switches; for time.sync and
+// (params.json): 20 ms for the routing and filter switches; for time.mode and
 // time.div, per time.change mode: crossfade = time.xfadeMs, jump = 3 ms, repitch
 // = none (it declares no length, so no ideal is printed); the deferred and
 // seeded-jump keys declare none either. The worse of L and R is read.
@@ -4039,8 +4273,8 @@ bool b265Port(Detail& d) {
   const long n = S(3.4), t0 = S(2.0) + 12;
   struct K { const char* key; double a, b; double change; double fadeS; };  // change < 0: leave time.change alone
   const K keys[] = {{"route.mode", 0, 1, -1, 0.02},  {"filt.in.on", 0, 1, -1, 0.02}, {"filt.loop.on", 1, 0, -1, 0.02}, {"filt.out.on", 0, 1, -1, 0.02},
-                    {"time.sync", 1, 0, 0, -1},       {"time.div", 9, 12, 0, -1},     {"time.sync", 1, 0, 1, 0.06},    {"time.div", 9, 12, 1, 0.06},
-                    {"time.sync", 1, 0, 2, 0.003},    {"time.div", 9, 12, 2, 0.003},  {"mod.shape", 0, 1, -1, -1},     {"mod.seed", 1, 2, -1, -1},
+                    {"time.mode", 2, 0, 0, -1},       {"time.div", 9, 12, 0, -1},     {"time.mode", 2, 0, 1, 0.06},    {"time.div", 9, 12, 1, 0.06},
+                    {"time.mode", 2, 0, 2, 0.003},    {"time.div", 9, 12, 2, 0.003},  {"mod.shape", 0, 1, -1, -1},     {"mod.seed", 1, 2, -1, -1},
                     {"time.change", 0, 1, -1, -1},    {"time.law", 0, 1, -1, -1},     {"time.tempoMode", 1, 0, -1, -1}};
   const char* changeName[] = {"repitch", "crossfade", "jump"};
   struct Patch { std::string name; P::ModulePreset preset; bool modulated; };
@@ -4093,7 +4327,7 @@ bool b265Port(Detail& d) {
 
 // The law, per repeat generation, on the report's equal-time patches in every
 // mode, on exact inputs only (D-044 as re-ruled after critic T-019 H1): the mono
-// impulse (rho_in = 1) and the left and right impulses (rho_in = 1/2). Stereo and
+// impulse (rho_in = 1) and the left and right impulses (rho_in = 1/2). Standard and
 // mid/side keep rho_out >= rho_in; ping-pong has no cross term (rho = 1/2:
 // hard-panned by design). Then where ping-pong's sides overlap: its fold at 1 kHz
 // (a whole multiple of 1/T) equals the closed form, so an inverted side is seen.
@@ -4143,7 +4377,7 @@ bool b408Controls(Detail& d) {
   Vec L = zeros(n), R = zeros(n);
   L[0] = 1, R[0] = -1;  // P1
   const double p1 = fold::rho(fold::energy(L, R));
-  REQUIRE(p1 == 0.0 && !fold::genPasses(fold::kStereo, {1, p1, -1.0, 2.0}, 1.0), "P1 (hL = d, hR = -d) reads rho %.6f and the law passes it", p1);
+  REQUIRE(p1 == 0.0 && !fold::genPasses(fold::kStandard, {1, p1, -1.0, 2.0}, 1.0), "P1 (hL = d, hR = -d) reads rho %.6f and the law passes it", p1);
   R[0] = 1;  // P2
   const double p2 = fold::rho(fold::energy(L, R));
   REQUIRE(p2 == 1.0, "P2 (hL = hR = d) reads rho %.6f, not 1 (the scale)", p2);
@@ -4180,22 +4414,22 @@ bool b408Controls(Detail& d) {
   return true;
 }
 
-// The colouring flag (SPEC §3.2 as ruled, D-044): stereo mode, 0 < |tL - tR| <
+// The colouring flag (SPEC §3.2 as ruled, D-044): standard routing, 0 < |tL - tR| <
 // 40 ms in whole microseconds; and the facts the ruling rests on, measured: a
 // stereo offset combs the fold (inside the zone AND at 50 ms: 40 ms is a warning
 // convention, not a boundary this metric shows), while ping-pong and mid/side
 // offsets do not comb at all.
 bool b408Zone(Detail& d) {
   struct C { int mode; double tl, tr; bool want; };
-  const C cases[] = {{fold::kStereo, 0.5, 0.5, false},   {fold::kStereo, 0.5, 0.501, true},    {fold::kStereo, 0.5, 0.5399, true},
-                     {fold::kStereo, 0.5399, 0.5, true},   {fold::kStereo, 0.5, 0.5401, false},  {fold::kStereo, 0.25, 0.2901, false},
-                     {fold::kStereo, 0.25, 0.29, false},   {fold::kStereo, 0.54, 0.5, false},  // exactly 40 ms both ways, though the doubles differ by an ulp
+  const C cases[] = {{fold::kStandard, 0.5, 0.5, false},   {fold::kStandard, 0.5, 0.501, true},    {fold::kStandard, 0.5, 0.5399, true},
+                     {fold::kStandard, 0.5399, 0.5, true},   {fold::kStandard, 0.5, 0.5401, false},  {fold::kStandard, 0.25, 0.2901, false},
+                     {fold::kStandard, 0.25, 0.29, false},   {fold::kStandard, 0.54, 0.5, false},  // exactly 40 ms both ways, though the doubles differ by an ulp
                      {fold::kPingPong, 0.5, 0.501, false}, {fold::kMidSide, 0.5, 0.501, false}, {fold::kMidSide, 0.5, 0.5, false}};
   for (const auto& c : cases)
     REQUIRE(fold::colouringZone(c.mode, c.tl, c.tr) == c.want, "mode %d, %.4f / %.4f s: the flag reads %d", c.mode, c.tl, c.tr, !c.want);
   // Through the engine's own resolved times, and the folds they make.
   struct E { int mode; double offR; bool want; double lo, hi; };  // the smoothed fold's worst point must lie in [lo, hi] dB
-  const E es[] = {{fold::kStereo, 0.0, false, -0.01, 0.01},  {fold::kStereo, 0.2, true, -60, -6},  {fold::kStereo, 10.0, false, -60, -6},
+  const E es[] = {{fold::kStandard, 0.0, false, -0.01, 0.01},  {fold::kStandard, 0.2, true, -60, -6},  {fold::kStandard, 10.0, false, -60, -6},
                   {fold::kPingPong, 0.2, false, -3.6, -2.9}, {fold::kMidSide, 0.2, false, -0.01, 0.01}};
   for (const auto& e : es) {
     const auto t = fold::take(fold::patchWith({{"route.mode", e.mode}, {"time.offR", e.offR}}), echo::IrInput::Mono, kSr, -1);
@@ -4249,7 +4483,7 @@ const std::vector<Check> kChecks = {
     {"deferral: a time.change flip mid-fade changes nothing", deferral, {"deferralBroken"}},
     {"tempo: synced 1/4 at 60 bpm repeats at exactly 1 s from the first block, no glide in", tempoSync, {"tempoIgnored", "tempoGlidesAtRest"}},
     {"clamp: synced times fold by halving, free times clamp, 1 ms floor (SPEC §3.4)", clampFold, {"clampTruncates", "noMinFloor"}},
-    {"routing: ping-pong alternates; stereo never crosses; right wakes; M/S levels; M/S folds to M", routing,
+    {"routing: ping-pong alternates; standard never crosses; right wakes; M/S levels; M/S folds to M", routing,
      {"msSign", "pingpongNoCross", "wakeLeftOnly", "msSideGain2"}},
     {"load: old repeats fade (not cut) and end within 20 ms; Device keys untouched (D-016)", loadEnds,
      {"loadKeepsLine", "loadWritesDevice", "loadClearsInstantly"}},
@@ -4279,24 +4513,28 @@ const std::vector<Check> kChecks = {
     {"seeded modulation: reproducible from mod.seed; seed change and shape switch never step", modSeeded, {"unseededSeed", "shapeInstant"}},
     {"tempo modes: follow exact, glide by the law, crossfade never bends; 2x step crossfades; key moves obey time.change", tempoModes,
      {"tempoModeIgnored", "followNoCap"}},
-    // ---- M3 B4, T-038 ----
-    {"time.scale resolution: base x scale, then offsets, then the 12 s fold / clamp / 1 ms floor; free = the value, synced = the nearest octave (every octave, both sides of each snap boundary; 44.1, 96 kHz)",
-     scaleResolution, {"scaleIgnoredSynced", "scaleNotSnapped", "scaleAfterClamp", "scaleSnapRounds"}},
-    {"time.scale move is a control move: it follows time.change in every mode (bit-identical to the same move through time.ms / time.div) and is latched at its start",
-     scaleControlMove, {"scaleBypassesChange", "scaleMoveSwallowed"}},
-    {"time.scale at x1 changes nothing: routings, free and synced, moving times under each time.change, a tempo sweep: bit-identical with the key absent, re-sent, or wandering inside a snap band",
-     scaleUnity, {"scaleResendIsMove"}},
-    {"time.scale at x1: the resolved times equal the pre-T-038 expression bit for bit over every division, tempo, offset and free time (44.1, 48, 96 kHz)",
-     scaleUnityBits, {"scaleOffsetRewrite"}},
-    {"time.scale and the tail: the declared tail, the rest gate and the offline renderer use the scaled times (44.1, 96 kHz)", scaleTail,
-     {"scaleTailUnscaled", "scaleIgnoredSynced"}},
+    // ---- M3 B4, T-044 (D-050; the offset expression is T-038's, kept) ----
+    {"time.mode resolution: sec and hz read time.ms (Hz = 1000 / ms), sync the division at the host tempo; the offsets, then the 12 s fold / clamp / 1 ms floor, against an independent reading of SPEC §3 (44.1, 96 kHz)",
+     timeResolution, {"hzCountsAsSync"}},
+    {"time.mode flip that moves a time is a control move: from sec, hz and sync it follows time.change (bit-identical to the same move through time.ms / time.div) and is latched at its start, also after a tempo step and on a stale tempo latch; a same-time flip into sync at a tempo step equals a patch synced all along",
+     modeFlipControlMove, {"modeFlipSwallowed", "modeFlipIntoSyncSwallowed", "modeFlipAlwaysMove"}},
+    {"time.mode sec <-> hz moves nothing: flips every 2500 samples, in a move in flight with time.change flipped, under modulation and a tempo sweep, are bit-identical to none; hz equals sec and follows no tempo (3 routings, each time.change)",
+     timeModeFlip, {"hzFlipIsMove", "hzCountsAsSync"}},
+    {"time.mode and the tail: sec and hz declare the identical tail, sync that of its sec twin; each sounds until it and is exact zero from it; a sec <-> hz flip while the tail rings changes nothing and the rest comes at the same sample; the offline renderer agrees (44.1, 96 kHz)",
+     timeModesTail, {"tailReadsDivInHz", "hzFlipDelaysRest"}},
+    {"a time key's send that moves no time is no move: time.ms (moved while synced, or re-sent), a re-sent time.div or time.offL in the sample a tempo step lands, and time.ms automated every 512-sample block under a tempo ramp, change jump at every tempoMode, are bit-identical to no send",
+     resendIsNoMove, {"keyResendIsMove", "moveReadsOneLine"}},
+    {"the resolved times equal main's offset expression bit for bit over every division, tempo, offset and free time, in each of sec, hz and sync (44.1, 48, 96 kHz)",
+     offsetExpressionBits, {"offsetRewrite"}},
+    {"a patch in each time.mode (sec, hz, sync): two instances alternately equal a solo render, every block pattern 1 - 4096 renders bit-identically, reset() equals a fresh reset instance, the first repeat lands on its time at 44.1 - 192 kHz",
+     timeModesIndependence, {"hzCountsAsSync"}},
     {"click metric (M2 gate, s fixed at 2.25): sweeps, tempo sweeps and single moves under 2.5 and inside the speed invariants, at 44.1 / 48 / 96 / 192 kHz, worst of 8 probe phases; a planted click over",
-     clickSweep, {"integerRead", "blockSteppedD", "bareJump", "noLawCap", "scaleBypassesChange", "fadeLinear"}},
-    {"click metric over the probe's phase: a move reversed mid-glide (both laws, time.ms / time.div / time.scale free and synced, 1 and 2 octaves, down and up, 100/200/400 ms; 44.1 / 48 / 96 / 192 kHz) reads under 2.5 at the worst of 8 half-period phases, zero backstop hits",
+     clickSweep, {"integerRead", "blockSteppedD", "bareJump", "noLawCap", "fadeLinear"}},
+    {"click metric over the probe's phase: a move reversed mid-glide (both laws, time.ms / time.div, 1 and 2 octaves, down and up, 100/200/400 ms; 44.1 / 48 / 96 / 192 kHz) reads under 2.5 at the worst of 8 half-period phases, zero backstop hits",
      reversalClick, {"expSlewOff", "tapeKinkUnbounded"}},
     {"the click gates' probe-phase sweep sweeps: the 8 shifts are distinct and span half a probe period, and they move a step's reading (an onset's, and a reversal's)",
      phaseSweepWorks, {"phaseSweepCollapsed"}},
-    {"click metric over the probe's phase: every exponential-law onset (sweeps, single moves, octave steps, plain onsets; 44.1 / 48 / 96 / 192 kHz) reads under 2.5 at the worst of 8 half-period phases, zero backstop hits",
+    {"click metric over the probe's phase: every exponential-law onset (sweeps, single moves, plain onsets; 44.1 / 48 / 96 / 192 kHz) reads under 2.5 at the worst of 8 half-period phases, zero backstop hits",
      onsetClick, {"expSlewOff"}},
     {"the exponential law's 0.1 ms bound binds only just after a move (44.1 - 192 kHz; glides 0.01 - 1 s; onsets, reversals, 1 and 2 ms targets, a glide change; modulated): never in a relaxation",
      expSlewBinds, {"expSlewLong", "expSpuriousRetarget", "expSlewOff"}},
@@ -4329,12 +4567,13 @@ const std::vector<Check> kChecks = {
     {"state: version line, every patch key once in manifest order by name, then the [device] block (SPEC §16.2)", stateFormat,
      {"stateDivByIndex", "stateKeyMissing"}},
     {"state A18: save -> load -> save byte-identical, values bit-equal, renders identical; also in a comma locale", stateExact, {"stateFloat6g"}},
+    {"state RS-6.11: time.ms saved bit for bit at the values a Hz reading produces (1000 / 3, 1000 / 440, the range's ends), in sec and hz", stateTimeExact, {"stateFloat6g"}},
     {"state A17: a mid-session state in a fresh instance renders as the original after reset()", stateComplete, {"stateKeyMissing"}},
     {"state A19: the worst case fits 2 KiB; 2 KiB + 1 refused first; staging allocates nothing", stateSize, {"stateOversizedAccepted"}},
     {"state A20: saved while ringing, mid-ramp and latched equals saved at rest", stateLiveExcluded, {"stateLatchSerialised"}},
-    {"state undo: for each of the 30 keys, the snapshot restores byte- and bit-identically", stateUndo, {"stateKeyMissing"}},
+    {"state undo: for each of the 29 keys, the snapshot restores byte- and bit-identically", stateUndo, {"stateKeyMissing"}},
     {"state: every malformed text refused whole (strict number grammar), nothing staged; an alias reads and is written back by name",
-     stateRefusals, {"stateAcceptsUnknown", "stateKeyMissing", "stateMissingScaleDefaults"}},
+     stateRefusals, {"stateAcceptsUnknown", "stateKeyMissing", "stateMissingKeyDefaults"}},
     {"state: an adopt mid-play is a D-020 load plus the Device keys ramping, bit for bit", stateAdoptLive, {"adoptResets"}},
     // ---- M3 B2, T-037 ----
     {"Clear: nothing changes before its sample; from it the repeats fade over 20 ms (48, 44.1 kHz) and end", clearFade, {"clearCuts"}},
@@ -4362,18 +4601,18 @@ const std::vector<Check> kChecks = {
     // ---- M3 B3, T-018 ----
     {"A2 reset identity: 2 s of seeded noise at the defaults and a stress patch; reset() mid-ramp, mid-modulation = fresh", a2ResetIdentity, {"resetKeepsModPhase"}},
     {"A4 latency truth: an impulse and a swept sine pass the dry path at the declared 0 samples", a4Latency, {"dryLate"}},
-    {"A8 stereo image: L 220 / R 330 Hz, |L - R| kept in stereo routing", a8Image, {"monoSum"}},
+    {"A8 stereo image: L 220 / R 330 Hz, |L - R| kept in standard routing", a8Image, {"monoSum"}},
     {"A10 real time: a scripted session (sweeps, preset moves, corner loads, staged state, Clear, tempo, sleep and wake) allocates nothing", a10Session,
      {"allocInProcess"}},
     {"A14 feedback: in horde's n = 1 cycle at loop gain 1.2, silence in gives exact silence out (defaults, stress)", a14Cycle, {"selfStart"}},
     {"B265 port: horde's click metric matches horde's JS (54caca8) to 1e-9 on eight pinned vectors (click, peak time, floor)", b265Port,
      {"b265HoodHalved"}},
     // ---- M3 B3, T-019 ----
-    {"B408 law: per repeat on mono, L and R impulses, stereo and mid/side keep rho_out >= rho_in, ping-pong 1/2 with no cross term; ping-pong's overlap at 1 kHz = closed form (D-044)",
+    {"B408 law: per repeat on mono, L and R impulses, standard and mid/side keep rho_out >= rho_in, ping-pong 1/2 with no cross term; ping-pong's overlap at 1 kHz = closed form (D-044)",
      b408Gate, {"stereoInvertsR", "msSideGain2", "pingpongBothLines", "pingpongInvertsR"}},
     {"B408 controls P1 - P5 in rho's scale; P3's 1/3-octave and octave views equal the closed form within 0.1 dB, its notch ~500 Hz",
      b408Controls, {"foldScaleSlip", "foldNotchUnsmoothed", "foldOctaveNarrow"}},
-    {"B408 colouring flag: stereo mode, 0 < |tL - tR| < 40 ms (whole us); stereo offsets comb, ping-pong and mid/side offsets do not", b408Zone,
+    {"B408 colouring flag: standard routing, 0 < |tL - tR| < 40 ms (whole us); standard-routing offsets comb, ping-pong and mid/side offsets do not", b408Zone,
      {"zoneAnyMode", "zoneAtEqual"}},
 };
 
@@ -4429,10 +4668,10 @@ bool* plantFlag(std::string_view n) {
       {"pingpongInvertsR", &pingpongInvertsR},
       {"presetStateOversized", &presetStateOversized}, {"presetPatchOfDropsKey", &presetPatchOfDropsKey},
       {"factoryLabelTypo", &factoryLabelTypo}, {"factoryCarriesSlot", &factoryCarriesSlot},
-      {"scaleIgnoredSynced", &scaleIgnoredSynced}, {"scaleNotSnapped", &scaleNotSnapped}, {"scaleBypassesChange", &scaleBypassesChange},
-      {"scaleAfterClamp", &scaleAfterClamp}, {"scaleResendIsMove", &scaleResendIsMove}, {"scaleTailUnscaled", &scaleTailUnscaled},
-      {"scaleMoveSwallowed", &scaleMoveSwallowed}, {"scaleSnapRounds", &scaleSnapRounds}, {"scaleOffsetRewrite", &scaleOffsetRewrite},
-      {"stateMissingScaleDefaults", &stateMissingScaleDefaults},
+      {"offsetRewrite", &offsetRewrite}, {"stateMissingKeyDefaults", &stateMissingKeyDefaults},
+      {"hzCountsAsSync", &hzCountsAsSync}, {"hzFlipIsMove", &hzFlipIsMove}, {"modeFlipSwallowed", &modeFlipSwallowed},
+      {"tailReadsDivInHz", &tailReadsDivInHz}, {"modeFlipIntoSyncSwallowed", &modeFlipIntoSyncSwallowed},
+      {"modeFlipAlwaysMove", &modeFlipAlwaysMove}, {"keyResendIsMove", &keyResendIsMove}, {"moveReadsOneLine", &moveReadsOneLine}, {"hzFlipDelaysRest", &hzFlipDelaysRest},
   };
   for (const auto& p : table)
     if (n == p.n) return p.f;
@@ -4475,10 +4714,10 @@ struct AdmissionRow {
 const std::vector<AdmissionRow>& admissionRows() {
   static const std::vector<AdmissionRow> rows = {
       {"A1", "Declarations", {abiProperties, abiParamClasses}, "`check_manifest.py` (C++ table = params.json) and `manifest_lock.py` (the lock) in ./verify"},
-      {"A2", "Reset identity", {a2ResetIdentity, determinism}, ""},
-      {"A3", "Block independence", {blockIndependence}, ""},
+      {"A2", "Reset identity", {a2ResetIdentity, determinism, timeModesIndependence}, ""},
+      {"A3", "Block independence", {blockIndependence, timeModesIndependence}, ""},
       {"A4", "Latency truth", {a4Latency, abiProperties}, "latency 0, no residual (nothing is buffered ahead)"},
-      {"A5", "Silence and tails", {silence, tailExactZero, tailFormula, tailAfterChange, tailNearUnity, restNeverCuts, scaleTail}, ""},
+      {"A5", "Silence and tails", {silence, tailExactZero, tailFormula, tailAfterChange, tailNearUnity, restNeverCuts, timeModesTail}, ""},
       {"A6", "I/O gain (B435 tests 1-7)", {ioTest1Unity, ioGainLaw, ioTest3Opens, ioTest4Kept, ioTest5Placement, ioTest6Slot, ioTest7Latches, metersTaps},
        "no limiter face: the post-limiter test does not apply"},
       {"A7", "Off", {}, "horde's: \"off\" is the router's (RS-4.8); Echo has no bypass key"},
@@ -4487,16 +4726,16 @@ const std::vector<AdmissionRow>& admissionRows() {
       {"A10", "Real-time", {noAlloc, a10Session, ftzSet, ftzRestored},
        "locks and syscalls by review only: no RealtimeSanitizer on this toolchain, and the engine calls nothing that locks"},
       {"A11", "Parameter classes",
-       {switchesClickFree, crossfadeEqualGain, jumpIsShortFade, deferral, modSeeded, clickSweep, reversalClick, onsetClick, phaseSweepWorks, expSlewBinds, scaleControlMove, stepClick, outgoingBound, tapeCatchUp, loadLeavesDevice, presetValidate, b265Port},
+       {switchesClickFree, crossfadeEqualGain, jumpIsShortFade, deferral, modSeeded, clickSweep, reversalClick, onsetClick, phaseSweepWorks, expSlewBinds, modeFlipControlMove, timeModeFlip, timeResolution, resendIsNoMove, stepClick, outgoingBound, tapeCatchUp, loadLeavesDevice, presetValidate, b265Port},
        "structural: every flip key's switch declaration in params.json (`check_manifest.py`, with planted bare and length-less switches); the B265 reading REPORTED, never judged (`.harness/b265-report.txt`)"},
       {"A12", "Macros", {presetA12, presetValidate, presetFactoryBank},
        "macros are not offered (RS-5.1; D-050): every preset's slots are empty and a slot is refused by name; the row still round-trips every preset's values, the fixed row's keys included, byte-identical, and the factory bank (the init plus seven) loads as its own values (T-021); B408 for the bank is stated in the run's REPORT lines"},
       {"A13", "Corner presets", {presetA13}, "the horde preset's own save and reload is horde's"},
       {"A14", "Feedback", {a14Cycle}, "refusing a min_block > 1 module is the slot's; Echo declares 1"},
-      {"A15", "Determinism", {determinism}, ""},
+      {"A15", "Determinism", {determinism, timeModesIndependence}, ""},
       {"A16", "Sleep and wake", {sleepTwin, floorAndWake}, ""},
       {"A17", "State completeness", {stateComplete}, ""},
-      {"A18", "Restore exactness", {stateExact}, ""},
+      {"A18", "Restore exactness", {stateExact, stateTimeExact}, "time.ms bit for bit at the values a Hz reading produces (RS-6.11)"},
       {"A19", "State size", {stateSize, presetFactoryStateSize}, "every factory preset's saved state within 2 KiB (T-021)"},
       {"A20", "Live-state exclusion", {stateLiveExcluded}, ""},
       {"A21", "Morph position", {}, "not declared (RS-4.10; SPEC §16.6)"},
@@ -4575,7 +4814,7 @@ int main(int argc, char** argv) {
     tapeCatchUp(d);
     expSlewBinds(d);
 #ifdef ECHO_PLANTS
-    for (const char* p : {"bareJump", "integerRead", "blockSteppedD", "noLawCap", "scaleBypassesChange", "expSlewOff", "tapeKinkUnbounded", "tapeNoBrake", "tapeNoTargetBrake", "fbClampUnsigned", "fbFrozenOutgoing", "fadeLinear"}) {
+    for (const char* p : {"bareJump", "integerRead", "blockSteppedD", "noLawCap", "expSlewOff", "tapeKinkUnbounded", "tapeNoBrake", "tapeNoTargetBrake", "fbClampUnsigned", "fbFrozenOutgoing", "fadeLinear"}) {
       std::printf("  -- under plant %s\n", p);
       *plantFlag(p) = true;
       clickSweep(d);
@@ -4625,8 +4864,7 @@ int main(int argc, char** argv) {
                         "resetKeepsModPhase", "dryLate", "monoSum", "selfStart", "b265HoodHalved",
                         "stereoInvertsR", "pingpongBothLines", "foldScaleSlip", "foldOctaveNarrow", "foldNotchUnsmoothed",
                         "zoneAnyMode", "zoneAtEqual", "pingpongInvertsR", "presetStateOversized", "presetPatchOfDropsKey", "factoryLabelTypo", "factoryCarriesSlot",
-                        "scaleIgnoredSynced", "scaleNotSnapped", "scaleBypassesChange", "scaleAfterClamp", "scaleResendIsMove", "scaleTailUnscaled",
-                        "scaleMoveSwallowed", "scaleSnapRounds", "scaleOffsetRewrite", "stateMissingScaleDefaults", "expSlewOff", "expSlewLong", "phaseSweepCollapsed", "expSlewBlockStart", "expSpuriousRetarget",
+                        "offsetRewrite", "stateMissingKeyDefaults", "hzCountsAsSync", "hzFlipIsMove", "modeFlipSwallowed", "tailReadsDivInHz", "moveReadsOneLine", "hzFlipDelaysRest", "modeFlipIntoSyncSwallowed", "modeFlipAlwaysMove", "keyResendIsMove", "expSlewOff", "expSlewLong", "phaseSweepCollapsed", "expSlewBlockStart", "expSpuriousRetarget",
                         "tapeKinkUnbounded", "tapeNoBrake", "tapeNoTargetBrake", "fbClampUnsigned", "fbFrozenOutgoing", "fadeLinear",
                         "modAccelUnbounded", "modFloorClampsBoth", "modNoFloorBrake", "modRideKink", "modBoundKeepsSlope", "fbClampStale"}) {
     bool guarded = false;

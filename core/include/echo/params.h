@@ -65,12 +65,11 @@ struct ParamDef {
   std::string_view smoothing;
 };
 
-// Handles, in table order. kTimeScale is APPENDED (T-038, D-048): the state text,
-// the lock and every other key's handle keep their place.
+// Handles, in table order.
 enum P : int {
-  kInGain, kOutGain, kMix, kSync, kTimeMs, kDiv, kOffL, kOffR, kChange, kLaw, kTempoMode,
+  kInGain, kOutGain, kMix, kTimeMode, kTimeMs, kDiv, kOffL, kOffR, kChange, kLaw, kTempoMode,
   kGlide, kXfadeMs, kFb, kRoute, kInOn, kInHp, kInLp, kLoopOn, kLoopHp, kLoopLp, kOutOn,
-  kOutHp, kOutLp, kModDepth, kModRate, kModShape, kModSpread, kModSeed, kTimeScale, kNumParams
+  kOutHp, kOutLp, kModDepth, kModRate, kModShape, kModSpread, kModSeed, kNumParams
 };
 
 // horde's division list (intake/tempo-divisions.md), slow to fast: name,
@@ -97,14 +96,14 @@ constexpr std::optional<int> divisionIndex(std::string_view name) {
 }
 
 namespace labels {
-inline constexpr std::array<std::string_view, 2> kSync{"free", "sync"};
+inline constexpr std::array<std::string_view, 3> kTimeMode{"sec", "hz", "sync"};
 inline constexpr std::array<std::string_view, 22> kDiv{
     "2/1", "3/2", "2/1T", "1/1", "3/4", "1/1T", "1/2", "3/8", "1/2T", "1/4", "3/16",
     "1/4T", "1/8", "3/32", "1/8T", "1/16", "3/64", "1/16T", "1/32", "3/128", "1/32T", "1/64"};
 inline constexpr std::array<std::string_view, 3> kChange{"repitch", "crossfade", "jump"};
 inline constexpr std::array<std::string_view, 2> kLaw{"tape", "exponential"};
 inline constexpr std::array<std::string_view, 3> kTempoMode{"crossfade", "glide", "follow"};
-inline constexpr std::array<std::string_view, 3> kRoute{"stereo", "pingpong", "midside"};
+inline constexpr std::array<std::string_view, 3> kRoute{"standard", "pingpong", "midside"};
 inline constexpr std::array<std::string_view, 2> kOnOff{"off", "on"};
 inline constexpr std::array<std::string_view, 2> kShape{"sine", "drift"};
 }  // namespace labels
@@ -113,7 +112,7 @@ inline constexpr std::array<ParamDef, kNumParams> kParams{{
     {"io.inGain", "Input Gain", "dB", false, -24, 24, 0, Morph::Device, "io", {}, "continuous", "gain"},
     {"io.outGain", "Output Gain", "dB", false, -24, 24, 0, Morph::Device, "io", {}, "continuous", "gain"},
     {"mix", "Mix", "%", false, 0, 100, 30, Morph::Continuous, "lin", {}, "continuous", "gain"},
-    {"time.sync", "Sync", "", true, 0, 1, 1, Morph::Jump, "step", labels::kSync, "continuous", "time"},
+    {"time.mode", "Time Mode", "", true, 0, 2, 2, Morph::Jump, "step", labels::kTimeMode, "continuous", "time"},
     {"time.ms", "Time", "ms", false, 1, 12000, 375, Morph::Continuous, "log", {}, "continuous", "time"},
     {"time.div", "Division", "", true, 0, 21, 9, Morph::Jump, "step", labels::kDiv, "continuous", "time"},
     {"time.offL", "Left Offset", "%", false, -50, 50, 0, Morph::Continuous, "lin", {}, "continuous", "time"},
@@ -139,7 +138,6 @@ inline constexpr std::array<ParamDef, kNumParams> kParams{{
     {"mod.shape", "Mod Shape", "", true, 0, 1, 0, Morph::Jump, "step", labels::kShape, "continuous", "mod"},
     {"mod.spread", "Mod Spread", "%", false, 0, 100, 0, Morph::Continuous, "lin", {}, "continuous", "mod"},
     {"mod.seed", "Mod Seed", "", true, 0, 65535, 1, Morph::Jump, "step", {}, "continuous", "mod"},
-    {"time.scale", "Time Scale", "×", false, 0.25, 4, 1, Morph::Continuous, "log", {}, "continuous", "time"},
 }};
 
 // The declared actions (SPEC §16.7, params.json `actions`), by index = action id.

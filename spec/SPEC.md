@@ -33,6 +33,9 @@ outgoing head's clamp looks one sample ahead of the offset; the offset's move wh
 the read, and the M2 bar is what governs; this replaces A9's "a away from the floor, 2 a at contact"), from the critic's re-check.
 **Amended 2026-11-03 by D-050** (§3.5, §12, §16.3 and the last sentence of §16.4: Echo offers no macros; a preset is plain values and keeps `slots: []`, and a preset with a
 slot is refused; the rest of D-050 — Time, the saved modes, the fixed row — is amended in its own tickets).
+**Revision 5, by D-050 and D-050 A2 (2026-11-04, T-044):** `time.mode` (`sec`, `hz`, `sync`) replaces the two-label sync key, and the 30th key (the scale) goes: 29 keys again
+(§3.1, §3.4, §3.5, §9, §11, §16.2); `route.mode`'s first label is `standard` (§1, §3.2, §4, §9, §16.2); macros leave the scope list (§1); the fixed row is
+Time (`time.ms`), Feedback, Mix and Type (`route.mode`), provisional until T-045 (§16.4). The other keys' ranges, defaults and classes are unchanged.
 
 **What this is.** The behaviour Echo must have, stated so the C++ core (M1–M3) can be built and tested against it.
 The machine-readable half is [`params.json`](params.json): every key, unit, range, default, morph class, rate
@@ -49,16 +52,15 @@ rate. No per-sample constant appears anywhere in this spec.
 
 **Ships in 1.0:**
 - one delay line per channel, up to **12 s** each, with fractional reads (D-004);
-- **free time** (ms) or **synced time** by horde's division names, with a **left and right offset** as a percentage
-  of the base time (§3);
-- **routing**: stereo, ping-pong, mid/side (§4);
+- **time** in seconds or in Hz (both read one stored time in ms) or **synced time** by horde's division names, with a
+  **left and right offset** as a percentage of the base time (§3);
+- **routing**: standard, ping-pong, mid/side (§4);
 - **feedback** to 120 %, with a ceiling on the returning term only and a DC blocker in the loop (§5);
 - **filters at three positions** (input, loop, output), each with true bypass (§6);
 - **time changes**: repitch with two laws (tape, exponential), crossfade, jump; and a per-patch policy for tempo
   changes (§3.5–3.8);
 - **line modulation**: sine or seeded drift, with depth, rate, stereo spread and seed (§7);
 - **mix** and horde's **I/O gain** pair with meter taps (§8);
-- up to **8 macros**, resolved by horde (§12);
 - the declarations horde reads: latency, tail, rest, load, memory, classes and switch methods (§9–11).
 
 **Post-1.0, each by its own poll** (ROADMAP §Deferred): freeze / infinite hold, reverse, ducking, a smear amount
@@ -92,21 +94,25 @@ in L,R ─► io.inGain ─┬────────────────�
 
 ## 3. Time
 
-### 3.1 Free and synced
+### 3.1 Sec, Hz and sync
 
-| | free (`time.sync` = free) | synced (`time.sync` = sync) |
-|---|---|---|
-| base time | `time.ms`, 1 ms – 12 s | `time.div` beats × 60 / bpm |
-| stored as | ms | the division's **name** (`intake/tempo-divisions.md`) |
-| tempo | ignored | data, pushed by the host per block; never read from a clock |
+`time.mode` (`sec`, `hz`, `sync`; D-050) says how the one Time is read:
+
+| | sec (`time.mode` = sec) | hz (`time.mode` = hz) | sync (`time.mode` = sync) |
+|---|---|---|---|
+| base time | `time.ms`, 1 ms – 12 s | the same `time.ms`, read as a frequency: Hz = 1000 / ms, 1000 Hz – 0.083 Hz | `time.div` beats × 60 / bpm |
+| stored as | ms | ms | the division's **name** (`intake/tempo-divisions.md`) |
+| tempo | ignored | ignored | data, pushed by the host per block; never read from a clock |
+
+Sec and hz are two readings of one stored `time.ms`: 1 s is 1 Hz, 500 ms is 2 Hz, 12 s is 0.083 Hz. Nothing else differs
+between them, so **a switch between sec and hz moves no time and no read head** (§3.5). `time.ms` is stored as the double
+it was set to, never rounded to the display's precision, and a saved one reads back **bit for bit** (RS-6.11; §16.2): a Hz
+value turned into milliseconds (3 Hz is 1000 / 3 = 333.3333333333333 ms) is not a short decimal. The default is `sync`.
 
 The 22 division names are horde's list, slow to fast, `2/1` to `1/64`; aliases (`1/1D` for `3/2`, …) are accepted
 on load and stored as the canonical name. bpm ≤ 1 falls back to 120; re-sending an unchanged tempo is a no-op.
-
-**Time Scale** (`time.scale`, D-048) multiplies the base time: ×¼ to ×4 on a log law, default ×1, so the knob's centre
-is the preset as saved. Free, it is the value itself and scales continuously. Synced, it is the **nearest octave**,
-2^round(log2 scale), so the repeats stay on the grid: ×¼, ½, 1, 2 or 4 exactly (the snap boundaries are ×2^(k + ½),
-0.354, 0.707, 1.414 and 2.828). A re-sent scale, or a synced one moving inside a single octave's band, moves no time.
+The face's dot and triplet toggles (T-022) filter the steps a gesture on the Division control lands on; they store
+nothing and change no sound, and the stored name stays horde's (D-050 ruling 4).
 
 ### 3.2 Left and right offsets (ruled by poll, D-015)
 
@@ -114,7 +120,7 @@ Each side's time is `base × (1 + offset/100)`, with `time.offL` and `time.offR`
 milliseconds, so a pattern survives a tempo change: +50 % turns 1/4 into 1/4D, −33.3 % into 1/4T, and a few percent
 gives a Haas-style widening. Offsets apply in every routing; in mid/side they offset the M and S lines.
 
-**Colouring zone (D-010; D-044).** In **stereo** mode, when the two resolved times differ by less than 40 ms and are
+**Colouring zone (D-010; D-044).** In **standard** routing, when the two resolved times differ by less than 40 ms and are
 not equal, mono playback combs (a 1 ms offset puts the first ⅓-octave notch at 500 Hz, −9.4 dB at the defaults).
 Echo's screen warns; the mono-fold report states it. The flag is exactly 0 < |tL − tR| < 40 ms, compared in whole
 microseconds ("about 40 ms" in the literature, ruled a strict 40 ms). **40 ms is a warning convention** (the
@@ -134,10 +140,10 @@ or a wake starts on the host's tempo rather than gliding from a stale or default
 ### 3.4 The 12 s line and its clamp
 
 The line holds 12 s plus the modulation ceiling (20 ms) plus the kernel's margin (§11). Each time is the base
-time × `time.scale` (§3.1) × (1 + offset); the scale comes **before** this clamp, never after it. Then:
+time × (1 + offset), the offsets (§3.2) before this clamp, never after it. Then:
 - **synced** times longer than 12 s are **halved until the longer of the two fits** — both lines together, so the
   L/R ratio is kept and both stay on the grid (the screen marks them folded);
-- a **free** time longer than 12 s is clamped to 12 s (only reachable through a positive offset);
+- a **free** time (sec or hz) longer than 12 s is clamped to 12 s (only reachable through a positive offset);
 - every time is clamped below at **1 ms**.
 
 Example: `2/1` at 30 bpm is 16 s, which plays at 8 s; `2/1` at 40 bpm with a +50 % right offset is 12 s left and
@@ -145,9 +151,11 @@ Example: `2/1` at 30 bpm is 16 s, which plays at 8 s; `2/1` at 40 bpm with a +50
 
 ### 3.5 What a moving time does: `time.change`
 
-A time moves when a knob, automation or a morph changes `time.ms`, `time.div`, `time.sync`, `time.scale` or
-an offset (a **control move**), or when the host tempo changes a synced time (a **tempo move**, §3.8). For a control move,
-`time.change` decides:
+A time moves when a knob, automation or a morph changes `time.ms`, `time.div`, `time.mode` or
+an offset (a **control move**), or when the host tempo changes a synced time (a **tempo move**, §3.8). Only a change that
+moves a time is a move: a flip of `time.mode` between sec and hz moves none (both read the one `time.ms`, §3.1), and a flip
+that lands on the time already playing, or a re-sent value, moves none either. A flip into or out of sync that does move the time
+is a control move like any key's. For a control move, `time.change` decides:
 
 | mode | what the read head does |
 |---|---|
@@ -206,8 +214,8 @@ construction. The bound is per second, not per sample, because a step defect rea
 Glide arrival is later by about 0.1 ms.
 
 **The tape law's catch-up (D-049 A4).** The cap holds a head at speed 2.0 (or 0.5) while the tape model runs ahead of
-it, and a head that then landed on the model in one step would change its speed by up to 1.5 in a sample (the free scale
-sweep read 4.1 at 48 kHz and 18.4 at 192; a `time.glide` change mid-move is the same kink). So, **while the head is off the
+it, and a head that then landed on the model in one step would change its speed by up to 1.5 in a sample (a sweep of the time
+read 4.1 at 48 kHz and 18.4 at 192; a `time.glide` change mid-move is the same kink). So, **while the head is off the
 model**, its speed is aimed at the model's own speed plus the largest closing speed from which the bound above (the
 same 0.1 ms safety bound, a **safety bound, not part of the law**) can still stop it on the model, and the bound is then
 applied to the tape law's speed as it is to the exponential law's. **The head brakes against the target too** (D-049 A5): its
@@ -273,13 +281,13 @@ Line 0 and line 1, each with its own time (`offL` for line 0, `offR` for line 1)
 
 | mode | into line 0 | into line 1 | feedback | wet L | wet R |
 |---|---|---|---|---|---|
-| **stereo** | L | R | 0 → 0, 1 → 1 | line 0 | line 1 |
+| **standard** | L | R | 0 → 0, 1 → 1 | line 0 | line 1 |
 | **ping-pong** | (L+R)/2 | — | 0 → 1, 1 → 0 | line 0 | line 1 |
 | **mid/side** | M = (L+R)/2 | S = (L−R)/2 | 0 → 0, 1 → 1 | M + S | M − S |
 
 - **Ping-pong** sums the input to mono into the left line, so the first repeat is on the left and the repeats
   alternate. An input only on the right still enters (at half amplitude).
-- **Mid/side** uses M = (L+R)/2, so a mono input runs the M line at the same level as stereo mode does and meets the
+- **Mid/side** uses M = (L+R)/2, so a mono input runs the M line at the same level as standard routing does and meets the
   ceiling at the same input level. M and S never cross.
 - **Switching** routing is a 20 ms equal-gain crossfade of the encode, feedback and decode matrices. The line is
   kept, so a switch into or out of mid/side re-images the ringing tail. Through the switch the loop matrix is a
@@ -288,7 +296,7 @@ Line 0 and line 1, each with its own time (`offL` for line 0, `offR` for line 1)
 ### 4.1 Mono safety (B408) — Q-A4, ruled by poll (D-015)
 
 The mono fold (L+R)/2 of each mode, stated:
-- **stereo**: the fold of two independent lines; equal times fold without colouring. Offsets inside the colouring
+- **standard**: the fold of two independent lines; equal times fold without colouring. Offsets inside the colouring
   zone comb (§3.2).
 - **ping-pong**: every repeat sits on one side, so each folds with **no cross term**: ρ = ½ (−3 dB, the fold of a
   hard-panned source) exactly, on any input. That is panning by design, not cancellation: no two taps overlap
@@ -301,7 +309,7 @@ The mono fold (L+R)/2 of each mode, stated:
 decorrelated one, 0 for total cancellation. **Unintended cancellation** is the output's fold losing more than the
 input's. Gated per repeat generation on equal-time patches (an L/R offset is a requested widening, reported, not
 gated), on **exact inputs only**: the mono impulse (ρ_in = 1) and the left and right impulses (ρ_in = ½).
-**Stereo and mid/side**: ρ_out ≥ ρ_in. **Ping-pong**: no cross term (ρ = ½); and where its repeats overlap
+**Standard and mid/side**: ρ_out ≥ ρ_in. **Ping-pong**: no cross term (ρ = ½); and where its repeats overlap
 (sustained material) the fold at any whole multiple of 1/T equals (1 + g)² / (2 (1 + g²)) with the loop filter off,
 so a side inverted cannot hide behind r = 0. **Seeded decorrelated noise is reported, never judged:** a finite
 burst's ρ moves under the loop's filtering with no fault present by more than any independent-sample margin (the
@@ -413,7 +421,7 @@ A modulation offset is added to every read head of a line (both heads mid-crossf
 
 ## 9. The parameter manifest and switch declarations
 
-Authoritative: [`params.json`](params.json) (30 keys). Morph classes use the local enum mapped one to one onto
+Authoritative: [`params.json`](params.json) (29 keys). Morph classes use the local enum mapped one to one onto
 OQ #33 (RS-2.2): **continuous** = `continuous` + `morphs`; **jump** (flip) = `stepped` + `morphs`; **device** =
 `excluded`. Rate class is FOUNDATIONS' `ReadCadence`: every key is `kContinuous`. Every key has a display name and
 a normalised law (ADR-203): `lin`, `log` (geometric between min and max), `io` (B435), `step`.
@@ -423,7 +431,7 @@ a normalised law (ADR-203): `lin`, `log` (geometric between min and max), `io` (
 | `io.inGain` | Input Gain | dB | −24 … 24 | 0 | device | io | 20 ms amplitude ramp |
 | `io.outGain` | Output Gain | dB | −24 … 24 | 0 | device | io | 20 ms amplitude ramp |
 | `mix` | Mix | % | 0 … 100 | 30 | continuous | lin | 20 ms ramp |
-| `time.sync` | Sync | free / sync | — | sync | flip | step | moves the time (below) |
+| `time.mode` | Time Mode | sec / hz / sync | — | sync | flip | step | moves the time when it changes it (below) |
 | `time.ms` | Time | ms | 1 … 12000 | 375 | continuous | log | moves the time (§3.5) |
 | `time.div` | Division | 22 names | 2/1 … 1/64 | 1/4 | flip | step | moves the time (below) |
 | `time.offL` | Left Offset | % | −50 … 50 | 0 | continuous | lin | moves the time (§3.5) |
@@ -434,7 +442,7 @@ a normalised law (ADR-203): `lin`, `log` (geometric between min and max), `io` (
 | `time.glide` | Glide | s | 0.01 … 5 | 0.3 | continuous | log | the law's time constant |
 | `time.xfadeMs` | Crossfade | ms | 2 … 500 | 60 | continuous | log | latched per fade |
 | `fb.amount` | Feedback | % | 0 … 120 | 35 | continuous | lin | 20 ms ramp |
-| `route.mode` | Routing | stereo / pingpong / midside | — | stereo | flip | step | equal-gain crossfade, 20 ms |
+| `route.mode` | Routing | standard / pingpong / midside | — | standard | flip | step | equal-gain crossfade, 20 ms |
 | `filt.in.on` | Input Filter | off / on | — | off | flip | step | equal-gain crossfade, 20 ms |
 | `filt.in.hpHz` | Input Low Cut | Hz | 20 … 2000 | 20 | continuous | log | 10 ms log glide |
 | `filt.in.lpHz` | Input High Cut | Hz | 500 … 20000 | 20000 | continuous | log | 10 ms log glide |
@@ -449,16 +457,16 @@ a normalised law (ADR-203): `lin`, `log` (geometric between min and max), `io` (
 | `mod.shape` | Mod Shape | sine / drift | — | sine | flip | step | seeded jump of the offset (below) |
 | `mod.spread` | Mod Spread | % | 0 … 100 | 0 | continuous | lin | 250 ms ramp (§7) |
 | `mod.seed` | Mod Seed | integer | 0 … 65535 | 1 | flip | step | seeded jump (§7) |
-| `time.scale` | Time Scale | × | 0.25 … 4 | 1 | continuous | log | moves the time (§3.5); synced, snaps to octaves (§3.1) |
 
 **Switch declarations, in A11's vocabulary as amended** (§12.1: an equal-gain crossfade of a stated length, or
 `gate`; §12.2: a seeded jump — the state that starts running is seeded from the value being applied, so the value
 does not step and only its slope changes; it needs a reported click reading and a planted unseeded-jump control):
-- **`time.sync`, `time.div`** move the read head, by the active time-change mode: **repitch = a seeded jump of the
+- **`time.mode`, `time.div`** move the read head, by the active time-change mode: **repitch = a seeded jump of the
   read position** (the position is continuous; only its slope changes, within the cap); **crossfade = equal-gain,
   `time.xfadeMs`**; **jump = equal-gain, 3 ms**. A key whose method depends on another key's value is new to horde;
   Echo asks horde, in the readiness filing, whether a mode-dependent declaration is admissible (a ROADMAP
-  follow-up). The planted bare jump is the unseeded control.
+  follow-up). The planted bare jump is the unseeded control. `time.mode` adds one clause, a deferral: **a flip between
+  sec and hz moves nothing**, because both read one `time.ms` and no signal-path state switches.
 - **`time.change`, `time.law`, `time.tempoMode`: deferred** — no signal-path state switches at the flip (§3.5).
 - **`route.mode`, `filt.*.on`: equal-gain crossfade, 20 ms.**
 - **`mod.shape`, `mod.seed`: seeded jump of the modulation offset**, with a planted unseeded reseed as the control.
@@ -523,7 +531,7 @@ storage; the loop state is double):
 (The manifest's 17.58 MiB is the bare 12 s; the 20 ms modulation margin adds 0.03 MiB. The drift clamp, §7, keeps
 every read inside it.) **The tape law's position history**: one double per sample per line would be 35.2 MiB at
 192 kHz, so the C++ keeps it at control rate (one value per 32 samples, interpolated: 1.1 MiB at 192 kHz) — a design
-target, measured at M1 with the rest of the per-instance figure. **State size**: 30 keys, well inside the 2 KiB
+target, measured at M1 with the rest of the per-instance figure. **State size**: 29 keys, well inside the 2 KiB
 budget per corner (RS-6.12).
 
 ## 12. Macros
@@ -618,7 +626,7 @@ Ruled by poll 2026-10-23 (T-011), against horde's contract as re-pinned at `d34c
 ```
 echo-state 1
 mix 30
-time.sync sync
+time.mode sync
 time.ms 375
 time.div 1/4
 ...
@@ -631,17 +639,18 @@ io.outGain 0
 - **Text.** The first line is the version, `echo-state 1`. Then one `key value` per line, every patch key in
   manifest order (`params.json`), then a `[device]` line and the Device keys (`io.inGain`, `io.outGain`), saved once
   per instance, outside every corner (RS-4.5).
-- **Values by name:** stepped keys with labels (`time.sync`, `time.div`, `time.change`, `time.law`,
+- **Values by name:** stepped keys with labels (`time.mode`, `time.div`, `time.change`, `time.law`,
   `time.tempoMode`, `route.mode`, `filt.*.on`, `mod.shape`) are written by label, divisions by horde's names (§3.1;
   an alias is accepted on load and written back as the name); `mod.seed` as a decimal integer.
 - **Each value at its target**, never mid-ramp, so a state saved during a ramp, a ringing tail or a latched clip
   equals one saved at rest with the same parameters (A20).
 - **Floats: the shortest decimal that reads back exactly**, proven by reading it back as it is written; never
-  `%.6g` (RS-6.11). Save → load → save is byte-identical.
+  `%.6g` (RS-6.11). Save → load → save is byte-identical. This holds for `time.ms` at the values a Hz reading produces
+  (§3.1): a saved Time reads back bit for bit.
 - **At most 2 KiB** (2048 bytes, the whole text). A larger text is **refused before anything is allocated** (A19).
 - **Loading is all or nothing:** an unknown, missing, duplicated or out-of-range key, a label that is neither the key's
   label nor a division alias, or a different version refuses the whole text and changes nothing. Out of range is refused, never clamped.
-- Nothing outside the saved state and `reset()` shapes the sound (A17): the 30 keys are the whole patch.
+- Nothing outside the saved state and `reset()` shapes the sound (A17): the 29 keys are the whole patch.
 
 ### 16.3 Module presets (SPEC-MODULE-MACROS §4; RS-5.1 – 5.6; D-050)
 
@@ -655,19 +664,24 @@ io.outGain 0
 - **A preset whose `slots` is not empty is refused**, with a message naming the preset. So is a `macroLaw` or any
   other field the writer does not produce, and a Device key, an unknown or missing key, or a value out of range.
 
-### 16.4 Fixed controls (RS-5.8)
+### 16.4 Fixed controls (RS-5.8) — PROVISIONAL until T-045
 
-Echo declares **three**, in this order (also `params.json` → `fixedControls`):
+Echo declares **four**, in this order (also `params.json` → `fixedControls`, with its `fixedControlsStatus`):
 
 | k | label | key |
 |---|---|---|
-| 1 | Time | `time.scale` |
+| 1 | Time | `time.ms` |
 | 2 | Feedback | `fb.amount` |
 | 3 | Mix | `mix` |
+| 4 | Type | `route.mode` |
 
-Each is always live, Time up to the 12 s line (§3.4): Time Scale scales the time whether free or synced
-(continuously, or by octaves, §3.1), where `time.ms` does nothing while synced and `time.div` is stepped. A fixed control is an ordinary parameter: saved in the
-state (§16.2), present in every preset, and in A12's round trip.
+**This row is provisional until T-045 (D-050 A2).** Time is `time.ms`, which Echo reads in sec and hz (§3.1) and does not read
+in sync, so **while a patch is synced, its Time control does nothing**: `time.ms` is stored but not read, and the division is
+`time.div`, not on the row. D-050 ruling 5 wants one Time control that follows the mode, `time.ms` in sec and hz and `time.div` in
+sync, on one host id; the contract as written allows one unit, range and law per parameter (RS-2.1, RS-4.2, RS-4.3, ADR-203), so
+horde is asked (`echo-003`) to let an entry name its key by mode, and to draw Type, a stepped key, as a selector. Until horde
+answers, the row stands as declared here and the lock holds it without a mark (the lock file carries no note, D-050 A2). A fixed
+control is an ordinary parameter: saved in the state (§16.2), present in every preset, and in A12's round trip.
 
 ### 16.5 The tail declaration's mapping
 

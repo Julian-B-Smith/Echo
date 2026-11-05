@@ -99,7 +99,7 @@ ECHO_PLANT(wakeOffsetFromZero)   // after a wake the offset slews in from 0
 ECHO_PLANT(tapeLinearHistory)    // the tape history is linearly interpolated (the pre-critic form)
 ECHO_PLANT(glideFixedRate)       // the repitch laws' time constant is counted in 48 kHz samples
 // ---- M4 (core/tests/ir_tests.cpp guards these; echo_ir_plants) ----
-ECHO_PLANT(irHashSkipsKey)       // the IR cache hash skips the last key (mod.seed before T-038, time.scale since): a change to it serves a stale drawing
+ECHO_PLANT(irHashSkipsKey)       // the IR cache hash skips the last key (mod.seed): a change to it serves a stale drawing
 ECHO_PLANT(irReusesState)        // the renderer's clone is not reset between renders: the last patch's repeats leak in
 ECHO_PLANT(irDropsDevice)        // the renderer never sends the Device keys: the drawing ignores the I/O gains
 ECHO_PLANT(irLevelIgnored)       // the renderer's impulse is always 0 dBFS, whatever the stated level
@@ -167,7 +167,7 @@ ECHO_PLANT(monoSum)              // A8: the output is summed to mono (the image 
 ECHO_PLANT(selfStart)            // A14: at rest the output is a 1e-24 speck, not zero: in a cycle it starts itself
 ECHO_PLANT(b265HoodHalved)       // TEST-SIDE: the click metric's +-16 neighbourhood halved (the port must match horde exactly)
 // ---- M3, B3 (T-019: the B408 stereo report, D-010 / D-044; core/tests/fold.h) ----
-ECHO_PLANT(stereoInvertsR)       // stereo mode decodes line 1 inverted: a centred source cancels in mono (P1 in the engine)
+ECHO_PLANT(stereoInvertsR)       // standard routing decodes line 1 inverted: a centred source cancels in mono (P1 in the engine)
 ECHO_PLANT(pingpongBothLines)    // ping-pong also feeds the input into the right line: repeats land on both sides at once
 ECHO_PLANT(pingpongInvertsR)     // ping-pong decodes the right line inverted: per repeat r stays 0, but sustained material combs (critic T-019 M1)
 ECHO_PLANT(foldScaleSlip)        // TEST-SIDE: rho divides by the SUM of the channel energies (the 1 + r scale slip D-044 found)
@@ -181,17 +181,9 @@ ECHO_PLANT(presetPatchOfDropsKey) // patchOf leaves fb.amount out of the load: t
 ECHO_PLANT(factoryLabelTypo)     // pingpong-dotted's division label is "3/16 ": step() answers -1 and validate() must refuse it (critic T-021 M2)
 // ---- M3, B4 (T-039: no macros, D-050) ----
 ECHO_PLANT(factoryCarriesSlot)   // the bank's file gives dub-loop a slot: Echo offers no macros (RS-5.1), so readBank must refuse it, naming the preset
-// ---- M3, B4 (T-038: time.scale, D-048) ----
-ECHO_PLANT(scaleIgnoredSynced)   // time.scale is ignored while synced (it scales free time only)
-ECHO_PLANT(scaleNotSnapped)      // while synced the scale is applied as set, not snapped to the nearest octave
-ECHO_PLANT(scaleBypassesChange)  // a scale move lands the heads at once: a bare jump that ignores time.change (SPEC §3.5)
-ECHO_PLANT(scaleAfterClamp)      // the scale multiplies the times AFTER the §3.4 fold / clamp / floor, not before
-ECHO_PLANT(scaleResendIsMove)    // any time.scale send counts as a control move, even one that moves no time (it re-latches a tempo move)
-ECHO_PLANT(scaleTailUnscaled)    // the declared tail is built from the unscaled times (a scale above 1 under-declares it)
-ECHO_PLANT(scaleMoveSwallowed)   // a scale send that moves a time is not marked a control move: a tempo move in flight keeps its tempoMode (critic T-038 H1)
-ECHO_PLANT(scaleSnapRounds)      // the synced snap is round(log2 s): the double nearest 2^-1.5 has log2 exactly -1.5 and snaps to the wrong octave (critic T-038 L1)
-ECHO_PLANT(scaleOffsetRewrite)   // the offset is applied as scaled + scaled * off, not scaled * (1 + off): another rounding even at x1 (critic T-038 L2)
-ECHO_PLANT(stateMissingScaleDefaults) // the reader takes a missing time.scale as its default instead of refusing the text (critic T-038 L4; D-048 A1)
+// ---- M3, B4 (T-038: the offset's expression, kept after the scale key left, D-050) ----
+ECHO_PLANT(offsetRewrite)        // the offset is applied as base + base * off, not base * (1 + off): can round another way at a nonzero offset (at 0 both are exactly base; critic T-038 L2)
+ECHO_PLANT(stateMissingKeyDefaults) // the reader takes ANY missing key as its default instead of refusing the text (critic T-038 L4; D-048 A1, D-050 ruling 2)
 // ---- M3, B4 (T-040: the exponential law's mid-glide reversal, D-049) ----
 ECHO_PLANT(expSlewOff)           // the exponential law's 0.1 ms speed-step bound is removed: a retarget steps the speed in one sample (an onset reads 3.5, a reversal 5.1)
 ECHO_PLANT(expSlewLong)          // the exponential law's speed-step bound is 10 ms, not 0.1 ms: it binds all through a relaxation (the bound must bind only just after a retarget)
@@ -212,6 +204,16 @@ ECHO_PLANT(modNoFloorBrake)      // a shortening head's closing speed toward the
 ECHO_PLANT(modRideKink)          // while a fade's incoming head rides the floor the offset does not aim at it braking: it reaches the floor with the curve's slope and the read kinks as the head leaves (a crossfade 100 -> 5 ms over 40 ms at the offset's trough)
 ECHO_PLANT(modBoundKeepsSlope)   // a floor clamp leaves the offset's tracked slope as it was: the offset leaves the bound still carrying the slope it arrived with, and the read kinks (a 100 -> 3 ms jump at the trough of a 5 Hz sine)
 ECHO_PLANT(fbClampStale)         // the outgoing head's clamp to the line reads last sample's offset and misses the offset's coming move: it binds a sample late and steps the head's speed (a 20 -> 2 ms glide crossfaded 12 ms in, 20 ms of modulation at 1.25 Hz near the trough: M2 4.06 at 192 kHz)
+// ---- M3, B4 (T-044: Time in Sec, Hz or Sync, D-050) ----
+ECHO_PLANT(hzCountsAsSync)       // synced() reads time.mode >= 0.5, the old sync test: hz plays the division instead of reading time.ms
+ECHO_PLANT(hzFlipIsMove)         // a sec <-> hz flip is treated as a move though no time moved: it lands the heads on their targets at once (a bare jump), so a move in flight stops dead
+ECHO_PLANT(modeFlipSwallowed)    // a flip OUT of sync that moves a time (sync -> sec, sync -> hz) is not marked a control move: a tempo move's latch stays, instead of following time.change
+ECHO_PLANT(modeFlipIntoSyncSwallowed) // a flip INTO sync that moves a time is not marked a control move: a stale tempo latch (a tempo step, a same-time flip to sec, the flip back) keeps its latch
+ECHO_PLANT(modeFlipAlwaysMove)   // every flip is marked a control move, one that moved no time too: a same-time sec -> sync flip in the sample a tempo step lands follows time.change, not time.tempoMode
+ECHO_PLANT(moveReadsOneLine)     // whether a send moved a time is read from line 0 alone: a time.offR move is not marked, so it follows time.tempoMode after a tempo step, not time.change
+ECHO_PLANT(keyResendIsMove)      // time.ms / time.div / time.offL / time.offR mark a control move whether or not a time moved (the old unconditional mark): a synced patch's time.ms, or a re-sent value, re-latches a tempo move landing in the same sample
+ECHO_PLANT(hzFlipDelaysRest)     // a flip that moves nothing restarts the quiet count: a sec / hz flip while a tail rings puts off the rest (a flip restarting tailClock_ instead is unobservable: the quiet condition always rests first)
+ECHO_PLANT(tailReadsDivInHz)     // the declared tail is built from the division's time while hz plays time.ms: hz declares the wrong tail (over, when the division is the longer)
 }  // namespace echo::plant
 
 #undef ECHO_PLANT

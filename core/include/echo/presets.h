@@ -330,30 +330,30 @@ inline ModulePreset voiced(std::string id, std::string label, std::string descri
 // The seven, chosen to show the range (D-028); the human picks the final set by
 // listening (T-023).
 inline std::vector<ModulePreset> factory() {
-  const double on = 1, sync = step(kSync, "sync"), freeTime = step(kSync, "free");
+  const double on = 1, sync = step(kTimeMode, "sync"), freeTime = step(kTimeMode, "sec");
   std::vector<ModulePreset> bank{
       initPreset(),
       voiced("slap", "Slap", "A short slapback: one or two quick repeats, a little width.",
-             {{kSync, freeTime}, {kTimeMs, 110}, {kFb, 8}, {kMix, 28}, {kLoopOn, on}, {kLoopHp, 120}, {kLoopLp, 5500}, {kOffR, 6}}),
+             {{kTimeMode, freeTime}, {kTimeMs, 110}, {kFb, 8}, {kMix, 28}, {kLoopOn, on}, {kLoopHp, 120}, {kLoopLp, 5500}, {kOffR, 6}}),
       voiced("pingpong-dotted", "Dotted Ping-Pong", "A synced dotted-eighth bouncing between the sides.",
-             {{kSync, sync}, {kDiv, step(kDiv, plant::factoryLabelTypo ? "3/16 " : "3/16")}, {kRoute, step(kRoute, "pingpong")}, {kFb, 45}, {kMix, 32}, {kLoopOn, on},
+             {{kTimeMode, sync}, {kDiv, step(kDiv, plant::factoryLabelTypo ? "3/16 " : "3/16")}, {kRoute, step(kRoute, "pingpong")}, {kFb, 45}, {kMix, 32}, {kLoopOn, on},
               {kLoopHp, 150}, {kLoopLp, 7000}, {kModRate, 0.4}}),
       voiced("dub-loop", "Dub Loop", "A dark, synced dotted-quarter loop with long repeats, just under unity; the Feedback knob takes it up to unity.",
-             {{kSync, sync}, {kDiv, step(kDiv, "3/8")}, {kFb, 96}, {kMix, 35}, {kLoopOn, on}, {kLoopHp, 120}, {kLoopLp, 1800},
+             {{kTimeMode, sync}, {kDiv, step(kDiv, "3/8")}, {kFb, 96}, {kMix, 35}, {kLoopOn, on}, {kLoopHp, 120}, {kLoopLp, 1800},
               {kChange, step(kChange, "repitch")}, {kLaw, step(kLaw, "tape")}, {kModShape, step(kModShape, "drift")}, {kModDepth, 0.6},
               {kModRate, 0.3}}),
       voiced("chorus-line", "Chorus Line", "A short modulated line, closer to a chorus than an echo.",
-             {{kSync, freeTime}, {kTimeMs, 18}, {kFb, 15}, {kMix, 45}, {kModShape, step(kModShape, "sine")}, {kModDepth, 4}, {kModRate, 0.8},
+             {{kTimeMode, freeTime}, {kTimeMs, 18}, {kFb, 15}, {kMix, 45}, {kModShape, step(kModShape, "sine")}, {kModDepth, 4}, {kModRate, 0.8},
               {kModSpread, 100}, {kLoopOn, on}, {kLoopHp, 40}, {kLoopLp, 12000}}),
       voiced("wide-ms", "Wide M/S", "Mid/side repeats: on a stereo source the sides echo apart from the centre; a mono source stays centred.",
-             {{kSync, freeTime}, {kTimeMs, 240}, {kRoute, step(kRoute, "midside")}, {kOffR, 25}, {kFb, 30}, {kMix, 30}, {kLoopOn, on},
+             {{kTimeMode, freeTime}, {kTimeMs, 240}, {kRoute, step(kRoute, "midside")}, {kOffR, 25}, {kFb, 30}, {kMix, 30}, {kLoopOn, on},
               {kLoopHp, 200}, {kLoopLp, 8000}}),
       voiced("tape-throw", "Tape Throw", "A tape-style line: throw the time and the repeats bend in pitch.",
-             {{kSync, freeTime}, {kTimeMs, 450}, {kChange, step(kChange, "repitch")}, {kLaw, step(kLaw, "tape")}, {kGlide, 0.8}, {kFb, 55},
+             {{kTimeMode, freeTime}, {kTimeMs, 450}, {kChange, step(kChange, "repitch")}, {kLaw, step(kLaw, "tape")}, {kGlide, 0.8}, {kFb, 55},
               {kMix, 30}, {kLoopOn, on}, {kLoopHp, 120}, {kLoopLp, 4500}, {kModShape, step(kModShape, "drift")}, {kModDepth, 1.5},
               {kModRate, 0.5}, {kModSpread, 40}}),
       voiced("runaway", "Runaway", "Feedback past unity, held by the ceiling: it climbs slowly to a steady roar. An edge patch; ride it with care.",
-             {{kSync, sync}, {kDiv, step(kDiv, "1/8")}, {kFb, 115}, {kMix, 30}, {kLoopOn, on}, {kLoopHp, 120}, {kLoopLp, 6000}, {kOffR, -12},
+             {{kTimeMode, sync}, {kDiv, step(kDiv, "1/8")}, {kFb, 115}, {kMix, 30}, {kLoopOn, on}, {kLoopHp, 120}, {kLoopLp, 6000}, {kOffR, -12},
               {kModShape, step(kModShape, "drift")}, {kModRate, 0.3}}),
   };
   return bank;

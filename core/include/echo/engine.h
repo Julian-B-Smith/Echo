@@ -333,7 +333,7 @@ class Echo {
     const double bpmEnd = (std::isfinite(bpm) && bpm > 1.0) ? bpm : 120.0;
     if (idle_ && !plant::tempoGlidesAtRest) bpmPrev_ = bpmEnd;  // at rest the tempo lands, never glides (§3.3)
     double bpmStart = bpmPrev_;  // re-landed if the instance rests and wakes inside this block
-    const bool sync = p_[kSync] >= 0.5;
+    const bool sync = synced();
 
     for (int i = 0; i < n; ++i) {
       // Actions fired for this block land at their own sample (RS-4.12, A23),
@@ -904,7 +904,7 @@ class Echo {
         return {{{{0.5, 0.5}, plant::msSideGain2 ? std::array<double, 2>{1.0, -1.0} : std::array<double, 2>{0.5, -0.5}}},
                 {{{1.0, 0.0}, {0.0, 1.0}}},
                 {{{1.0, 1.0}, plant::msSign ? std::array<double, 2>{1.0, 1.0} : std::array<double, 2>{1.0, -1.0}}}};
-      default:  // stereo
+      default:  // standard
         return {{{{1.0, 0.0}, {0.0, 1.0}}}, {{{1.0, 0.0}, {0.0, 1.0}}},
                 {{{1.0, 0.0}, plant::stereoInvertsR ? std::array<double, 2>{0.0, -1.0} : std::array<double, 2>{0.0, 1.0}}}};
     }
@@ -960,23 +960,20 @@ class Echo {
   }
 
   // ---- time (§3) ------------------------------------------------------------
-  // Base time x time.scale, x (1 + offset), synced times halved together past
-  // 12 s (the L/R ratio and the grid survive), free times clamped, 1 ms floor.
-  // The scale comes BEFORE the fold and the clamp (§3.4): a clamp on the
-  // unscaled times, scaled afterwards, would let a scaled time past the line
-  // or under the floor. Also refreshes the declared tail, which depends on the
-  // times, the feedback and the depth.
+  // Base time x (1 + offset), synced times halved together past 12 s (the L/R
+  // ratio and the grid survive), free times clamped, 1 ms floor. Also refreshes
+  // the declared tail, which depends on the times, the feedback and the depth.
+  // Sec and Hz read the SAME stored time.ms (§3.1: Hz = 1000 / ms), so only the
+  // synced test appears here; nothing downstream can tell the two apart.
   void resolveBoth(double bpm) {
-    const bool sync = p_[kSync] >= 0.5;
+    const bool sync = synced();
     const double b = (bpm > 1.0) ? bpm : 120.0;
     const int div = static_cast<int>(p_[kDiv]);
     const double base = sync ? kDivisions[static_cast<std::size_t>(div)].beats * 60.0 / b : p_[kTimeMs] / 1000.0;
-    const double sc = timeScale(sync);
-    const double scaled = plant::scaleAfterClamp ? base : base * sc;  // the plant defers the scale to after the clamp
-    double tL = scaled * (1.0 + p_[kOffL] / 100.0), tR = scaled * (1.0 + p_[kOffR] / 100.0);
-    if (plant::scaleOffsetRewrite) {  // the plant: the offset written distributively, a different rounding even at x1
-      tL = scaled + scaled * (p_[kOffL] / 100.0);
-      tR = scaled + scaled * (p_[kOffR] / 100.0);
+    double tL = base * (1.0 + p_[kOffL] / 100.0), tR = base * (1.0 + p_[kOffR] / 100.0);
+    if (plant::offsetRewrite) {  // the plant: the offset written distributively, can round another way at a nonzero offset (at 0 both are exactly base)
+      tL = base + base * (p_[kOffL] / 100.0);
+      tR = base + base * (p_[kOffR] / 100.0);
     }
     folded_ = false;
     if (sync && !plant::clampTruncates)
@@ -984,36 +981,14 @@ class Echo {
     const double lo = plant::noMinFloor ? 0.0 : k::kMinDelayS;
     tL = std::clamp(tL, lo, k::kMaxDelayS);
     tR = std::clamp(tR, lo, k::kMaxDelayS);
-    if (plant::scaleAfterClamp) {  // capped at the line so the planted fault cannot read outside it
-      tL = std::min(tL * sc, k::kMaxDelayS);
-      tR = std::min(tR * sc, k::kMaxDelayS);
-    }
     tT_[0] = tL * sr_;
     tT_[1] = tR * sr_;
     setTail(computeTail());
   }
 
-  // time.scale as it multiplies the base time (§3.1, D-048): the value itself
-  // while free; while synced the nearest OCTAVE, so the repeats stay on the grid
-  // (x1/4, 1/2, 1, 2, 4). The boundaries sit at 2^(k + 1/2), which is irrational:
-  // NO double lies exactly on one, so there is no tie to own. A double is up or
-  // down by which side of the true boundary it is on, and the double nearest each
-  // boundary (sqrt2 x 2^(k-1), exact) is just ABOVE it (1.4142135623730951 >
-  // sqrt 2), so it snaps UP. The snap is therefore a mantissa compare against that
-  // one double: s = m x 2^e with m in [0.5, 1), the boundary at m = sqrt2 / 2
-  // whatever the octave. It needs no log2, whose last bit differs between libms
-  // (log2 of the nearest double to 2^-1.5 returns exactly -1.5, which rounded to
-  // the WRONG octave). std::ldexp(1, n) is exact.
-  double timeScale(bool sync) const {
-    const double s = p_[kTimeScale];
-    if (!sync) return s;
-    if (plant::scaleIgnoredSynced) return 1.0;
-    if (plant::scaleNotSnapped) return s;
-    if (plant::scaleSnapRounds) return std::ldexp(1.0, static_cast<int>(std::lround(std::log2(s))));  // the plant: round(log2 s), wrong at the boundary's double
-    int e = 0;
-    const double m = std::frexp(s, &e);  // s = m x 2^e, so s lies in [2^(e-1), 2^e)
-    return std::ldexp(1.0, m >= std::numbers::sqrt2 * 0.5 ? e : e - 1);
-  }
+  // time.mode == sync (D-050 ruling 3). The test is a method so the plant that
+  // reads the old >= 0.5 (hz counted as sync) has one place to live.
+  bool synced() const { return plant::hzCountsAsSync ? p_[kTimeMode] >= 0.5 : p_[kTimeMode] == 2.0; }
 
   // (n + 2)·T_max + 0.25 s (§10, D-019): n passes take a write from the
   // returning term's bound (< 2, +6.03 dB rounded up) below -120 dBFS; T_max
@@ -1024,8 +999,9 @@ class Echo {
   std::int64_t computeTail() const {
     const double g = fbTarget();
     if (g >= 1.0) return kInfiniteTail;
-    // The planted fault builds the tail from the unscaled times (scaleTailUnscaled).
-    const double t01 = std::max(tT_[0], tT_[1]) / (plant::scaleTailUnscaled ? timeScale(p_[kSync] >= 0.5) : 1.0);
+    double t01 = std::max(tT_[0], tT_[1]);
+    if (plant::tailReadsDivInHz && p_[kTimeMode] == 1.0)  // the plant: hz declares the division's time, as if synced
+      t01 = kDivisions[static_cast<std::size_t>(p_[kDiv])].beats * 60.0 / ((bpm_ > 1.0) ? bpm_ : 120.0) * sr_;
     const double tMax = t01 + p_[kModDepth] / 1000.0 * sr_ + 4.0;
     double n = g <= 0.0 ? 0.0 : std::ceil((k::kGateDb - k::kReturnHeadroomDb) / (20.0 * std::log10(g)));
     if (plant::tailFormulaShort) n = std::floor(n / 7.0);
@@ -1750,19 +1726,32 @@ class Echo {
       case kOutGain: rOut_.to(gainTarget(kOutGain), rampN_); break;
       case kMix: rMix_.to(p_[kMix] / 100.0, rampN_); break;
       case kFb: rFb_.to(fbTarget(), rampN_); setTail(computeTail()); break;
-      case kSync: case kTimeMs: case kDiv: case kOffL: case kOffR:
-        resolveBoth(bpm_);
-        paramMoved_ = true;  // a key move: the next head step latches time.change (§3.5)
-        break;
-      case kTimeScale: {
-        // A scale move is a control move like any time key (§3.5, D-048): the heads
-        // follow time.change. But only a send that MOVES a time is a move: a re-sent
-        // value, or a synced scale staying inside one octave's snap band, moves
-        // nothing, and must not re-latch a tempo move in flight as a key move.
+      case kTimeMs: case kDiv: case kOffL: case kOffR: case kTimeMode: {
+        // A time key's send is a control move like any other (§3.5): the heads follow
+        // time.change. But only a send that MOVES a time is a move. A re-sent value,
+        // time.ms while synced (stored, not read), a division or offset that lands on
+        // the time already playing, and a flip between sec and hz (one stored time.ms,
+        // no signal-path state switches) move nothing, and must not re-latch a move
+        // in flight as a key move: a tempo move landing in the same sample would
+        // follow time.change instead of time.tempoMode, and a move started under a
+        // since-changed time.change would be latched again.
         const double a0 = tT_[0], a1 = tT_[1];
         resolveBoth(bpm_);
-        if (plant::scaleBypassesChange) { landHead(0); landHead(1); }  // the plant: a bare jump, no mode consulted
-        else if (!plant::scaleMoveSwallowed && (plant::scaleResendIsMove || tT_[0] != a0 || tT_[1] != a1)) paramMoved_ = true;
+        const bool moved = plant::moveReadsOneLine ? tT_[0] != a0 : (tT_[0] != a0 || tT_[1] != a1);
+        if (key != kTimeMode) {
+          if (moved || plant::keyResendIsMove) paramMoved_ = true;  // the plant restores the unconditional mark
+          break;
+        }
+        // The plant treats a flip that moves nothing as a move that lands the heads at once (a bare jump). Marking it a control
+        // move instead would be unobservable: the mark is read only where a target changes in the same sample (stepHead), and
+        // a sec / hz flip changes none and has no tempo move beside it.
+        if (plant::hzFlipIsMove && !moved) { landHead(0); landHead(1); }
+        if (plant::hzFlipDelaysRest && !moved) quietRun_ = 0;
+        // modeFlipSwallowed: a flip OUT of sync (to sec or hz) that moves a time goes unmarked; modeFlipIntoSyncSwallowed: a flip INTO
+        // sync does. modeFlipAlwaysMove marks a flip that moved nothing too (a same-time sec -> sync flip at a tempo step).
+        const bool intoSync = p_[kTimeMode] == 2.0;
+        const bool swallowed = intoSync ? plant::modeFlipIntoSyncSwallowed : plant::modeFlipSwallowed;
+        if (!swallowed && (moved || plant::modeFlipAlwaysMove)) paramMoved_ = true;
         break;
       }
       case kModDepth: rDepth_.to(p_[kModDepth] / 1000.0 * sr_, modRampN_); setTail(computeTail()); break;

@@ -3,7 +3,7 @@
 //
 //   echo-state 1
 //   mix 30
-//   time.sync sync
+//   time.mode sync
 //   ...
 //   [device]
 //   io.inGain 0
@@ -267,7 +267,7 @@ inline bool parse(std::string_view text, Values& out, const char** why = nullptr
   if (first) return refuse("empty");
   for (std::size_t i = 0; i < seen.size(); ++i) {
     if (seen[i]) continue;
-    if (!(plant::stateMissingScaleDefaults && static_cast<int>(i) == kTimeScale)) return refuse("a missing key");
+    if (!plant::stateMissingKeyDefaults) return refuse("a missing key");
     v[i] = kParams[i].def;  // the planted lenient reader
   }
   out = v;

@@ -153,7 +153,7 @@ inline void fft(std::vector<std::complex<double>>& a) {  // iterative radix-2, s
 // Where one channel's generations arrive, in seconds: generation n (1-based)
 // at first + (n - 1) * spacing. From SPEC §4's routing table and the clone's
 // resolved line times T0, T1 (after offsets, the §3.4 clamp, synced folding):
-//   stereo:    channel k is line k alone: first = spacing = Tk.
+//   standard:  channel k is line k alone: first = spacing = Tk.
 //   ping-pong: every input enters line 0 and the feedback crosses, so the
 //              repeats alternate L (T0), R (T0+T1), L (2T0+T1), ...: per
 //              channel first = T0 (L) or T0+T1 (R), spacing = T0+T1, and
@@ -183,7 +183,7 @@ inline IrGenWindows irGenerationWindows(const IrInfo& info, const IrRequest& r, 
       break;
     default:
       w.first = w.spacing = info.times[static_cast<std::size_t>(channel & 1)];
-      if (plant::viewGenWindowFromBase && r.patch[kSync] < 0.5) w.first = w.spacing = r.patch[kTimeMs] / 1000.0;  // the plant: the base time
+      if (plant::viewGenWindowFromBase && r.patch[kTimeMode] != 2.0) w.first = w.spacing = r.patch[kTimeMs] / 1000.0;  // the plant: the base time
       break;
   }
   if (plant::viewGenIndexOffByOne) w.first += w.spacing;  // the plant: generation n drawn at n + 1
