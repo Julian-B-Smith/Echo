@@ -24,6 +24,13 @@ longer clicks), from T-040's measurements and its critic review.
 to its model after the cap is braked and bound by the same 0.1 ms safety bound; a fade's outgoing head keeps its speed and slews it to rest
 instead of stopping dead; the catch-up also brakes against its target, so a lengthening move held at the lower cap does not pass it; the click
 cases are gated at 44.1 – 192 kHz; the lab carries the same three fixes), from T-041's measurements.
+**Amended 2026-11-01 by D-049 A8** (§3.6, §7: the modulation offset's slope is bounded and it lands on its target by braking; during
+a fade the offset answers to the sounding head alone and the incoming head rides the 3-sample floor; the offset leaves a bound from
+rest; a shortening head brakes toward the read floor; the lab carries the same fixes), from T-042's measurements: a fade to a short
+time under deep modulation used to move the offset by up to its whole size in one sample. **Amended 2026-11-01 by D-049 A9** (§3.6, §7: the
+outgoing head's clamp looks one sample ahead of the offset; the offset's move when a fade ends), from the T-042 critic's measurements.
+**Amended 2026-11-02 by D-049 A10** (§3.6, §7, §13: the read's speed changes by at most 2 a in general and by up to about 3 a when the floor stops
+the read, and the M2 bar is what governs; this replaces A9's "a away from the floor, 2 a at contact"), from the critic's re-check.
 
 **What this is.** The behaviour Echo must have, stated so the C++ core (M1–M3) can be built and tested against it.
 The machine-readable half is [`params.json`](params.json): every key, unit, range, default, morph class, rate
@@ -175,7 +182,13 @@ Reading at a moving delay D(t) plays at speed s = 1 − dD/dt, a pitch ratio of 
 The other two candidates (asymmetric slew, critically damped 2nd order) stay in the lab as references only.
 
 **Bounds.** Every law is held to **the cap**: |pitch| ≤ 12 st, so dD/dt ∈ [−1, +0.5]. The modulation adds at most
-±0.25 to the read's speed (§7). Together, s ∈ [0.25, 2.25] **by construction**, inside the **hard invariant
+±0.25 to the read's speed (§7). The head and the offset each change their own speed by at most the 0.1 ms bound a (one unit of speed per
+0.1 ms), so the **read's** speed changes by at most **2 a in general** (head a + offset a; a seeded search of gestures reads 2.000 a far from
+the floor) and by **up to about 3 a when the floor stops the read** (2.955 a: a drift at 0.25 Hz, a 44.3 → 3.38 ms move, exponential law, 192 kHz,
+where the offset closes on the floor while the head is not moving toward it, so the floor brake below, gated on the head's own speed, does not act).
+That click reads M2 2.16, 2.24 at its worst in a directed sweep, under the bar: **the M2 bar is what governs**, not a per-sample bound on the read.
+The floor brake (below) is a further exception for the head alone. Together, s ∈ [0.25, 2.25]
+**by construction** (the head's [0.5, 2] and the offset's ±0.25 from the curve), inside the **hard invariant
 (D-006): s ∈ [0.25, 4] for the sounding head at every sample**. The read never reverses and never runs faster than
 4×; a clamp at the bound is kept as a backstop and its hits are counted (the lab's gate requires zero hits across
 every law, move and modulation extreme, so the backstop never acts).
@@ -206,8 +219,19 @@ law is untouched, sample for sample**: a move that stays inside the cap (the 0.5
 by more than 0.1 sample. A lengthening move: the speed stays ≤ 1.1 and the head passes the target by at most 0.1 sample (the model half is
 shortening-only, since there the model is pinned to the head). M2 alone passes a bound with no brake, which rings (1.8 samples over
 the model, speed down to 0.5), and a brake without the target term passes a lengthening move's target by 0.03 – 1.7 samples (0.19 at 44.1 kHz,
-1.7 at 192). A fade's outgoing head changes speed by at most the bound a sample across a modulated retarget, its clamp to the line being
-the sign-aware one `modStep` uses.
+1.7 at 192). A fade's outgoing head changes speed by at most the bound a sample across a modulated retarget away from the read floor, and
+the read's speed by at most 2 a in the gate's contact gesture (D-049 A9, A10: a bound for that gesture, not a general limit), its clamp to the line being the sign-aware one `modStep` uses, looking one sample ahead
+of the offset by the offset's own slope. A clamp that reads only last sample's offset misses the offset's coming move, binds a sample late and
+steps the head's speed (a 20 → 2 ms glide crossfaded to 400 ms 12 ms in, under 20 ms of modulation at 1.25 Hz near the trough: 5.9 a, M2 4.06
+at 192 kHz; the plant `fbClampStale`).
+
+**The floor brake (D-049 A8).** The read is D plus the modulation offset, and the read never comes closer than 3 samples to the write
+head (§7). A **shortening** head's closing speed toward that floor is therefore limited to the discrete stopping speed from its distance,
+sqrt(a²/4 + 2a·d) − a/2 with a the 0.1 ms bound and d the distance to the floor, less the offset's own slope, so a deep dive (100 → 2 ms at
+the trough of a 20 ms sine) meets the floor at zero closing speed instead of stopping dead from up to 0.75 (M2 8.4 at 192 kHz). It acts only
+near the floor: far from it the limit exceeds the cap, and a fading head is left alone (the incoming head rides the floor, the outgoing one
+slews to rest, §7). The head's own speed changes by more than a there (up to 5.8 a at 192 kHz), and the offset's retreat cancels it in the read,
+so the read's speed is not stepped by it (the read's own bound is the general one above, 2 a, and about 3 a when the floor stops the read) and no click traces to it. Like the other bounds it is a safety bound, **not part of the law**.
 
 **Fallback (D-006's hybrid).** If a move would take longer than **3 s** at the cap's rate, the head crossfades
 (§3.5) instead of gliding: a 12 s → 10 ms move crossfades rather than diving for 12 s. The outgoing head of that crossfade
@@ -350,10 +374,22 @@ A modulation offset is added to every read head of a line (both heads mid-crossf
 - **Depth limits.** The depth is limited so the curve's own slope moves the read speed by at most ±25 %
   (A ≤ 0.25 / max|dm/dt|: 2πf for the sine, 3.5f for drift; at 10 Hz the sine's depth is at most 4 ms), and so the
   read stays 3 samples clear of the write head (A ≤ D − 3 samples).
-- **The offset is slew-limited to ±0.25 samples a sample.** Rate glides, depth and spread ramps, a shape switch, a
-  seed change, or a depth limit lifting when a short time moves to a long one can therefore never move the read
-  faster than ±25 %: this is what makes the speed bound of §3.6 hold by construction. (Revision 1 relied on ramp
-  lengths alone; the critic found four ways around them.)
+- **The offset is slew-limited to ±0.25 samples a sample, and its slope to one unit of speed per 0.1 ms** (D-049 A8: it changes
+  by at most a = 1/(0.1 ms · fs) a sample). Rate glides, depth and spread ramps, a shape switch, a seed change, or a depth limit
+  lifting when a short time moves to a long one can therefore never move the read faster than ±25 %: this is what makes the speed
+  bound of §3.6 hold by construction. (Revision 1 relied on ramp lengths alone; the critic found four ways around them.) The slope bound
+  is what keeps the speed from stepping: a clamp on the offset's size alone stops it dead on its target, a step of up to 0.25 in one
+  sample that reads in proportion to the sample rate (M2 2.28 at 96 kHz and 4.55 at 192 after a retarget of a 20 → 2 ms glide
+  under 20 ms of modulation at 1.25 Hz, both laws). The offset **lands on its target by braking**, like the tape law's catch-up (§3.6):
+  its speed follows the curve's own slope plus the largest closing speed from which the bound can still stop it, so on the curve it IS
+  the curve, with no lag. **It leaves a bound from rest**: when the read floor stops it, its slope is zero and the bound applies again
+  from there.
+- **During a fade the offset answers to the sounding head.** The read floor and ceiling clamp the offset by the **outgoing** head alone,
+  the one still sounding; the **incoming head rides the 3-sample floor** (held there, not counted as a floor read) while the offset
+  retreats, and while the offset is under the incoming head's floor it aims at that floor, braking, so the head leaves the floor at about
+  zero slope. When the fade ends, the offset lands at the floor bound in one sample (it can move hundreds of samples), and the incoming read stays
+  continuous because it was already riding the floor. Clamping by both heads moved the offset by up to its whole size in one sample when a fade to a short time began (a 5 ms sine
+  at 1 Hz, a 100 → 2 ms crossfade at the trough, 48 kHz: a 147-sample jump, speed −146, M2 33.9), under the head that sounded it.
 - **Smoothing**: depth and spread ramp over 250 ms; a shape switch blends the two shapes' values over 250 ms; the
   rate glides in log-frequency (100 ms).
 - **Seed change** is a declared **seeded jump** (contract §12.2): the new streams start from the value being
@@ -504,11 +540,11 @@ intents unless a preset binds it. What a preset holds, which keys a macro may bi
 | ceiling | knee 0.9, asymptote 1.0 | §5.1 |
 | DC blocker | 5 Hz, gain-normalised | §5.1 |
 | repitch cap | 12 st both directions | §3.6 |
-| read speed | s ∈ [0.25, 4] (hard); [0.25, 2.25] by construction | §3.6 |
+| read speed | s ∈ [0.25, 4] (hard); [0.25, 2.25] by construction (the head's [0.5, 2] and the offset's ±0.25) | §3.6 |
 | repitch fallback | 3 s at the cap's rate | §3.6 |
 | jump | 3 ms equal-gain crossfade | §3.7 |
 | tempo follow cap | 50 cents | §3.8 |
-| modulation | slope ±25 % of speed; offset slew ±0.25 sample/sample; drift clamped to [−1, 1] | §7 |
+| modulation | slope ±25 % of speed; offset slew ±0.25 sample/sample, its slope ≤ 1 unit of speed per 0.1 ms; drift clamped to [−1, 1] | §7 |
 | ramps | 20 ms (gains, mix, feedback, routing and filter switches, load fade-out); 250 ms (modulation depth, spread, shape) | §4–10 |
 | cutoff glide | 10 ms, log-frequency | §6 |
 | tail gate | −120 dBFS; margin 0.25 s | §10 |

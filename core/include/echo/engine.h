@@ -215,6 +215,7 @@ class Echo {
     const double keptPhase = modPhase_;
     modPhase_ = 0.0;
     mods_[0] = mods_[1] = 0.0;
+    modV_[0] = modV_[1] = modTp_[0] = modTp_[1] = 0.0;  // the offset's tracker restarts at rest with it
     reseed(false);
     if (plant::resetKeepsModPhase) modPhase_ = keptPhase;
     seedApplied_ = p_[kModSeed];
@@ -1116,15 +1117,21 @@ class Echo {
   // must not itself step the speed: it is the one `modStep` uses, SIGN-AWARE (the read is dA + the offset, so the
   // floor on dA is kMinRead - offset, not kMinRead + |offset|; the tighter |offset| form bound under a modulated
   // fade from a shortening glide and stepped the speed by 0.132 in one sample at 192 kHz, 2.5x the bound, D-049 A6).
-  // The offset is last sample's (modStep runs after the heads, and moves it by at most 0.25 and under its own floor
-  // bound), so the read itself is held by modStep. Nothing is allocated: it is one multiply-add on a field.
+  // modStep runs AFTER the heads, so the offset read here is last sample's, and the read this sample is dA plus the offset it is
+  // about to make. The floor clamp therefore looks one sample ahead by the offset's own slope (modV_, which the offset keeps unless a bound
+  // stops it): last sample's offset alone missed the coming move, the clamp bound a sample late and stepped the head's speed (a 20 -> 2 ms
+  // glide crossfaded to 400 ms 12 ms in, under 20 ms of modulation at 1.25 Hz, near the trough: M2 4.06 at 192 kHz, the plant
+  // fbClampStale; D-049 A9). Only the floor looks ahead: the ceiling uses last sample's offset, because directed runs (5,568, both forms) never
+  // made it bind, and a term with no reading and no plant is not shipped (D-049 A10). The read itself is still held by modStep. Nothing is
+  // allocated: it is one multiply-add on a field.
   void outgoingSlew(int k) {
     Head& h = head_[k];
     if (plant::fbFrozenOutgoing || h.vA == 0.0) return;
     const double a = 1.0 / (k::kExpSlewS * sr_);
     h.vA = h.vA > 0.0 ? std::max(0.0, h.vA - a) : std::min(0.0, h.vA + a);
     const double m = plant::fbClampUnsigned ? std::fabs(mods_[k]) : 0.0;
-    const double lo = plant::fbClampUnsigned ? k::kMinRead + m : k::kMinRead - mods_[k];
+    const double ahead = plant::fbClampStale ? 0.0 : modV_[k];
+    const double lo = plant::fbClampUnsigned ? k::kMinRead + m : k::kMinRead - mods_[k] - ahead;
     const double hi = static_cast<double>(lineLen_ - k::kKernelMargin) - (plant::fbClampUnsigned ? m : mods_[k]);
     h.dA = std::clamp(h.dA + h.vA, lo, hi);
   }
@@ -1285,13 +1292,26 @@ class Echo {
     // retarget (an onset, or a move reversed mid-glide) steps the speed by up to 1.5 in one sample, which
     // reads as a click (M2 up to 5.1). Bound the step per second, not per sample, so it holds at any
     // host rate (a step defect reads in proportion to the rate). It binds only where the law's V jumps;
-    // elsewhere the one-pole on ln D is exact. Applied after the cap: both bounds hold together, since
-    // the result lies between two values the cap already allowed.
+    // elsewhere the one-pole on ln D is exact. Applied after the cap, so the cap's range holds (the result lies between two values the
+    // cap already allowed). It bounds the LAW's speed against the previous sample's; the floor brake below runs after it and is the one
+    // stated exception, a change of the head's speed by more than a that the offset cancels in the read (SPEC §3.6, D-049 A9).
     if (expLaw && !plant::expSlewOff) {
       const double a = 1.0 / ((plant::expSlewLong ? 0.010 : k::kExpSlewS) * sr_);
       const double bound = std::clamp(h.V, vPrev - a, vPrev + a);
       if (bound != h.V) { ++stats_[k].slewBinds; stats_[k].lastSlewBind = n_; }
       h.V = bound;
+    }
+    // The floor brake (D-049 A8). The head's read is D + the offset, and the read floor (kMinRead) clamps the OFFSET, so a head
+    // shortening hard toward the floor (100 -> 2 ms at the trough of a deep sine) meets it at the law's full closing speed, and
+    // the offset, slope-bounded, cannot retreat as fast as D shortens: the read pins to the floor and the speed stops dead
+    // from up to 0.75 (reads 8.4 at 192 kHz, the plant modNoFloorBrake). So a SHORTENING head's closing speed toward the floor
+    // is limited to the discrete stopping speed from its distance to it (the form of the catch-up's brake above), less the
+    // offset's own slope, which the offset adds to the read. Far from the floor the limit exceeds the cap and never acts. A
+    // fading head is left alone: the incoming head rides the floor (readHead) and the outgoing one has outgoingSlew.
+    if (!h.fade && h.V < 0.0 && !plant::modNoFloorBrake) {
+      const double a = 1.0 / (k::kExpSlewS * sr_), dist = std::max(0.0, h.D + mods_[k] - k::kMinRead);
+      const double stop = std::sqrt(0.25 * a * a + 2.0 * a * dist) - 0.5 * a;
+      h.V = std::max(h.V, -stop - modV_[k]);
     }
     if (std::fabs(T - (h.D + h.V)) < 1e-9 && std::fabs(h.V) <= std::fabs(gap)) { h.D = T; h.V = 0; }
     else h.D += h.V;
@@ -1483,8 +1503,9 @@ class Echo {
   // The offsets (samples) for both lines at this sample. The depth is limited
   // so the curve's own slope moves the read speed by at most 25 % and the read
   // stays 3 samples clear of the write head; and the OFFSET itself is
-  // slew-limited to 0.25 sample a sample, so no rate glide, ramp, shape blend,
-  // seed change or lifted depth limit can move the read faster (§7).
+  // slew-limited to 0.25 sample a sample and its SLOPE to one unit of speed per
+  // k::kExpSlewS, so no rate glide, ramp, shape blend, seed change or lifted depth
+  // limit can move the read faster, or step its speed (§7, D-049 A8).
   void modStep() {
     if (rateL2_ != rateTargetL2_) {  // the rate glides in log-frequency (cached once settled)
       rateL2_ += (rateTargetL2_ - rateL2_) * rateA_;
@@ -1510,13 +1531,46 @@ class Echo {
     modTargets(w, t);
     for (int k = 0; k < 2; ++k) {
       if (plant::modSlewOff) mods_[k] = t[k];
-      else mods_[k] += std::clamp(t[k] - mods_[k], -k::kModSlopeMax, k::kModSlopeMax);
+      else if (plant::modAccelUnbounded) mods_[k] += std::clamp(t[k] - mods_[k], -k::kModSlopeMax, k::kModSlopeMax);
+      else {
+        // The offset's SLOPE is bounded, not only its size (D-049 A8). Clamping the step to 0.25 a sample (the old form) stops
+        // dead when it reaches its target, a speed step of up to 0.25 in one sample, and a speed step reads in proportion to the
+        // rate (M2 4.5 at 192 kHz after a retarget under 20 ms of modulation). So the slope changes by at most a, the same
+        // per-second bound as the heads' (one unit of speed per k::kExpSlewS), and the offset lands on its target by braking
+        // (the form of the tape catch-up: the target's own slope plus the stopping term, D-049 A4). The error is taken against
+        // the PREVIOUS sample's target (modTp_) and the move is that target's own slope plus the brake, so on the curve the
+        // offset IS the curve with no lag; the slope cap stays 0.25.
+        const double a = 1.0 / (k::kExpSlewS * sr_), cap = k::kModSlopeMax;
+        double tk = t[k], ts = std::clamp(t[k] - modTp_[k], -cap, cap), e = modTp_[k] - mods_[k];
+        modTp_[k] = t[k];
+        // While a fade's incoming head rides the floor (the offset is under kMinRead - dB), the offset aims at that floor first,
+        // braking onto it with no target slope, so the head leaves the floor at about zero slope; it then follows the curve.
+        // Without this the offset reaches the floor with the curve's slope and the read kinks as the head comes off it (the plant
+        // modRideKink; a crossfade 100 -> 5 ms over 40 ms at the trough reads 3.40 without it, 1.37 with it, at 192 kHz).
+        if (!plant::modRideKink && head_[k].fade && mods_[k] < k::kMinRead - head_[k].dB) { tk = k::kMinRead - head_[k].dB; ts = 0.0; e = tk - mods_[k]; }
+        const double r = std::min(std::fabs(e), std::sqrt(0.25 * a * a + 2.0 * a * std::fabs(e)) - 0.5 * a);
+        double v = std::clamp(ts + (e > 0.0 ? r : -r), -cap, cap);
+        v = std::clamp(v, modV_[k] - a, modV_[k] + a);
+        if (std::fabs(tk - (mods_[k] + v)) < 1e-9) v = tk - mods_[k];  // within 1e-9 of the target: land on it. (After a depth ramp at 192 kHz the offset can leave the curve by up to 0.028 sample for a sample or two before it lands exactly.)
+        mods_[k] += v;
+        modV_[k] = v;  // the tracker's own slope, never the floor clamp's jump below: that would poison the next sample's bound
+      }
       // The read floor wins over the slew (critic M2-M3): a move to a short
       // time can leave a slewing offset that would read under 3 samples from
       // the write head, which the kernel cannot. Bounded here, per line.
       if (!plant::modNoFloorBound) {
-        const auto [lo, hi] = headSpan(k);
+        // During a fade the offset answers to the OUTGOING head alone, the one still sounding: the incoming head rides the floor
+        // (readHead) while the offset retreats. Clamping by the incoming head too (headSpan) moved the offset by up to its whole
+        // magnitude in one sample when a fade to a short time began, and the outgoing head read that jump (D-049 A8; a 100 -> 2 ms
+        // crossfade at the trough of a 5 ms sine: a 147-sample jump, M2 33.9 at 48 kHz; the plant modFloorClampsBoth).
+        const auto [lo, hi] = (head_[k].fade && !plant::modFloorClampsBoth) ? std::pair<double, double>{head_[k].dA, head_[k].dA} : headSpan(k);
+        const double bounded = mods_[k];
         mods_[k] = std::clamp(mods_[k], k::kMinRead - lo, static_cast<double>(lineLen_ - k::kKernelMargin) - hi);
+        // Stopped at the bound, the offset leaves it from rest: its slope bounded again. Left as it was, it would leave the bound still
+        // carrying the slope it arrived with, and the read kinks (the plant modBoundKeepsSlope; the jump at the trough, 3.485 at 192 kHz).
+        // When a fade ends the offset lands at the floor bound in one sample (it can move hundreds of samples): the incoming read stays
+        // continuous because it was already riding the floor (SPEC §7).
+        if (mods_[k] != bounded && !plant::modBoundKeepsSlope) modV_[k] = 0.0;
       }
     }
   }
@@ -1566,7 +1620,9 @@ class Echo {
     if (h.statsLive) {
       double dp = pos - h.lastPos;
       const double lo = 1.0 - k::kSMax, hi = 1.0 - k::kSMin;
-      if (!h.fade && (dp > hi || dp < lo)) {
+      // 1e-9 of tolerance: the head's cap (0.5) and the offset's slope cap (0.25) add to exactly 0.75 = 1 - kSMin, so rounding
+      // (about 3e-14) tipped a legitimate 0.25 speed over the bound and counted a hit (D-049 A8). The bound itself is unchanged.
+      if (!h.fade && (dp > hi + 1e-9 || dp < lo - 1e-9)) {
         const double D = h.lastPos + (dp > hi ? hi : lo) - mods_[k];
         h.V += D - h.D;
         h.D = D;
@@ -1645,7 +1701,7 @@ class Echo {
     const double m = mods_[k];
     if (!h.fade) return readAt(k, pos(k, (plant::blockSteppedD ? heldD_[k] : h.D) + m));
     const double wF = static_cast<double>(h.fi + 1) / h.fn;
-    const double a = readAt(k, pos(k, h.dA + m)), b = readAt(k, pos(k, h.dB + m));
+    const double a = readAt(k, pos(k, h.dA + m)), b = readAt(k, pos(k, h.dB + m, true));
     if (plant::equalPower) return std::cos(wF * k::kPi / 2) * a + std::sin(wF * k::kPi / 2) * b;
     // Raised-cosine weights (D-049 A4): w + (1 - w) = 1 still holds (equal-gain), but the weight's SLOPE is 0 at
     // both ends. A linear weight kinks there, and a kink reads in proportion to the rate under the click metric
@@ -1655,11 +1711,13 @@ class Echo {
   }
   // Every read position is held inside the line; an attempt past it is
   // counted (the suite requires zero: the depth limit and the clamp keep it in).
-  double pos(int k, double p) {
+  // `ride` marks a fade's INCOMING head, which sits on the floor by design while the
+  // offset retreats (D-049 A8): it is held there but not counted as a floor read.
+  double pos(int k, double p, bool ride = false) {
     if (plant::integerRead) p = std::round(p);
     const double hi = static_cast<double>(lineLen_ - k::kKernelMargin);
     if (p > hi) { ++stats_[k].overruns; return hi; }
-    if (p < k::kMinRead) { ++stats_[k].floors; return k::kMinRead; }  // counted: the suite requires zero
+    if (p < k::kMinRead) { if (!ride) ++stats_[k].floors; return k::kMinRead; }  // counted: the suite requires zero
     return p;
   }
 
@@ -1810,6 +1868,7 @@ class Echo {
     // slewing in from 0 (critic M2-M4: it played 39 ms at 0.75).
     if (land && !plant::wakeOffsetFromZero) modTargets(shapeNow(), mods_);
     else if (plant::wakeOffsetFromZero) mods_[0] = mods_[1] = 0.0;
+    for (int k = 0; k < 2; ++k) { modV_[k] = 0.0; modTp_[k] = mods_[k]; }  // landed: at rest, tracking its own value
     paramMoved_ = false;
     loadLeft_ = 0;
   }
@@ -1892,6 +1951,8 @@ class Echo {
   double shapeW_ = 1.0, shapeFrom_ = 0.0, shapeTarget_ = 0.0;
   Drift drift_[2];
   double mods_[2] = {0.0, 0.0};
+  double modV_[2] = {0.0, 0.0};   // the offset's own slope (modStep's tracker), 0 whenever the offset is set from outside
+  double modTp_[2] = {0.0, 0.0};  // the curve's target at the previous sample, for the offset's error and target slope
   std::atomic<std::uint64_t> nonFinite_{0};
   std::atomic<bool> nonFiniteLatch_{false};
   Tap tapIn_, tapOut_;
