@@ -667,7 +667,7 @@ class EchoLab {
   // ---- the time engine -----------------------------------------------------
   _startFade(h, from, to, s, st) {
     h.fade = true; h.dA = from; h.dB = to; h.fi = 0; h.fn = Math.max(1, Math.round(s * this.sr));
-    h.pending = NaN; st.fades++;
+    h.pending = NaN; st.fades++; h.keyQueued = false;
     h.vA = h.V; h.V = 0;           // the outgoing head leaves at the speed it had (D-049 A4); a head at rest has none
     this._slewOut(h);              // the fade's first sample moves the outgoing head too: its speed is continuous
   }
@@ -708,28 +708,48 @@ class EchoLab {
     h.lastMod = mod;
     const Tprev = h.T; h.T = T;
     if (T !== Tprev) {                                            // a new move (or a retarget)
-      if (cls === 1) h.tempo = false; else if (cls === 2) h.tempo = true;
+      // A move a KEY caused always follows time.change, even when the tempo moves while it is still in flight: only a settled head
+      // hands the move to time.tempoMode (SPEC §3.8; the core's guard, D-050 A4).
+      const keyInFlight = !h.tempo && (h.fade || Math.abs(h.D - Tprev) >= 1);
+      if (cls === 1) { h.tempo = false; if (h.fade) h.keyQueued = true; }
+      else if (cls === 2 && (lab.plant === "tempoStealsKeyMove" || !keyInFlight)) h.tempo = true;
       const was = h.law;
-      this._latch(h); h.tc = 0;
+      // A tempo tick under a key's move in flight is not a new move: the key's latch stands, so a time.change or time.law flip waits for the next move (SPEC §3.5, D-050 A4).
+      if (h.tempo || cls !== 2 || lab.plant === "tempoTickRelatches") this._latch(h);
+      h.tc = 0;
       if (h.law === "varispeed" && was !== "varispeed") this._tapeRebuild(k, h);
     }
-    const mode = h.mode, xf = mode === 3 ? ECHO_K.jumpS : this.p[EI["time.xfadeMs"]] / 1000;
+    let mode = h.mode, xf = mode === 3 ? ECHO_K.jumpS : this.p[EI["time.xfadeMs"]] / 1000;
 
+    // Follow: while a follow crossfade runs, its destination keeps tracking the grid within the cap, so the head is on the grid when the fade ends and following
+    // resumes (the core's; without it a follow fade on a ramp ends off the grid and queues another, D-050 A4).
+    if (h.fade && mode === 4 && cls === 2 && lab.plant !== "followNoTrackInFade" && Math.abs(T - Tprev) <= this.capR) h.dB += T - Tprev;
     if (h.fade) {
       this._slewOut(h);
       if (++h.fi < h.fn) { h.pending = T; return; }
       h.fade = false; h.D = h.dB; h.V = 0; h.vA = 0; h.headId++;
       if (h.law === "varispeed") this._tapeRebuild(k, h);
       const tgt = h.pending === h.pending ? h.pending : T;
+      // A key's fade that has ended is a key's move finished: if no key moved the target during it, what moved it was the tempo, and time.tempoMode owns that (SPEC §3.8, D-050 A4).
+      if (!h.tempo && !h.keyQueued && T !== h.D && lab.plant !== "keyFadeChains") {
+        h.tempo = true;
+        this._latch(h);
+        mode = h.mode; xf = this.p[EI["time.xfadeMs"]] / 1000;
+      }
+      h.keyQueued = false;
       // The queue (D-007's deterministic retrigger rule): a target that moved
       // during the fade is faded to next; the latest target wins.
       if ((mode === 1 || mode === 3 || mode === 4) && Math.abs(tgt - h.D) >= 0.5) { this._startFade(h, h.D, tgt, xf, st); return; }
     }
     if (mode === 2) { h.D = T; return; }                          // the planted bare jump (smoke only)
-    if (mode === 1 || mode === 3) { if (Math.abs(T - h.D) >= 0.5) this._startFade(h, h.D, T, xf, st); return; }
+    // A head still moving has just come off the law: "under half a sample starts no fade" is a rule for a head at rest. This one would stop
+    // where it stands, a speed step of up to 1.0 in one sample, so it leaves through a fade (SPEC §3.5, D-050 A4).
+    if (mode === 1 || mode === 3) { if (Math.abs(T - h.D) >= 0.5 || (h.V !== 0 && lab.plant !== "movingHeadStopsDead")) this._startFade(h, h.D, T, xf, st); return; }
     if (mode === 4) {                                             // tempo "follow" (Q-A2 C)
       const dT = T - Tprev, settled = Math.abs(h.D - Tprev) < 1;
-      if (settled && Math.abs(dT) <= this.capR) { h.D += dT; this._clampSpeed(h, mod, st); return; }
+      // The law's speed must be inside the cap too, not only the target's: a head handed over faster would drop to the cap's step in one sample (D-050 A4).
+      const speedInCap = lab.plant === "followCapDropsSpeed" || Math.abs(h.V) <= this.capR;
+      if (settled && speedInCap && Math.abs(dT) <= this.capR) { h.D += dT; if (lab.plant !== "followKeepsStaleSpeed") h.V = 0; this._clampSpeed(h, mod, st); return; }
       if (settled) { this._startFade(h, h.D, T, this.p[EI["time.xfadeMs"]] / 1000, st); return; }
       // else a glide from a knob move is still in flight: the law finishes it
     }

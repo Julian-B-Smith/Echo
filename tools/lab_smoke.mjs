@@ -642,5 +642,72 @@ function generations(params, sr, lab) {
   plant(!sameBits(render(true, "hzFlipIsMove"), still), "time.mode render check detects a sec <-> hz flip that lands the heads: a move in flight stops dead");
 }
 
+// ---- 21. T-046 (D-050 A3, A4): a head still moving when time.tempoMode takes over. A key's glide reaches its moving target at the head's own
+// speed; crossfade and follow must not stop it there. 96 kHz, where the core's rows read over the bar without the fix (a step reads in proportion
+// to the rate), and the worst of 4 probe phases as in 18b. The in-flight guard reads on the fade count: while the key's glide runs, the tempo starts no fade.
+{
+  const SRx = 96000;
+  const worst = (secs, params, events, bpmAt, lab) => {
+    const n = blocks(secs * SRx);
+    let w = 0;
+    for (let j = 0; j < 4; j++) {
+      const src = new Float32Array(n), nf = Math.round(0.01 * SRx);
+      for (let i = 0; i < n; i++) src[i] = 0.5 * Math.sin(2 * Math.PI * (X.ECHO_PROBE_HZ * i / SRx + j / 8)) * (i < nf ? 0.5 - 0.5 * Math.cos(Math.PI * i / nf) : 1);
+      const r = X.echoRender({ sr: SRx, seconds: secs, srcL: src, lab: Object.assign({ fallback: true }, lab), params, events, bpmAt });
+      w = Math.max(w, X.echoClickM2(r.L, Math.round(0.2 * SRx), r.L.length, 0.5, X.ECHO_PROBE_HZ, SRx, 2.25));
+    }
+    return w;
+  };
+  const synced = { "time.mode": 2, "time.ms": 500, "time.change": 0, "time.law": 0, "fb.amount": 0, "filt.loop.on": 0, mix: 100 };
+  const swing = t => 120 + 60 * Math.sin(2 * Math.PI * t);
+  // A cell found by the critic's sweep (it reads in 2 of 32; the lab's soft-landing tape law rarely lands within half a sample of a swinging target).
+  const onSwing = lab => worst(1.5, Object.assign({}, synced, { "time.div": 9, "time.tempoMode": 0, "time.glide": 0.05 }), [{ t: 1.1, key: "time.div", v: 12 }], swing, lab);
+  const fixed = onSwing({}), swingStopped = onSwing({ plant: "movingHeadStopsDead" });
+  check(fixed < 2.5, `M2: a time.div move handed to time.tempoMode crossfade on 120 +- 60 bpm reads clean at 96 kHz (${fixed.toFixed(2)} < 2.5)`);
+  plant(swingStopped > 2.5, `M2 flags a moving head that stops dead when the tempo takes over (${swingStopped.toFixed(2)})`);
+  // The same stop at a steady tempo: a glide in flight is retargeted to the place its head stands, read from a pilot render ending at that block (the core's retargetOnMovingHead). The pilot needs a signal: a silent one rests and lands its heads.
+  const t1 = blocks(1.1 * SRx) / SRx;
+  const plain = Object.assign({}, synced, { "time.mode": 0, "time.glide": 0.3 });
+  const pilot = X.echoRender({ sr: SRx, seconds: t1, srcL: new Float32Array(blocks(t1 * SRx)).fill(0.1), lab: { fallback: true }, params: plain, events: [{ t: 1, key: "time.ms", v: 125 }] });
+  const stand = pilot.engine.heads[0].D * 1000 / SRx;
+  const retarget = lab => worst(1.6, plain, [{ t: 1, key: "time.ms", v: 125 }, { t: t1, key: "time.change", v: 1 }, { t: t1, key: "time.ms", v: stand }], undefined, lab);
+  const moved = retarget({}), stopped = retarget({ plant: "movingHeadStopsDead" });
+  check(moved < 2.5, `M2: a retarget to within half a sample of a moving head leaves through a fade at 96 kHz (${moved.toFixed(2)} < 2.5)`);
+  plant(stopped > 2.5, `M2 flags a moving head that stops dead on such a retarget (${stopped.toFixed(2)})`);
+  const stepAfter = t => 120 + 0.5 * Math.sin(2 * Math.PI * t) + (t >= 1.2 ? 13 : 0);
+  const inCap = lab => worst(1.6, Object.assign({}, synced, { "time.div": 12, "time.tempoMode": 2, "time.glide": 0.01 }), [{ t: 1.0, key: "time.div", v: 9 }], stepAfter, lab);
+  const capFixed = inCap({}), capDropped = inCap({ plant: "followCapDropsSpeed" });
+  check(capFixed < 2.5, `M2: a fast glide handed to time.tempoMode follow inside the cap reads clean at 96 kHz (${capFixed.toFixed(2)} < 2.5)`);
+  plant(capDropped > capFixed + 0.5, `M2 flags follow dropping a speed past the cap, lengthening (${capDropped.toFixed(2)} against ${capFixed.toFixed(2)})`);
+  // No shortening row: the lab's cap test is one clause (|V|), so one plant covers both sides and the lengthening row reads it; its soft-landing law reads no step shortening.
+  // Fades on line 0 by the end of the render: the tempo alone starts one fade per crossfade, so a key's glide that kept the key's starts none past the count before it.
+  const fades = (seconds, events, lab) => X.echoRender({ sr: SR, seconds, srcL: new Float32Array(blocks(seconds * SR)).fill(0.1), lab: Object.assign({ fallback: true }, lab), bpmAt: swing,
+    params: Object.assign({}, synced, { "time.div": 9, "time.tempoMode": 0, "time.glide": 0.3 }), events }).stats[0].fades;
+  const before = fades(1.0, []), move = [{ t: 1.0, key: "time.div", v: 12 }];
+  const held = fades(1.15, move) - before, stolen = fades(1.15, move, { plant: "tempoStealsKeyMove" }) - before;
+  check(held <= 0, `a key's glide in flight under a moving tempo stays the key's: the tempo starts no fade during it (${held})`);
+  plant(stolen > 0, `the in-flight check detects a tempo move taking a key's glide (${stolen} fades)`);
+  // D-050 A4: a key's fade that has ended hands over: a crossfade on a 1 bpm/s ramp, then follow takes the ramp with no fade. It used to chain the key's fades for the whole ramp.
+  const ramp = t => 120 + Math.max(0, t - 1);
+  const onRamp = lab => X.echoRender({ sr: SR, seconds: 3, srcL: new Float32Array(blocks(3 * SR)).fill(0.1), lab: Object.assign({ fallback: true }, lab), bpmAt: ramp,
+    params: Object.assign({}, synced, { "time.div": 9, "time.change": 1, "time.tempoMode": 2 }), events: [{ t: 1.0, key: "time.div", v: 12 }] }).stats[0].fades;
+  const chainFixed = onRamp({}), chained = onRamp({ plant: "keyFadeChains" });
+  check(chainFixed <= 2, `a key's crossfade on a ramp hands over to time.tempoMode follow when its fade ends (${chainFixed} fades)`);
+  plant(chained > 10, `the handover check detects a key's fades chaining for the whole ramp (${chained} fades)`);
+  plant(onRamp({ plant: "followNoTrackInFade" }) > 10, "the handover check detects a follow fade that does not track the grid (it ends off it and queues another)");
+  // D-050 A4: a time.change flip during a key's glide on a ramp waits for the next move: bit-identical to no flip.
+  const glideOnRamp = (flip, lab) => X.echoRender({ sr: SR, seconds: 1.4, srcL: noise(blocks(1.4 * SR), 23), lab: Object.assign({ fallback: true }, lab), bpmAt: ramp,
+    params: Object.assign({}, synced, { "time.div": 9, "time.tempoMode": 2, "time.glide": 0.3 }), events: [{ t: 1.0, key: "time.div", v: 12 }].concat(flip ? [{ t: 1.1, key: "time.change", v: 1 }] : []) }).L;
+  const unflipped = glideOnRamp(false);
+  check(sameBits(glideOnRamp(true), unflipped), "a time.change flip during a key's glide on a ramp renders bit-identically to no flip");
+  plant(!sameBits(glideOnRamp(true, { plant: "tempoTickRelatches" }), unflipped), "the deferral check detects a tempo tick applying the flip at once");
+  // D-050 A4: a follow handover leaves no speed behind in the head.
+  const speedLeft = lab => X.echoRender({ sr: SRx, seconds: 2.4, srcL: new Float32Array(blocks(2.4 * SRx)).fill(0.1), lab: Object.assign({ fallback: true }, lab), bpmAt: t => 120 + 0.5 * Math.sin(2 * Math.PI * t),
+    params: Object.assign({}, synced, { "time.div": 12, "time.tempoMode": 2, "time.glide": 0.05 }), events: [{ t: 1.0, key: "time.div", v: 9 }] }).engine.heads[0].V;
+  const left = speedLeft({}), stale = speedLeft({ plant: "followKeepsStaleSpeed" });
+  check(left === 0, `a follow handover leaves no speed in the head (${left})`);
+  plant(stale !== 0, `the speed check detects one left behind (${stale})`);
+}
+
 console.log(fail ? "lab_smoke: RED" : "lab_smoke: OK");
 process.exit(fail);

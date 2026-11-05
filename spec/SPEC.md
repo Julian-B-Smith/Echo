@@ -36,6 +36,7 @@ slot is refused; the rest of D-050 — Time, the saved modes, the fixed row — 
 **Revision 5, by D-050 and D-050 A2 (2026-11-04, T-044):** `time.mode` (`sec`, `hz`, `sync`) replaces the two-label sync key, and the 30th key (the scale) goes: 29 keys again
 (§3.1, §3.4, §3.5, §9, §11, §16.2); `route.mode`'s first label is `standard` (§1, §3.2, §4, §9, §16.2); macros leave the scope list (§1); the fixed row is
 Time (`time.ms`), Feedback, Mix and Type (`route.mode`), provisional until T-045 (§16.4). The other keys' ranges, defaults and classes are unchanged.
+**Amended 2026-11-05 by D-050 A4** (§3.5, §3.8, T-046: a head still moving leaves through a fade; a key's fade that ends hands over to `time.tempoMode`; a tempo tick does not re-latch a key's move; the handover and its limit stated).
 
 **What this is.** The behaviour Echo must have, stated so the C++ core (M1–M3) can be built and tested against it.
 The machine-readable half is [`params.json`](params.json): every key, unit, range, default, morph class, rate
@@ -172,11 +173,14 @@ sample rate (the 3 ms jump read 1.9, 3.6 and 7.0 at 48, 96 and 192 kHz); a smoot
 1.0 in one sample (3.5 at 48 kHz, 14 at 192 kHz). It travels at most 2.4 samples at 48 kHz (9.6 at 192 kHz) and stays inside the line.
 **Retrigger rule: a queue, latest target wins** — a target that arrives mid-fade waits, and when the fade ends the
 head fades to the most recent target (intermediate ones are dropped). Two heads at most, deterministic. A move of
-less than half a sample starts no fade.
+less than half a sample starts no fade **from a head at rest**. A head still moving leaves through a fade all the same, so its speed stays continuous
+(D-050 A4): it used to stop where it stood, a step of up to 1.0 in one sample that read 13.8 at 192 kHz. The cost is a brief comb while the two heads are apart, by at most 50 µs:
+measured from a head at speed 2 (T-046's critic), 10 kHz dips by 10.3 dB at 48 kHz and by 20 – 21.8 dB at 192 kHz, 5 kHz by 1.8 – 2.7 dB, at any `time.xfadeMs` tried (30 and 500 ms).
 
 **Deferral.** Each move is **latched** to the `time.change`, `time.law` and `time.tempoMode` in force when it
 starts. Flipping any of the three changes nothing at the flip; it applies from the next move (their declared
-switch, §9).
+switch, §9). A tempo tick under a key's move in flight is not a next move: the key's latch stands, on a moving tempo too. Once the tempo owns the time,
+each tick of a moving tempo is a move, so a `time.law` or `time.tempoMode` flip during a ramp applies at the next tick (D-050 A4).
 
 ### 3.6 Repitch (Q-A1, ruled: both laws ship, D-016)
 
@@ -274,6 +278,18 @@ D = 1 s, +51 cents at 3 s and +1.65 st at 10 s. **`time.tempoMode`** lets each p
 The policy owns a move caused by the tempo alone; a move caused by a key always follows `time.change`. The
 crossfade and follow modes amend horde's rule for the patches that choose them; horde is told so in a notice (a
 ROADMAP follow-up), not asked.
+
+**The handover (D-050 A4).** A key's move keeps following `time.change` while the tempo moves under it, and `time.tempoMode` takes over when the move is finished:
+
+- **A key's crossfade or jump** is finished when its fade ends. If no key moved the target during the fade, whatever moved it was the tempo, and `time.tempoMode` owns that from there. A
+  ramp is therefore not a chain of the key's fades (a key's jump used to start 2,667 of them over 8 s).
+- **A key's repitch glide** is finished when the head is within one sample of its target. The head can arrive still moving, and it does not stop. Under **crossfade** it leaves through a
+  fade (§3.5). Under **follow** it follows exactly only when its own speed, like the target's, is inside the 50-cent cap, and otherwise fades. Under **glide** the law simply carries on.
+- **The limit:** a glide whose target moves away from it may not come within a sample while the ramp lasts, so `time.change`'s law stays in charge until the ramp ends (measured on a 20 s
+  ramp at 48 kHz, 1/4 → 1/8: up to 2.19 ms behind, gliding). A target moving toward the head crosses it and hands over at once.
+
+A key's move landing on a moving tempo reads under the §13 bar at 44.1, 48, 96 and 192 kHz, worst of 8 probe phases, with no backstop hit; stopping the head read up to 11.07 at 192 kHz on
+120 ± 60 bpm at 1 Hz.
 
 ## 4. Routing (`route.mode`)
 

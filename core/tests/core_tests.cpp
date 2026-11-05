@@ -1977,9 +1977,158 @@ std::vector<ClickCase> stepCases() {
       c.kv.push_back({"time.div", 12});
       cs.push_back(c);
     }
+  // T-046 (D-050 A3, A4): a key move landing on a moving tempo. The move follows time.change until the head reaches the moving target, then
+  // time.tempoMode owns it, and the head arrives still moving: crossfade and follow used to stop it dead (the plants movingHeadStopsDead,
+  // followHandoverStopsDead; speed up to 2.0 -> 1.0, M2 up to 11.07 at 192 kHz). Neither a key move nor a tempo move reads this alone (clickSweep's
+  // tempo rows have no key move, the rows above no tempo). The places are the worst of a sweep over the 1 Hz swing's phase (the trace); the glide rows and the
+  // exponential law never stopped a head, and stay as the control that the handover did not change them. Last in the list, so every older plant stops at its own row.
+  struct TempoMove { const char* what; int mode, div; double depth, at; const char* key; double v; };
+  const auto tempoRow = [&](const TempoMove& m, int law, int tempoMode, int change = 0) {
+    const char* const tempoName[3] = {"crossfade", "glide", "follow"};
+    char swing[64];
+    std::snprintf(swing, sizeof swing, ", 120 +- %g bpm at 1 Hz, %.0f ms, tempo ", m.depth, m.at * 1000);
+    const char* const changeName[3] = {"", ", key crossfade", ", key jump"};
+    ClickCase c = stepCase(std::string(m.what) + swing + tempoName[tempoMode] + changeName[change], law, change, 500, {{m.at, m.key, m.v}}, 3.0, change == 2);
+    for (auto& kv : c.kv)
+      if (std::string_view(kv.first) == "time.mode") kv.second = m.mode;
+    c.kv.push_back({"time.div", static_cast<double>(m.div)});
+    c.kv.push_back({"time.tempoMode", static_cast<double>(tempoMode)});
+    const double depth = m.depth;
+    c.bpm = [depth](double i) { return 120.0 + depth * std::sin(2 * kPi * i / kSr); };
+    cs.push_back(c);
+  };
+  const TempoMove tempoMoves[] = {
+      {"time.mode sec -> sync", 0, 12, 60, 1.1, "time.mode", 2},  // T-044's critic's row: 3.925 at 192 kHz before the fix
+      {"time.mode sec -> sync", 0, 12, 40, 1.25, "time.mode", 2},
+      {"time.mode sync -> sec", 2, 12, 60, 1.25, "time.mode", 0},
+      {"time.div 1/4 -> 1/8", 2, 9, 60, 1.75, "time.div", 12},
+      {"time.div 1/4 -> 1/8", 2, 9, 60, 0.7, "time.div", 12},
+      {"time.div 1/8 -> 1/4", 2, 12, 60, 1.5, "time.div", 9},
+      {"time.div 1/8 -> 1/4", 2, 12, 40, 1.1, "time.div", 9},  // and its 4.47, under follow
+      {"time.offL +20 %", 2, 12, 60, 1.25, "time.offL", 20},
+  };
+  for (const TempoMove& m : tempoMoves)
+    for (const int tm : {0, 2}) tempoRow(m, 0, tm);
+  for (const std::size_t i : {std::size_t{0}, std::size_t{3}, std::size_t{5}}) tempoRow(tempoMoves[i], 0, 1);
+  for (const std::size_t i : {std::size_t{0}, std::size_t{3}})
+    for (const int tm : {0, 2}) tempoRow(tempoMoves[i], 1, tm);
+  // A fast glide (0.01 s) handed over while the tempo sits inside follow's cap (the swing's 0.013 samples a sample): the rows of the two followCapDrops plants, one per side.
+  // The 13 bpm step lands inside the lengthening glide (at 1.2 s; the handover comes at 1.437 s at 192 kHz), which keeps the head fast enough to read: under the plant the speed
+  // falls from 0.445 to 0.028 in one sample, M2 5.72, and no fade is involved. The shortening glide reads 4.15 under its plant with no step.
+  for (const int tm : {0, 2}) {
+    const std::size_t before = cs.size();
+    tempoRow({"time.div 1/8 -> 1/4, glide 0.01, a 13 bpm step 200 ms on", 2, 12, 0.5, 1.0, "time.div", 9}, 0, tm);
+    tempoRow({"time.div 1/2 -> 1/4, glide 0.01", 2, 6, 0.5, 1.125, "time.div", 9}, 0, tm);
+    for (std::size_t i = before; i < cs.size(); ++i)
+      for (auto& kv : cs[i].kv)
+        if (std::string_view(kv.first) == "time.glide") kv.second = 0.01;
+    cs[before].bpm = [](double i) { const double t = i / kSr; return 120.0 + 0.5 * std::sin(2 * kPi * t) + (t >= 1.2 ? 13.0 : 0.0); };
+  }
+  // D-050 A4: a key's crossfade or jump on a moving tempo, whose end hands over to time.tempoMode, under each mode: the handover from a fade reads under the bar too.
+  for (const int change : {1, 2})
+    for (const int tm : {0, 1, 2})
+      for (const std::size_t i : {std::size_t{0}, std::size_t{3}}) tempoRow(tempoMoves[i], 0, tm, change);
   return cs;
 }
-constexpr int kStepCases = kModRows + 2 + 2 * 7 + 2 + 4 * 4;
+constexpr int kStepCases = kModRows + 2 + 2 * 7 + 2 + 4 * 4 + 8 * 2 + 3 + 2 * 2 + 2 * 2 + 2 * 3 * 2;
+
+// T-046 (D-050 A4): the same stop at a steady tempo. A glide in flight, time.change flipped to crossfade or jump (deferred), then a retarget to within half a sample
+// of the moving head, which is where the head stood a sample ago: a pilot run reads that place, and the case is deterministic, so the second run meets it. The old rule
+// (under half a sample starts no fade) stopped the head dead: M2 up to 13.80 at 192 kHz (the plant movingHeadStopsDead). Both laws, both modes, four rates, 8 phases.
+bool retargetOnMovingHead(Detail& d) {
+  for (const int law : {0, 1})
+    for (const int change : {1, 2}) {
+      const auto w4 = worstAtRates([&](std::size_t ri, int j) {
+        const double sr = kClickRates[ri];
+        const long shift = phaseShift(j, sr), t0 = S(1.0, sr) + shift, t1 = S(1.1, sr) + shift, n = S(2.0, sr);
+        const auto make = [&] { return mk({{"time.mode", 0}, {"time.ms", 500}, {"time.law", static_cast<double>(law)}, {"time.change", 0}, {"time.glide", 0.3}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, sr); };
+        const Vec in = clickProbeAt(n, sr);
+        auto pilot = make();
+        const Vec lead(in.begin(), in.begin() + t1);
+        run(*pilot, lead, lead, {set(t0, "time.ms", 125)});
+        const double D = pilot->headDelay(0);
+        auto e = make();
+        e->resetStats();
+        const Out o = run(*e, in, in, {set(t0, "time.ms", 125), set(t1, "time.change", change), set(t1, "time.ms", D * 1000.0 / sr)});
+        const auto st = e->speedStats(0), st1 = e->speedStats(1);
+        return ClickRun{clickM2At(o.L, S(0.2, sr), n, 0.5, sr), SpeedStatsView{std::min(st.sMin, st1.sMin), std::max(st.sMax, st1.sMax), st.clamps + st1.clamps, st.floors + st1.floors + st.overruns + st1.overruns}};
+      });
+      for (std::size_t ri = 0; ri < 4; ++ri) {
+        const PhaseWorst& w = w4[ri];
+        if (g_report) std::printf("  REPORT step M2 steady retarget on a moving head, law %d, change %d, %g Hz %6.3f\n", law, change, kClickRates[ri], w.m2);
+        REQUIRE(w.st.clamps == 0 && w.st.floors == 0, "a retarget on a moving head, law %d, change %d, %g Hz: %llu backstop hits, %llu floor/overrun reads", law, change, kClickRates[ri],
+                static_cast<unsigned long long>(w.st.clamps), static_cast<unsigned long long>(w.st.floors));
+        REQUIRE(w.m2 <= kClickMax, "a retarget on a moving head, law %d, change %d, %g Hz reads M2 %.3f at its worst of %d probe phases (threshold %.3f)", law, change, kClickRates[ri], w.m2, kPhases, kClickMax);
+      }
+    }
+  return true;
+}
+
+// D-050 A4: a key's fade that has ended hands over to time.tempoMode. A key's crossfade or jump landing on a 1 bpm/s ramp, then the fades counted from 1.25 s (the key's own
+// are over by then) to the ramp's end at 8 s. Follow and glide take the ramp with none; crossfade with its own stream at time.xfadeMs, the same for a key's jump as for a
+// key's crossfade. They used to chain the key's fades for the whole ramp (the plant keyFadeChains: 134 crossfades, 2,667 jumps). 1 bpm/s is inside follow's cap, so follow's
+// head must end on the grid. The crossfade cells are counted against the stream's own length ((8 - 1.25) / 0.060), not against a render with no key
+// move, and they pass under the plant too (about 112 fades either way): the plant is caught by the glide and follow cells.
+bool keyFadeHandsOver(Detail& d) {
+  for (const double sr : kClickRates)
+    for (const int change : {1, 2})
+      for (const int tm : {0, 1, 2}) {
+        auto e = mk({{"time.mode", 2}, {"time.div", 9}, {"time.change", static_cast<double>(change)}, {"time.tempoMode", static_cast<double>(tm)}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, sr);
+        const long n = S(8.0, sr), t0 = S(1.0, sr), t1 = S(1.25, sr);
+        const Vec in = clickProbeAt(n, sr);
+        const auto bpm = [&](long i) { const double t = static_cast<double>(i) / sr; return 120.0 + (t - 1.0 > 0.0 ? 1.0 * (t - 1.0) : 0.0); };
+        std::uint64_t atT1 = 0;
+        runEach(*e, in, in, {set(t0, "time.div", 12)}, bpm, [&](long i, Echo& en) { if (i == t1) atT1 = en.fadeCount(0); });
+        const std::uint64_t fades = e->fadeCount(0) - atT1;
+        const double xf = 0.060, perRamp = (8.0 - 1.25) / xf;  // time.xfadeMs at its default
+        if (tm == 0) {
+          REQUIRE(fades > 0.8 * perRamp && fades < 1.2 * perRamp, "key change %d, tempo crossfade, %g Hz: %llu fades on the ramp, expected about %.0f (its own stream at time.xfadeMs)", change, sr, static_cast<unsigned long long>(fades), perRamp);
+        } else {
+          REQUIRE(fades == 0, "key change %d, tempo mode %d, %g Hz: %llu fades on the ramp after the key's fade ended, expected none", change, tm, sr, static_cast<unsigned long long>(fades));
+        }
+        if (tm == 2) {
+          const double grid = 30.0 / bpm(n - 1) * sr;
+          REQUIRE(std::fabs(e->headDelay(0) - grid) < 1.0, "key change %d, tempo follow, %g Hz: the head ends %.3f samples off the grid", change, sr, e->headDelay(0) - grid);
+        }
+      }
+  return true;
+}
+
+// D-050 A4: §3.5's deferral on a moving tempo. A time.change or time.law flip during a key's glide changes nothing until the next move, so the render is bit-identical to one
+// with no flip, ramp or no ramp. A tempo tick used to re-latch the key's move, so the flip applied on the next tick (the plant tempoTickRelatches: 7 fades on a 1 bpm/s ramp).
+bool deferralOnMovingTempo(Detail& d) {
+  struct Flip { const char* key; double v; };
+  for (const double sr : {48000.0, 192000.0})
+    for (const int tm : {0, 1, 2})
+      for (const Flip f : {Flip{"time.change", 1}, Flip{"time.change", 2}, Flip{"time.law", 1}}) {
+        const auto render = [&](bool flip) {
+          auto e = mk({{"time.mode", 2}, {"time.div", 9}, {"time.change", 0}, {"time.law", 0}, {"time.glide", 0.3}, {"time.tempoMode", static_cast<double>(tm)}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, sr);
+          const long n = S(1.4, sr);
+          const Vec in = clickProbeAt(n, sr);
+          std::vector<Event> ev = {set(S(1.0, sr), "time.div", 12)};
+          if (flip) ev.push_back(set(S(1.1, sr), f.key, f.v));
+          return runEach(*e, in, in, ev, [&](long i) { return 120.0 + static_cast<double>(i) / sr; }, [](long, Echo&) {});
+        };
+        const Out a = render(false), b = render(true);
+        REQUIRE(a.L == b.L && a.R == b.R, "a %s flip during a key's glide on a 1 bpm/s ramp changed the render (tempo mode %d, %g Hz): it must wait for the next move", f.key, tm, sr);
+      }
+  return true;
+}
+
+// D-050 A4: a follow handover leaves no speed behind. A key's glide (0.05 s) handed over on a 1 bpm/s ramp, the tempo then steady, time.tempoMode flipped to crossfade, and a
+// tempo move of 1e-5 bpm, far under half a sample: a head at rest starts no fade. A speed left in the head (+0.0205, T-046's critic's gesture) makes it look moving and
+// starts one (the plant followKeepsStaleSpeed); it would survive a rest too, since a rest lands only a head off its target.
+bool handoverLeavesNoSpeed(Detail& d) {
+  auto e = mk({{"time.mode", 2}, {"time.div", 12}, {"time.change", 0}, {"time.law", 0}, {"time.glide", 0.05}, {"time.tempoMode", 2}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}});
+  const long n = S(4.0), tN = n - S(0.2);
+  const Vec in = clickProbeAt(n, kSr);
+  const auto bpm = [&](long i) { const double t = static_cast<double>(i) / kSr; return i >= tN ? 121.5 + 1e-5 : (t < 1.0 ? 120.0 : (t < 2.5 ? 120.0 + (t - 1.0) : 121.5)); };
+  std::uint64_t before = 0;
+  runEach(*e, in, in, {set(S(1.0), "time.div", 9), set(tN - 1, "time.tempoMode", 0)}, bpm, [&](long i, Echo& en) { if (i == tN - 1) before = en.fadeCount(0); });
+  const std::uint64_t started = e->fadeCount(0) - before;
+  REQUIRE(started == 0, "a move of 1e-5 bpm started %llu fades from a head at rest: a speed was left in it at the follow handover", static_cast<unsigned long long>(started));
+  return true;
+}
 
 // Each modulated row's LFO label is a claim about the offset at the row's first move: read it there, at every rate, on the engine itself
 // (one fresh engine per distinct LFO rate and place: the offset does not depend on the gesture). A crest is +A, a trough -A, a crossing is 0
@@ -4540,7 +4689,15 @@ const std::vector<Check> kChecks = {
      expSlewBinds, {"expSlewLong", "expSpuriousRetarget", "expSlewOff"}},
     // ---- M3 B4, T-041 ----
     {"click metric over the probe's phase: the tape law's plain onsets, time.glide changes mid-move, D-006's fallback taken from a moving head, a crossfade-mode retarget of a glide in flight and a retarget mid-fade (both laws), and the modulated moves, each at the crest, the trough and both zero crossings of the LFO (20 -> 2 ms glide then crossfade 6 and 12 ms in, repitch 100 -> 2 ms in both laws, crossfade and jump 100 -> 3 ms at 5 Hz, a long crossfade 100 -> 5 ms; 44.1 / 48 / 96 / 192 kHz) read under 2.5 at the worst of 8 half-period phases, zero backstop hits",
-     stepClick, {"tapeKinkUnbounded", "fbFrozenOutgoing", "modAccelUnbounded", "modFloorClampsBoth", "modNoFloorBrake", "modRideKink", "modBoundKeepsSlope", "fbClampStale"}},
+     stepClick, {"tapeKinkUnbounded", "fbFrozenOutgoing", "modAccelUnbounded", "modFloorClampsBoth", "modNoFloorBrake", "modRideKink", "modBoundKeepsSlope", "fbClampStale", "movingHeadStopsDead", "followHandoverStopsDead", "followCapDropsLengthening", "followCapDropsShortening"}},
+    {"a retarget to within half a sample of a moving head, time.change flipped to crossfade or jump at a steady tempo: the head leaves through a fade and reads under 2.5, zero backstop hits (both laws, 44.1 - 192 kHz, worst of 8 phases)",
+     retargetOnMovingHead, {"movingHeadStopsDead"}},
+    {"a key's fade that has ended hands over to time.tempoMode: after a key's crossfade or jump on a 1 bpm/s ramp, follow and glide start no fade, follow ends on the grid, and crossfade runs its own stream at time.xfadeMs (44.1 - 192 kHz)",
+     keyFadeHandsOver, {"keyFadeChains"}},
+    {"deferral on a moving tempo: a time.change or time.law flip during a key's glide on a ramp renders bit-identically to no flip, under every tempo mode (48, 192 kHz)",
+     deferralOnMovingTempo, {"tempoTickRelatches"}},
+    {"a follow handover leaves no speed behind: a move far under half a sample starts no fade from the head at rest afterwards",
+     handoverLeavesNoSpeed, {"followKeepsStaleSpeed"}},
     {"a fade's outgoing head: its speed changes by at most the 0.1 ms bound a sample across a modulated crossfade retarget of a shortening glide, both laws (44.1 - 192 kHz): the clamp to the line must not step it (floor contact, the H1 gesture: at most 2 a)",
      outgoingBound, {"fbClampUnsigned", "fbClampStale"}},
     {"the tape law's catch-up: after the cap releases, the speed does not ring (>= 0.9 shortening, <= 1.1 lengthening) and the head never overshoots the model or passes its target by more than 0.1 sample, at 44.1 - 192 kHz (M2 cannot see this)",
@@ -4672,6 +4829,8 @@ bool* plantFlag(std::string_view n) {
       {"hzCountsAsSync", &hzCountsAsSync}, {"hzFlipIsMove", &hzFlipIsMove}, {"modeFlipSwallowed", &modeFlipSwallowed},
       {"tailReadsDivInHz", &tailReadsDivInHz}, {"modeFlipIntoSyncSwallowed", &modeFlipIntoSyncSwallowed},
       {"modeFlipAlwaysMove", &modeFlipAlwaysMove}, {"keyResendIsMove", &keyResendIsMove}, {"moveReadsOneLine", &moveReadsOneLine}, {"hzFlipDelaysRest", &hzFlipDelaysRest},
+      {"movingHeadStopsDead", &movingHeadStopsDead}, {"followHandoverStopsDead", &followHandoverStopsDead}, {"followCapDropsLengthening", &followCapDropsLengthening}, {"followCapDropsShortening", &followCapDropsShortening},
+      {"followKeepsStaleSpeed", &followKeepsStaleSpeed}, {"keyFadeChains", &keyFadeChains}, {"tempoTickRelatches", &tempoTickRelatches},
   };
   for (const auto& p : table)
     if (n == p.n) return p.f;
@@ -4726,7 +4885,7 @@ const std::vector<AdmissionRow>& admissionRows() {
       {"A10", "Real-time", {noAlloc, a10Session, ftzSet, ftzRestored},
        "locks and syscalls by review only: no RealtimeSanitizer on this toolchain, and the engine calls nothing that locks"},
       {"A11", "Parameter classes",
-       {switchesClickFree, crossfadeEqualGain, jumpIsShortFade, deferral, modSeeded, clickSweep, reversalClick, onsetClick, phaseSweepWorks, expSlewBinds, modeFlipControlMove, timeModeFlip, timeResolution, resendIsNoMove, stepClick, outgoingBound, tapeCatchUp, loadLeavesDevice, presetValidate, b265Port},
+       {switchesClickFree, crossfadeEqualGain, jumpIsShortFade, deferral, modSeeded, clickSweep, reversalClick, onsetClick, phaseSweepWorks, expSlewBinds, modeFlipControlMove, timeModeFlip, timeResolution, resendIsNoMove, stepClick, retargetOnMovingHead, keyFadeHandsOver, deferralOnMovingTempo, handoverLeavesNoSpeed, outgoingBound, tapeCatchUp, loadLeavesDevice, presetValidate, b265Port},
        "structural: every flip key's switch declaration in params.json (`check_manifest.py`, with planted bare and length-less switches); the B265 reading REPORTED, never judged (`.harness/b265-report.txt`)"},
       {"A12", "Macros", {presetA12, presetValidate, presetFactoryBank},
        "macros are not offered (RS-5.1; D-050): every preset's slots are empty and a slot is refused by name; the row still round-trips every preset's values, the fixed row's keys included, byte-identical, and the factory bank (the init plus seven) loads as its own values (T-021); B408 for the bank is stated in the run's REPORT lines"},
@@ -4809,6 +4968,7 @@ int main(int argc, char** argv) {
     reversalClick(d);
     onsetClick(d);
     stepClick(d);
+    retargetOnMovingHead(d);
     std::printf("  SPEED STRESS %s\n", speedStress(d) ? "clean" : d.c_str());
     outgoingBound(d);
     tapeCatchUp(d);
@@ -4826,10 +4986,11 @@ int main(int argc, char** argv) {
       *plantFlag(p) = false;
     }
     // T-042's plants act on the modulated rows alone (stepClick, and the stress, which reports as a pass or a fail)
-    for (const char* p : {"modAccelUnbounded", "modFloorClampsBoth", "modNoFloorBrake", "modRideKink", "modBoundKeepsSlope", "fbClampStale"}) {
+    for (const char* p : {"modAccelUnbounded", "modFloorClampsBoth", "modNoFloorBrake", "modRideKink", "modBoundKeepsSlope", "fbClampStale", "movingHeadStopsDead", "followHandoverStopsDead", "followCapDropsLengthening", "followCapDropsShortening"}) {
       std::printf("  -- under plant %s\n", p);
       *plantFlag(p) = true;
       stepClick(d);
+      retargetOnMovingHead(d);
       std::printf("  SPEED STRESS %s\n", speedStress(d) ? "clean" : d.c_str());
       *plantFlag(p) = false;
     }
@@ -4866,7 +5027,9 @@ int main(int argc, char** argv) {
                         "zoneAnyMode", "zoneAtEqual", "pingpongInvertsR", "presetStateOversized", "presetPatchOfDropsKey", "factoryLabelTypo", "factoryCarriesSlot",
                         "offsetRewrite", "stateMissingKeyDefaults", "hzCountsAsSync", "hzFlipIsMove", "modeFlipSwallowed", "tailReadsDivInHz", "moveReadsOneLine", "hzFlipDelaysRest", "modeFlipIntoSyncSwallowed", "modeFlipAlwaysMove", "keyResendIsMove", "expSlewOff", "expSlewLong", "phaseSweepCollapsed", "expSlewBlockStart", "expSpuriousRetarget",
                         "tapeKinkUnbounded", "tapeNoBrake", "tapeNoTargetBrake", "fbClampUnsigned", "fbFrozenOutgoing", "fadeLinear",
-                        "modAccelUnbounded", "modFloorClampsBoth", "modNoFloorBrake", "modRideKink", "modBoundKeepsSlope", "fbClampStale"}) {
+                        "modAccelUnbounded", "modFloorClampsBoth", "modNoFloorBrake", "modRideKink", "modBoundKeepsSlope", "fbClampStale",
+                        "movingHeadStopsDead", "followHandoverStopsDead", "followCapDropsLengthening", "followCapDropsShortening",
+                        "followKeepsStaleSpeed", "keyFadeChains", "tempoTickRelatches"}) {
     bool guarded = false;
     for (const auto& c : kChecks)
       for (const char* p : c.plants) guarded = guarded || std::string_view(p) == n;
