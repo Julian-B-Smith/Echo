@@ -214,6 +214,14 @@ ECHO_PLANT(moveReadsOneLine)     // whether a send moved a time is read from lin
 ECHO_PLANT(keyResendIsMove)      // time.ms / time.div / time.offL / time.offR mark a control move whether or not a time moved (the old unconditional mark): a synced patch's time.ms, or a re-sent value, re-latches a tempo move landing in the same sample
 ECHO_PLANT(hzFlipDelaysRest)     // a flip that moves nothing restarts the quiet count: a sec / hz flip while a tail rings puts off the rest (a flip restarting tailClock_ instead is unobservable: the quiet condition always rests first)
 ECHO_PLANT(tailReadsDivInHz)     // the declared tail is built from the division's time while hz plays time.ms: hz declares the wrong tail (over, when the division is the longer)
+// ---- M3, B4 (T-046: a move landing on a moving tempo, D-050 A3) ----
+ECHO_PLANT(movingHeadStopsDead)     // a head still moving, less than half a sample from its target, starts no fade under time.tempoMode crossfade or a crossfade / jump retarget: it stops where it stands, and steps again when the next fade picks up the speed it kept (a time.div move on 120 +- 60 bpm: M2 9.85 at 192 kHz; a retarget at a steady tempo: 13.80)
+ECHO_PLANT(followHandoverStopsDead) // the same under time.tempoMode follow, when the tempo is past the 50-cent cap: the head stops where it stands (a time.div move on 120 +- 60 bpm: M2 11.07 at 192 kHz)
+ECHO_PLANT(followCapDropsLengthening) // follow's in-cap branch does not read the law's speed when the delay is lengthening: a head handed over faster than the cap drops to the cap's step in one sample (a fast 1/8 -> 1/4 glide: speed 0.445 -> 0.028, M2 5.72 at 192 kHz)
+ECHO_PLANT(followCapDropsShortening)  // the same when the delay is shortening (a fast 1/2 -> 1/4 glide: M2 4.15 at 192 kHz)
+ECHO_PLANT(followKeepsStaleSpeed)   // follow's in-cap branch leaves the law's last speed in the head: it never moves again by it, but it makes a head at rest look moving, so a later time.tempoMode flip and a tiny tempo move start a fade
+ECHO_PLANT(keyFadeChains)           // a key's fade that ends on a moved target queues another key's fade, however the target moved: time.tempoMode never takes over during a ramp (2,667 jumps over 8 s)
+ECHO_PLANT(tempoTickRelatches)      // a tempo tick under a key's move in flight re-latches it: a time.change or time.law flip applies on the next tick of a moving tempo, not from the next move
 }  // namespace echo::plant
 
 #undef ECHO_PLANT

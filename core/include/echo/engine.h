@@ -1031,6 +1031,7 @@ class Echo {
     bool statsLive = false;      // false for one sample after a handover (no speed measured)
     double lnT = 0;              // ln T, cached per target (the exponential law)
     double vA = 0;               // a fade's outgoing head: its speed (delay a sample) while it slews to rest (D-049 A4)
+    bool keyQueued = false;      // a key moved the target during this fade: the fade's end must honour it (D-050 A4)
   };
 
   // The tape law's state (§3.6): a tape at speed v (tape units a sample), the
@@ -1060,6 +1061,7 @@ class Echo {
     h.fade = false;
     h.fi = 0;
     h.fn = 1;
+    h.keyQueued = false;
     h.lnT = std::log(h.T);
     h.statsLive = false;  // a landing is a handover: no speed is measured across it
     tape_[k].active = false;
@@ -1078,6 +1080,7 @@ class Echo {
     h.fi = 0;
     h.fn = fadeLength(mode);
     h.fade = true;
+    h.keyQueued = false;
     h.vA = h.V;  // the outgoing head leaves at the speed it had (D-049 A4); a head at rest has none
     h.V = 0;
     ++fadeCount_[k];
@@ -1141,9 +1144,13 @@ class Echo {
       // tempo moves while it is still in flight: only a settled head hands the
       // move to time.tempoMode (critic M2-H4).
       const bool keyInFlight = !h.tempo && (h.fade || std::fabs(h.D - Tprev) >= 1.0);
-      if (cls == 1) h.tempo = false;
-      else if (cls == 2 && (plant::tempoStealsKeyMove || !keyInFlight)) h.tempo = true;
-      latch(h);
+      if (cls == 1) {
+        h.tempo = false;
+        if (h.fade) h.keyQueued = true;
+      } else if (cls == 2 && (plant::tempoStealsKeyMove || !keyInFlight)) h.tempo = true;
+      // A tempo tick under a key's move in flight is not a new move: the key's latch stands, so a time.change or time.law flip waits for the next
+      // move as §3.5 says. Re-latching here applied the flip on the very next tick of a moving tempo (D-050 A4, the plant tempoTickRelatches).
+      if (h.tempo || cls != 2 || plant::tempoTickRelatches) latch(h);
     }
     // Follow (§3.8): while a follow crossfade runs, its destination keeps
     // tracking the grid within the 50-cent cap, so the head is on the grid
@@ -1163,6 +1170,16 @@ class Echo {
       h.vA = 0;
       h.statsLive = false;  // a handover: dA's position gives way to dB's
       tape_[k].active = false;
+      // A key's fade that has ended is a key's move finished: if no key moved the target during it, whatever moved it was the tempo, and time.tempoMode
+      // owns that. Waiting for the head to come within a sample of the target never ends on a ramp: the target moves further than that during every fade
+      // (2.4 samples over 60 ms at 0.1 bpm/s), so the queue chained fades for the whole ramp (2,667 jumps over 8 s, D-050 A4, the plant keyFadeChains).
+      // `T != h.D` reads nothing (T-046's critic: removing it leaves the suite green, since a head at rest re-latched changes nothing); it is kept as
+      // a guard, so the tempo's latch is never taken where the tempo moved nothing (D-049 A10's exception, stated).
+      if (!h.tempo && !h.keyQueued && T != h.D && !plant::keyFadeChains) {
+        h.tempo = true;
+        latch(h);
+      }
+      h.keyQueued = false;
       // The queue (§3.5): a target that moved during the fade is faded to
       // next; the latest one wins, the ones between are dropped.
       if (h.mode != kRepitch && std::fabs(T - h.D) >= 0.5) {
@@ -1176,23 +1193,33 @@ class Echo {
       finishStep(k, D0, false);
       return;
     }
+    // A head still moving here has just come off the law: a key's glide reached its moving target and time.tempoMode took over, or a retarget
+    // landed under half a sample from it. "Under half a sample starts no fade" is a rule for a head at rest: this one would stop where it
+    // stands, a speed step of up to 1.0 in one sample that reads in proportion to the rate (M2 9.85 at 192 kHz, 120 +- 60 bpm; 13.80 for the
+    // retarget, at a steady tempo), so it leaves through a fade, whose outgoing head keeps its speed and slews it to rest (D-050 A3, A4).
     if (h.mode == kCrossfade || h.mode == kJump) {
-      if (std::fabs(T - h.D) >= 0.5) startFade(k, T, h.mode);
+      if (std::fabs(T - h.D) >= 0.5 || (h.V != 0.0 && !plant::movingHeadStopsDead)) startFade(k, T, h.mode);
       finishStep(k, D0, false);
       return;
     }
     if (h.mode == kFollow) {  // tempo "follow" (§3.8): exact within 50 cents, a crossfade past it
       const double dT = T - Tprev;
       const bool settled = std::fabs(h.D - Tprev) < 1.0;
-      if (settled && (plant::followNoCap || (dT >= -capUp_ && dT <= capDn_))) {
+      // The law's speed must be inside the cap too, not only the target's: a head handed over faster than that would drop to the cap's step in
+      // one sample (D-050 A4; 5.72 at 192 kHz lengthening, 4.15 shortening, a plant for each side).
+      const bool speedInCap = (plant::followCapDropsShortening || h.V >= -capUp_) && (plant::followCapDropsLengthening || h.V <= capDn_);
+      if (settled && speedInCap && (plant::followNoCap || (dT >= -capUp_ && dT <= capDn_))) {
         // Move toward T by at most the cap: follows the grid exactly and
         // absorbs any residual a previous move left (critic M2-M2).
         h.D += plant::followNoCap ? dT : (plant::followKeepsResidual ? dT : std::clamp(T - h.D, -capUp_, capDn_));
+        // The law is over: a speed left here would make the head look moving to the branches above (a later tempoMode flip and a tiny tempo move
+        // would start a fade from a head at rest), and it survives a rest (the plant followKeepsStaleSpeed).
+        if (!plant::followKeepsStaleSpeed) h.V = 0.0;
         finishStep(k, D0, false);
         return;
       }
       if (settled) {
-        if (std::fabs(T - h.D) >= 0.5) startFade(k, T, kCrossfade);
+        if (std::fabs(T - h.D) >= 0.5 || (h.V != 0.0 && !plant::followHandoverStopsDead)) startFade(k, T, kCrossfade);  // a moving head fades, as above (11.07 at 192 kHz without it)
         finishStep(k, D0, false);
         return;
       }

@@ -22,7 +22,7 @@ with HIGH findings the author's own suite had passed.
   (D-037 – D-040), T-016 on its own PR (D-041): **batch 2 done**. Batch 3's four items done
   2026-10-28 (D-042 – D-045): T-017 on PR #24 (2975c34), T-018 on PR #25 (1a78af5), T-019 on
   PR #26 (2966256), T-020 on PR #27 (985c1d1); the T-021 bank draft B3 also plans is not
-  started (the bank holds the init only). Batch 4 (T-021 finished, T-022, T-023) next; D-048 (2026-10-29) adds T-038 and T-039 ahead of T-022's face; D-049 adds T-040, T-041 and T-042 before T-023 (all three done); D-050 (2026-11-03) removes macros and `time.scale`: T-039 rewritten, T-044 and T-045 added (T-039 and T-044 done; T-046 added by D-050 A3). **M4 (the IR
+  started (the bank holds the init only). Batch 4 (T-021 finished, T-022, T-023) next; D-048 (2026-10-29) adds T-038 and T-039 ahead of T-022's face; D-049 adds T-040, T-041 and T-042 before T-023 (all three done); D-050 (2026-11-03) removes macros and `time.scale`: T-039 rewritten, T-044 and T-045 added (T-039, T-044 and T-046 done; T-046 added by D-050 A3, widened by A4). **M4 (the IR
   display and Echo's screen) is under way beside it** (D-027, D-030): T-030 – T-032 done (PR #15,
   PR #16); T-033 open (T-014 is on main, PR #20); T-036 (gate 4's flicker) done 2026-10-28 (D-046).
 - **Oracle:** `./verify fast` = kit integrity, leak gate, private-name gate,
@@ -1086,12 +1086,15 @@ filings need the human's go-ahead each time.
 - **Out of scope:** horde's side of it.
 
 ### T-046 — M3: a move landing on a moving tempo stays under the bar (D-050 A3)
-- **Status:** open (T-044 is the base it builds on).
-- **Scope:** `engine.h` (the head's handover from a move to the tempo), SPEC §3.5 - §3.8, the lab and `tools/lab_smoke.mjs`, `plants.h`, `core_tests.cpp`.
+- **Status:** done 2026-11-05 (stacked on T-044's PR; D-050 A4 widened the scope; trace `traces/2026-11-05-t046-tempo-handover.md`; critic FIX-THEN-SHIP, then SHIP).
+- **Scope:** `engine.h` (the head's handover from a move to the tempo, and the latch on a tempo tick), SPEC §3.5 and §3.8 (D-050 A4), the lab and `tools/lab_smoke.mjs` (the fade and the in-flight guard, D-050 A4), `plants.h`, `core_tests.cpp`.
 - **Acceptance criteria:**
   1. T-044's critic's measurement is reproduced first: at 192 kHz, sec -> sync, tape, 120 ± 60 bpm at 1 Hz, `time.tempoMode` crossfade or follow, reads M2 3.925; a `time.div` move under ± 40 bpm up to 4.47.
   2. `stepClick` gains rows combining a key move and a `time.mode` flip with a moving tempo, at 44.1, 48, 96 and 192 kHz, worst of 8 phases, under 2.5 with zero backstop hits. `kClickMax` does not move.
   3. Each unfixed behaviour is a planted control its own gate catches. Every factory preset sounds as before; `./verify fast` green.
+  4. The same stop at a steady tempo (a retarget within half a sample of a moving head, `time.change` flipped to crossfade or jump) has its own check at the four rates, worst of 8 phases, under 2.5 (D-050 A4).
+  5. A key's fade that ends hands over to `time.tempoMode`: on a 1 bpm/s ramp, after a key's crossfade or jump, follow and glide start no fade and crossfade runs its own stream (D-050 A4).
+  6. A `time.change` or `time.law` flip during a key's glide on a ramp renders bit-identically to no flip (D-050 A4).
 - **Out of scope:** the time keys themselves (T-044); the row (T-045); tempo moves with no key move, already gated by `clickSweep`.
 
 ## Open questions (blocking — ask the human)
