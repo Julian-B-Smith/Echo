@@ -22,6 +22,7 @@ move; `status:` is lifecycle; neither does the other's job.
 | from | file here | what |
 |---|---|---|
 | HYPERSAW (horde) | `hypersaw/notice-macro-modify-law.md` | seq 2, `ball: none`, filed 2026-10-24 (PR #22, merged 2026-10-25): horde's slot resolves macros under ADR-251's `modify` law; the optional fixed row (RS-5.8). Nothing owed. Read against our rulings: it matches Echo's factory bank on `modify` (D-035, ruling 3) and the four `fixedControls` (D-035 ruling 4; locked by D-041). |
+| HYPERSAW (horde) | `hypersaw/notice-state-budgets.md`, answered by `hypersaw/response-state-budgets.md` | seq 3 (PR #34) and seq 4: horde re-derives every module's state budget (ADR-351). Answered 2026-11-02: 478 B largest factory preset, at most 910 B by calculation, no caps. `ball: HYPERSAW` for the ruled budgets (T-043). |
 
 ## Outbound threads
 
