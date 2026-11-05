@@ -1,0 +1,900 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Echo tap swarm prototype</title>
+<!--
+  tap-swarm-proto — a listening prototype for the legacy tap swarm as an opt-in option in Echo.
+  Origin: Echo lead session, 2026-11-05. Asked for by the human mid-T-046, after looking at the legacy echo's tap
+  distribution: "could make for an ethereal effect... consider appending the behavior as an option". Nothing is
+  decided. The design note beside this file (docs/design/tap-swarm.md) carries the measurements and the poll.
+
+  WHAT THIS IS. An Echo-like loop (one line per channel; the ceiling on the returning term only; the gain-normalised
+  5 Hz DC blocker; a one-pole loop filter with true bypass; equal-power mix; stereo, ping-pong and mid/side), plus the
+  shapes under study, so the human can A/B them by ear:
+    off      Echo as it is: one head per line, read and fed back.
+    scatter  shape (a): a seeded cloud of output taps per line; feedback from the ONE main head, so repeats stay
+             discrete (each repeat carries the same cloud; the cloud never re-enters the loop).
+    smear    shape (b): feedback = (1 - smear) x main + smear x the cloud's AVERAGE. A convex blend, so the loop's peak
+             gain is at most the feedback by construction; the cloud recirculates and thickens each pass (diffusion:
+             this is the shape that nears Scape's ground).
+    wander   shape (c): ONE head in the loop at any time, hopping between the swarm's tap times each pass on a seeded
+             schedule, with Echo's raised-cosine equal-gain crossfade. Loop gain stays exactly the feedback; the
+             repeats stay discrete but land off the grid.
+    legacy   the rejected law (ADR-142) inside Echo's loop: wet = cloud / sqrt(n), feedback = cloud / n. Reference only.
+
+  NOT the C++ core and not a parity target: the main head's glide is a plain exponential law under the 12-semitone cap,
+  there is no tempo-follow, no line modulation (the swarm's own per-tap drift stands in), no load or rest logic.
+
+  DETERMINISM. Seeded mulberry32 streams only; the DSP reads no clock and never calls Math.random. The script below
+  with id="dsp" is loaded verbatim into the AudioWorklet AND rebuilt with a poisoned Math by the self-checks
+  (?check=1, or the button), so what is checked is what is heard. Every check runs a planted fault first and must
+  read red on it (the charter's must-fail rule).
+-->
+<style>
+  :root { --bg:#0f1218; --panel:#171b24; --line:#2a3040; --text:#e8ecf2; --dim:#8b94a6;
+          --acc:#5ff2e0; --amber:#ffc24b; --red:#ff6b8a; --green:#5fd08a; --vio:#b48cff; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font:13px/1.5 ui-monospace,Menlo,"IBM Plex Mono",monospace;
+         padding:16px; max-width:1180px; margin:0 auto; }
+  h1 { font-size:17px; } h1 b { color:var(--acc); }
+  h2 { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--dim); margin-bottom:8px; }
+  .tag { color:var(--dim); font-size:11.5px; margin:2px 0 12px; max-width:980px; }
+  .bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; background:var(--panel); border:1px solid var(--line);
+         padding:10px; border-radius:4px; margin-bottom:12px; }
+  button, select, input[type=number] { background:var(--bg); color:var(--text); border:1px solid var(--line);
+         font:inherit; padding:4px 10px; border-radius:3px; }
+  button { cursor:pointer; } button:hover { border-color:var(--acc); }
+  button.on { border-color:var(--acc); color:var(--acc); }
+  button.big { font-size:15px; padding:6px 18px; font-weight:600; }
+  #power.on { background:var(--acc); color:var(--bg); }
+  .slot { min-width:64px; } .slot.on { background:var(--amber); color:var(--bg); border-color:var(--amber); }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(330px, 1fr)); gap:12px; margin-bottom:12px; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:4px; padding:12px; }
+  .row { display:grid; grid-template-columns:118px 1fr 92px; gap:8px; align-items:center; margin:3px 0; }
+  .row.off { opacity:.35; }
+  .row output { color:var(--acc); text-align:right; font-size:12px; }
+  input[type=range] { width:100%; accent-color:var(--acc); }
+  .why { color:var(--dim); font-size:11.5px; margin-top:8px; min-height:3em; }
+  canvas { width:100%; height:230px; display:block; background:var(--bg); border:1px solid var(--line); border-radius:3px; }
+  table { border-collapse:collapse; width:100%; font-size:12px; }
+  td, th { border-bottom:1px solid var(--line); padding:4px 6px; text-align:left; vertical-align:top; }
+  th { color:var(--dim); font-weight:normal; width:34%; }
+  .ok { color:var(--green); } .bad { color:var(--red); } .dim { color:var(--dim); }
+  #checks div { font-size:12px; }
+  kbd { border:1px solid var(--line); border-radius:3px; padding:0 4px; font-size:11px; }
+  @media (max-width:560px) { body { padding:10px; } .row { grid-template-columns:96px 1fr 70px; } }
+</style>
+</head>
+<body>
+<h1><b>Echo</b> · tap swarm prototype</h1>
+<div class="tag">
+  The legacy tap-swarm echo as an <i>opt-in</i> option for Echo: three shapes to judge by ear against Echo as it is
+  and against the law ADR-142 rejected. Two slots, <b>A</b> and <b>B</b>, run side by side on the same source; the
+  toggle crossfades between them in 20 ms, so both tails stay alive and the comparison is instant. The controls edit
+  the slot you hear. Measurements, the cost and the poll: <code>docs/design/tap-swarm.md</code>.
+  Keys: <kbd>space</kbd> toggles A/B, <kbd>1</kbd>–<kbd>5</kbd> pick the mode of the slot you hear.
+</div>
+
+<div class="bar">
+  <button id="power" class="big">▶ Start audio</button>
+  <button id="slotA" class="slot big on">A</button>
+  <button id="slotB" class="slot big">B</button>
+  <button id="copyAB" title="copy the slot you hear into the other one">copy → other</button>
+  <label>preset <select id="preset"></select></label>
+  <span class="dim">|</span>
+  <label>source <select id="src">
+    <option value="pluck" selected>pluck phrase</option><option value="drums">drums</option>
+    <option value="chord">chord stab</option><option value="noise">noise burst</option>
+    <option value="clicks">clicks</option><option value="file">your file…</option></select></label>
+  <input type="file" id="file" accept="audio/*" style="display:none">
+  <label>bpm <input type="number" id="bpm" value="120" min="40" max="240" style="width:64px"></label>
+  <label>volume <input type="range" id="vol" min="0" max="1" step="0.01" value="0.6" style="width:90px"></label>
+  <span id="status" class="dim"></span>
+</div>
+
+<div class="grid">
+  <div class="panel">
+    <h2>Echo</h2>
+    <div class="row"><label>sync</label><select id="p-sync"><option value="1">sync</option><option value="0">free</option></select><span></span></div>
+    <div class="row" data-show="sync"><label>division</label><select id="p-div"></select><span></span></div>
+    <div class="row" data-show="free"><label>time</label><input type="range" id="p-ms" min="20" max="2000" step="1"><output id="o-ms"></output></div>
+    <div class="row"><label>right offset</label><input type="range" id="p-offR" min="-50" max="50" step="0.5"><output id="o-offR"></output></div>
+    <div class="row"><label>feedback</label><input type="range" id="p-fb" min="0" max="120" step="0.5"><output id="o-fb"></output></div>
+    <div class="row"><label>routing</label><select id="p-route"><option>stereo</option><option>pingpong</option><option>midside</option></select><span></span></div>
+    <div class="row"><label>loop filter</label><select id="p-loopOn"><option value="1">on</option><option value="0">off</option></select><span></span></div>
+    <div class="row"><label>loop low cut</label><input type="range" id="p-loopHp" min="20" max="2000" step="1" data-log="1"><output id="o-loopHp"></output></div>
+    <div class="row"><label>loop high cut</label><input type="range" id="p-loopLp" min="500" max="20000" step="1" data-log="1"><output id="o-loopLp"></output></div>
+    <div class="row"><label>mix</label><input type="range" id="p-mix" min="0" max="100" step="0.5"><output id="o-mix"></output></div>
+  </div>
+  <div class="panel">
+    <h2>Swarm</h2>
+    <div class="row"><label>mode</label><select id="p-mode"><option>off</option><option>scatter</option><option>smear</option><option>wander</option><option>legacy</option></select><span></span></div>
+    <div class="row" data-need="swarm"><label>count</label><input type="range" id="p-count" min="4" max="12" step="1"><output id="o-count"></output></div>
+    <div class="row" data-need="swarm"><label>distribution</label><select id="p-dist"><option>even</option><option>gaussian</option><option>cauchy</option></select><span></span></div>
+    <div class="row" data-need="swarm"><label>spread</label><input type="range" id="p-spread" min="0" max="2" step="0.01"><output id="o-spread"></output></div>
+    <div class="row" data-need="swarm"><label>placement</label><select id="p-place"><option value="before">before the repeat</option><option value="around">around the repeat</option></select><span></span></div>
+    <div class="row" data-need="swarm"><label>seed</label><input type="number" id="p-seed" min="0" max="65535"><button id="dice" title="next seed from a seeded stream">⚄</button></div>
+    <div class="row" data-need="cloud"><label>cloud</label><input type="range" id="p-cloud" min="0" max="100" step="0.5"><output id="o-cloud"></output></div>
+    <div class="row" data-need="smear"><label>smear</label><input type="range" id="p-smear" min="0" max="100" step="0.5"><output id="o-smear"></output></div>
+    <div class="row" data-need="drift"><label>drift</label><input type="range" id="p-drift" min="0" max="100" step="1"><output id="o-drift"></output></div>
+    <div class="row" data-need="drift"><label>drift rate</label><input type="range" id="p-driftRate" min="0" max="1" step="0.01"><output id="o-driftRate"></output></div>
+    <div class="row" data-need="swarm"><label>stereo</label><select id="p-stereo"><option value="independent">independent L/R clouds</option><option value="shared">shared cloud</option></select><span></span></div>
+    <div class="why" id="why"></div>
+  </div>
+</div>
+
+<div class="panel" style="margin-bottom:12px">
+  <h2>Impulse response of the slot you hear <span class="dim" style="text-transform:none">(wet only, a mono impulse; L up, R down; −72 … 0 dB; amber ticks: the main repeats k·T)</span></h2>
+  <canvas id="ir" width="1100" height="230"></canvas>
+</div>
+
+<div class="grid">
+  <div class="panel">
+    <h2>Measured on this slot</h2>
+    <table id="meas"></table>
+  </div>
+  <div class="panel">
+    <h2>Self-checks <button id="runChecks" style="float:right">run</button></h2>
+    <div id="checks" class="dim">Not run. <code>?check=1</code> runs them on load. Each check reads a planted fault first and must go red on it.</div>
+  </div>
+</div>
+
+<script id="dsp">
+/* ================= DSP =================
+ * The prototype engine and its test sources. Deterministic: seeded mulberry32 streams only, no clock, no
+ * Math.random. Loaded verbatim into the AudioWorklet, and rebuilt with a poisoned Math by the self-checks.
+ */
+"use strict";
+const SW = { MAXN: 12, LINE_S: 12.05, MIN_D: 3, MARGIN: 8, FADE_S: 0.03, HOP_S: 0.04, RAMP_S: 0.007 };
+const SW_MODES = ["off", "scatter", "smear", "wander", "legacy"];
+const SW_DIVS = { "1/2": 2, "1/4D": 1.5, "1/4": 1, "1/4T": 2 / 3, "1/8D": 0.75, "1/8": 0.5, "1/8T": 1 / 3, "1/16": 0.25 };
+const SW_DEFAULTS = Object.freeze({
+  sync: 1, ms: 375, div: "1/4", bpm: 120, offR: 0, fb: 50, route: "stereo", loopOn: 1, loopHp: 60, loopLp: 9000, mix: 40,
+  mode: "off", count: 8, dist: "gaussian", spread: 0.6, place: "around", seed: 1234, cloud: 50, smear: 40,
+  drift: 25, driftRate: 0.3, stereo: "independent",
+});
+// Keys whose change rebuilds the tap set: positions jump, so the old and new sets crossfade (equal-gain, 30 ms).
+const SW_STRUCT = ["count", "dist", "seed", "place", "stereo"];
+
+function mulberry32(seed) {
+  let a = seed | 0;
+  return function () {
+    a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+// One stream per (seed, line, tap, purpose): a murmur3 finaliser over the packed ids, so neighbouring seeds and
+// taps get unrelated streams rather than shifted copies of one.
+function swStreamSeed(seed, line, tap, purpose) {
+  let h = (seed * 0x9E3779B1) ^ Math.imul(line + 1, 0x85EBCA6B) ^ Math.imul(tap + 1, 0xC2B2AE35) ^ Math.imul(purpose + 1, 0x27D4EB2F);
+  h ^= h >>> 16; h = Math.imul(h, 0x85EBCA6B); h ^= h >>> 13; h = Math.imul(h, 0xC2B2AE35); h ^= h >>> 16;
+  return h | 0;
+}
+// The legacy lab's three distributions (swarm-time-lab.html rebuild()), each clipped to [-1, 1] and sorted.
+function swDraw(dist, n, rng) {
+  const x = new Float64Array(SW.MAXN);
+  for (let i = 0; i < n; i++) {
+    let v;
+    if (dist === "even") v = n === 1 ? 0 : 2 * i / (n - 1) - 1;
+    else if (dist === "gaussian") { const u1 = Math.max(rng(), 1e-9), u2 = rng(); v = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2) / 2.5; }
+    else v = Math.tan(Math.PI * (rng() - 0.5)) / 4;
+    x[i] = Math.max(-1, Math.min(1, v));
+  }
+  const s = Array.from(x.subarray(0, n)).sort((a, b) => a - b);
+  for (let i = 0; i < n; i++) x[i] = s[i];
+  return x;
+}
+// A tap's time as a ratio of its line's time. "around": T x 2^(x * spread), spread in octaves either side.
+// "before": T x 2^((x - 1)/2 * spread), so every tap sits at or before the main head (r <= 1): the reason is the
+// speed bound (design note, section 4.4): a tap at r x T moves r times as fast as the main head in a glide.
+function swRatio(x, spread, place) { return place === "before" ? Math.pow(2, (x - 1) / 2 * spread) : Math.pow(2, x * spread); }
+
+// The 4-point read (Echo's D-004 kernel: Catmull-Rom). The line is read BEFORE this sample's write, so the sample
+// written d samples ago sits at w - d. Integer index arithmetic, as engine.h does (its critic H1).
+function swRead(b, N, w, D) {
+  const di = Math.floor(D), f = D - di;
+  let i = w - di, t = 0;
+  if (f > 0) { i--; t = 1 - f; }
+  if (i < 0) i += N;
+  const x0 = b[i === 0 ? N - 1 : i - 1], x1 = b[i], x2 = b[i + 1 >= N ? i + 1 - N : i + 1], x3 = b[i + 2 >= N ? i + 2 - N : i + 2];
+  const c1 = 0.5 * (x2 - x0), c2 = x0 - 2.5 * x1 + 2 * x2 - 0.5 * x3, c3 = 0.5 * (x3 - x0) + 1.5 * (x1 - x2);
+  return ((c3 * t + c2) * t + c1) * t + x1;
+}
+// Echo's ceiling (SPEC 5.1): identity to 0.9, then a tanh knee to the 1.0 asymptote, on the returning term only.
+// A line's main time in samples (SPEC 3.1, 3.2, 3.4, simplified: no tempo ramp, no synced halving).
+function swTimeSamples(p, k, sr) {
+  const base = p.sync ? (60 / (p.bpm > 1 ? p.bpm : 120)) * (SW_DIVS[p.div] || 1) : p.ms / 1000;
+  const t = base * (1 + (k === 1 ? p.offR : 0) / 100);
+  return Math.min(12 * sr, Math.max(0.001 * sr, t * sr));
+}
+// The mode weights: wet (main, cloud, wander head), then feedback (main, cloud average, wander head). Every feedback
+// triple is non-negative and sums to 1, and the engine ramps toward it with a one-pole, so every intermediate vector
+// is convex too: the loop's peak gain is at most g through any mode change, by construction (the argument of
+// Echo's routing blend, SPEC 4).
+function swWeights(p) {
+  const c = p.cloud / 100, s = p.smear / 100;
+  switch (p.mode) {
+    case "scatter": return [1 - c, c, 0, 1, 0, 0];
+    case "smear":   return [1 - c, c, 0, 1 - s, s, 0];
+    case "wander":  return [0, c, 1 - c, 0, 0, 1];
+    case "legacy":  return [0, 1, 0, 0, 1, 0];
+    default:        return [1, 0, 0, 1, 0, 0];
+  }
+}
+function swCeil(x) { const a = Math.abs(x); return a <= 0.9 ? x : Math.sign(x) * (0.9 + 0.1 * Math.tanh((a - 0.9) / 0.1)); }
+
+class SwarmSet {
+  // One line's tap set: n seeded positions, each with its own drift stream (a Catmull-Rom curve through seeded
+  // points in [-1, 1], one point per period, clamped: Echo's drift shape, SPEC 7).
+  constructor(p, line, sr) {
+    const ln = p.stereo === "shared" ? 0 : line;
+    this.n = p.count | 0;
+    this.place = p.place;
+    this.x = swDraw(p.dist, this.n, mulberry32(swStreamSeed(p.seed, ln, 0, 1)));
+    this.r = new Float64Array(SW.MAXN);
+    for (let i = 0; i < this.n; i++) this.r[i] = swRatio(this.x[i], p.spread, this.place);
+    this.lim = new Float64Array(SW.MAXN);   // each tap's drift depth limit, cents (set at control rate)
+    this.d = new Float64Array(SW.MAXN);
+    this.o = new Float64Array(SW.MAXN);     // each tap's drift offset in samples, slew-limited (SPEC 7's rule)
+    this.pts = new Float64Array(4 * SW.MAXN);
+    this.ph = new Float64Array(SW.MAXN);
+    this.rng = [];
+    for (let i = 0; i < SW.MAXN; i++) {
+      const g = mulberry32(swStreamSeed(p.seed, ln, i, 2));
+      this.rng.push(g);
+      for (let k = 0; k < 4; k++) this.pts[4 * i + k] = 2 * g() - 1;
+      this.ph[i] = (i + 0.5) / SW.MAXN; // spread the curves' phases so the taps do not breathe together
+    }
+    this.fresh = true;            // delays land on their targets at the first sample (they fade in from weight 0)
+  }
+}
+
+class SwarmProto {
+  constructor(sr) {
+    this.sr = sr;
+    this.N = Math.ceil(SW.LINE_S * sr) + SW.MARGIN;
+    this.buf = [new Float32Array(this.N), new Float32Array(this.N)];
+    this.w = 0;
+    this.p = Object.assign({}, SW_DEFAULTS);
+    this.lnD = [0, 0];
+    this.D = [0, 0];
+    this.cur = [null, null]; this.prev = [null, null];
+    this.fi = 0; this.fn = Math.max(1, Math.round(SW.FADE_S * sr)); this.pending = false;
+    this.wt = new Float64Array(6); this.wtT = new Float64Array(6);   // wet: main, cloud, wander; fb: main, cloud, wander
+    this.g = 0; this.gT = 0; this.mx = 0; this.mxT = 0;
+    this.spreadS = SW_DEFAULTS.spread;
+    this.lfOn = 1; this.lfB = 1;                                       // loop-filter switch blend (true bypass at 0)
+    this.lf = new Float64Array(8);                                     // per line: wet hp-lp, wet lp; fb hp-lp, fb lp
+    this.dc = new Float64Array(4);                                     // per line: x1, y1
+    this.route = "stereo"; this.routePrev = "stereo"; this.rB = 1;
+    this.hop = [this.newHop(), this.newHop()];
+    this.hopRng = [null, null];
+    this.ctl = 0;
+    this.routeId = { stereo: 0, pingpong: 1, midside: 2 };
+    this.stats = { capHits: 0, hops: 0, lineMax: 0, reads: 0, samples: 0 };
+    this.plant = { noCeiling: false, bias: 0 };                        // self-check faults, inert by default
+    this.set(SW_DEFAULTS, true);
+    this.snap();
+  }
+  newHop() { return { rA: 1, rB: 1, dA: 0, dB: 0, fi: 0, fn: 0, dwell: 0 }; }
+
+  // Merge parameter values. A tap-set key rebuilds the set and crossfades; everything else ramps.
+  set(q, init) {
+    let struct = !!init;
+    for (const k of Object.keys(q)) {
+      if (!(k in SW_DEFAULTS)) continue;
+      if (this.p[k] === q[k]) continue;
+      this.p[k] = q[k];
+      if (SW_STRUCT.includes(k)) struct = true;
+      if (k === "seed" || k === "stereo") this.hopRng = [null, null];
+    }
+    const p = this.p;
+    if (struct) this.restructure();
+    if (!this.hopRng[0]) for (let k = 0; k < 2; k++) this.hopRng[k] = mulberry32(swStreamSeed(p.seed, p.stereo === "shared" ? 0 : k, 0, 3));
+    if (p.route !== this.route) { this.routePrev = this.route; this.route = p.route; this.rB = 0; }
+    if ((p.loopOn ? 1 : 0) !== this.lfOn) this.lfOn = p.loopOn ? 1 : 0;
+    this.gT = p.fb / 100; this.mxT = p.mix / 100;
+    this.wtT.set(swWeights(p));
+  }
+  restructure() {
+    if (this.cur[0] && this.fi < this.fn) { this.pending = true; return; } // a queue, latest wins (Echo's rule, SPEC 3.5)
+    for (let k = 0; k < 2; k++) { this.prev[k] = this.cur[k]; this.cur[k] = new SwarmSet(this.p, k, this.sr); this.control(k); }
+    this.fi = this.prev[0] ? 0 : this.fn;
+  }
+  timeSamples(k) { return swTimeSamples(this.p, k, this.sr); }
+  // Land every ramp and head on its target (what a load or a fresh offline render wants).
+  snap() {
+    this.wt.set(this.wtT); this.g = this.gT; this.mx = this.mxT; this.spreadS = this.p.spread; this.lfB = this.lfOn; this.rB = 1;
+    if (this.pending) { this.pending = false; for (let k = 0; k < 2; k++) this.cur[k] = new SwarmSet(this.p, k, this.sr); }
+    this.prev[0] = this.prev[1] = null; this.fi = this.fn;
+    for (let k = 0; k < 2; k++) {
+      this.D[k] = this.timeSamples(k); this.lnD[k] = Math.log(this.D[k]);
+      this.cur[k].fresh = true; this.control(k);
+      const h = this.hop[k]; h.rA = h.rB = 1; h.dA = h.dB = this.D[k]; h.fi = h.fn = 0; h.dwell = Math.round(this.D[k]);
+    }
+  }
+  reset() {
+    this.buf[0].fill(0); this.buf[1].fill(0); this.lf.fill(0); this.dc.fill(0);
+    this.stats = { capHits: 0, hops: 0, lineMax: 0, reads: 0, samples: 0 };
+    this.snap();
+  }
+  // Control rate (every 32 samples): tap ratios from the smoothed spread, and each tap's drift depth limit, so the
+  // curve's own slope moves a tap's read speed by at most +-0.25 (Echo's SPEC 7 rule, applied per tap).
+  control(k) {
+    for (let j = 0; j < 2; j++) {
+      const S = j ? this.prev[k] : this.cur[k];
+      if (!S) continue;
+      const f = 0.1 * Math.pow(2, this.p.driftRate * 5);
+      for (let i = 0; i < S.n; i++) {
+        S.r[i] = swRatio(S.x[i], this.spreadS, S.place);
+        const d = Math.max(1, S.d[i] || this.D[k] * S.r[i]);
+        S.lim[i] = Math.min(this.p.drift, 0.25 * this.sr * 1200 / (d * Math.LN2 * 3.5 * f));
+      }
+    }
+  }
+  // One tap set's cloud on line k: returns the plain sum of its reads; moves each tap toward its target under the cap.
+  cloud(k, S, b, f) {
+    const sr = this.sr, hi = this.N - SW.MARGIN - 4;
+    let sum = 0;
+    for (let i = 0; i < S.n; i++) {
+      // drift: advance this tap's curve
+      let ph = S.ph[i] + f / sr;
+      const o = 4 * i;
+      if (ph >= 1) { ph -= 1; S.pts[o] = S.pts[o + 1]; S.pts[o + 1] = S.pts[o + 2]; S.pts[o + 2] = S.pts[o + 3]; S.pts[o + 3] = 2 * S.rng[i]() - 1; }
+      S.ph[i] = ph;
+      const p0 = S.pts[o], p1 = S.pts[o + 1], p2 = S.pts[o + 2], p3 = S.pts[o + 3];
+      let v = 0.5 * ((2 * p1) + (-p0 + p2) * ph + (2 * p0 - 5 * p1 + 4 * p2 - p3) * ph * ph + (-p0 + 3 * p1 - 3 * p2 + p3) * ph * ph * ph);
+      v = v > 1 ? 1 : v < -1 ? -1 : v;
+      // "before" drifts downward only (v mapped to [-1, 0]), so drift never carries a tap past the main time either.
+      const cents = (S.place === "before" ? (v - 1) / 2 : v) * S.lim[i];
+      const base = this.D[k] * S.r[i], oT = base * (Math.pow(2, cents / 1200) - 1);
+      // The offset moves at most 0.25 sample a sample (SPEC 7): a depth limit that steps at control rate, or a curve
+      // steeper than its limit, can then never move a tap faster than +-25 % on its own.
+      if (S.fresh) S.o[i] = oT; else { const ds = oT - S.o[i]; S.o[i] += ds > 0.25 ? 0.25 : ds < -0.25 ? -0.25 : ds; }
+      let tgt = base + S.o[i];
+      tgt = tgt < SW.MIN_D ? SW.MIN_D : tgt > hi ? hi : tgt;
+      if (S.fresh) S.d[i] = tgt;
+      else {
+        // The per-tap cap: a step in [-1.25, +0.75] samples per sample is read speed s = 1 - step in [0.25, 2.25],
+        // Echo's by-construction range (SPEC 3.6). A tap at r <= 1 steps by r x (the main head's step, in [-1, 0.5])
+        // plus the offset's (in [-0.25, 0.25]), so "before" lands inside it by construction; an engagement beyond
+        // rounding is counted.
+        let st = tgt - S.d[i];
+        if (st > 0.75) { if (st > 0.75 + 1e-9) this.stats.capHits++; st = 0.75; } else if (st < -1.25) { if (st < -1.25 - 1e-9) this.stats.capHits++; st = -1.25; }
+        S.d[i] += st;
+      }
+      sum += swRead(b, this.N, this.w, S.d[i]);
+    }
+    S.fresh = false;
+    this.stats.reads += S.n;
+    return sum;
+  }
+  // Shape (c): the wandering head. One pass at its current tap, then a raised-cosine equal-gain hop to another of the
+  // swarm's ratios (or the main head, ratio 1), chosen by the line's seeded stream.
+  wander(k, b) {
+    const h = this.hop[k], S = this.cur[k];
+    h.dA = this.follow(k, h.dA, h.rA);
+    if (h.fi < h.fn) {
+      h.dB = this.follow(k, h.dB, h.rB);
+      const x = (h.fi + 1) / h.fn, wB = 0.5 - 0.5 * Math.cos(Math.PI * x);
+      const y = (1 - wB) * swRead(b, this.N, this.w, h.dA) + wB * swRead(b, this.N, this.w, h.dB);
+      this.stats.reads += 2;
+      if (++h.fi >= h.fn) { h.rA = h.rB; h.dA = h.dB; h.dwell = Math.max(Math.round(0.05 * this.sr), Math.round(h.dA)); }
+      return y;
+    }
+    if (--h.dwell <= 0) {
+      const opts = S.n + 1, cur = h.rA;
+      let r = cur;
+      for (let tries = 0; tries < 8 && Math.abs(r - cur) < 1e-9; tries++) {
+        const j = Math.floor(this.hopRng[k]() * opts);
+        r = j === S.n ? 1 : S.r[j];
+      }
+      h.rB = r; h.dB = this.follow(k, this.D[k] * r, r); h.fi = 0; h.fn = Math.max(1, Math.round(SW.HOP_S * this.sr));
+      this.stats.hops++;
+    }
+    this.stats.reads += 1;
+    return swRead(b, this.N, this.w, h.dA);
+  }
+
+  // A wander head follows its ratio of the main time under the same per-tap cap as the cloud (counted).
+  follow(k, d, r) {
+    const hi = this.N - SW.MARGIN - 4;
+    let t = this.D[k] * r; t = t < SW.MIN_D ? SW.MIN_D : t > hi ? hi : t;
+    let st = t - d;
+    if (st > 0.75) { if (st > 0.75 + 1e-9) this.stats.capHits++; st = 0.75; } else if (st < -1.25) { if (st < -1.25 - 1e-9) this.stats.capHits++; st = -1.25; }
+    return d + st;
+  }
+
+  process(inL, inR, outL, outR, n) {
+    const sr = this.sr, p = this.p, N = this.N;
+    const aR = 1 - Math.exp(-1 / (SW.RAMP_S * sr));       // weights, gain, mix, switches: ~20 ms to 95 %
+    const aD = 1 - Math.exp(-1 / (0.3 * sr));             // the main head's glide (exponential law, 0.3 s)
+    const aS = 1 - Math.exp(-1 / (0.05 * sr));            // spread
+    const R = Math.exp(-2 * Math.PI * 5 / sr), dcK = (1 + R) / 2;
+    const aHp = 1 - Math.exp(-2 * Math.PI * Math.min(p.loopHp, 0.45 * sr) / sr), aLp = 1 - Math.exp(-2 * Math.PI * Math.min(p.loopLp, 0.45 * sr) / sr);
+    const f = 0.1 * Math.pow(2, p.driftRate * 5);
+    const wet = this.wet || (this.wet = new Float64Array(2)), fbv = this.fbv || (this.fbv = new Float64Array(2)), x = this.xe || (this.xe = new Float64Array(2));
+    const r1 = this.routeId[this.route], r0 = this.routeId[this.routePrev];
+    for (let s = 0; s < n; s++) {
+      if ((this.ctl++ & 31) === 0) { this.control(0); this.control(1); }
+      for (let i = 0; i < 6; i++) this.wt[i] += aR * (this.wtT[i] - this.wt[i]);
+      this.g += aR * (this.gT - this.g); this.mx += aR * (this.mxT - this.mx);
+      this.spreadS += aS * (p.spread - this.spreadS);
+      this.lfB += aR * (this.lfOn - this.lfB); if (!this.lfOn && this.lfB < 1e-6) { this.lfB = 0; this.lf.fill(0); }
+      if (this.rB < 1) this.rB = Math.min(1, this.rB + 1 / (0.02 * sr));
+      const W = this.wt, cloudOn = W[1] > 1e-9 || W[4] > 1e-9 || this.wtT[1] > 0 || this.wtT[4] > 0;
+      const wanderOn = W[2] > 1e-9 || W[5] > 1e-9 || this.wtT[2] > 0 || this.wtT[5] > 0;
+      const xf = this.fi < this.fn ? 0.5 - 0.5 * Math.cos(Math.PI * (this.fi + 1) / this.fn) : 1;
+      // encode (SPEC 4: stereo L, R; ping-pong (L+R)/2 into line 0; mid/side M, S), blended through a routing switch
+      const L = inL[s], Rr = inR[s], rb = this.rB;
+      const a0 = r1 === 0 ? L : (L + Rr) / 2, a1 = r1 === 0 ? Rr : r1 === 1 ? 0 : (L - Rr) / 2;
+      const b0 = r0 === 0 ? L : (L + Rr) / 2, b1 = r0 === 0 ? Rr : r0 === 1 ? 0 : (L - Rr) / 2;
+      x[0] = rb * a0 + (1 - rb) * b0; x[1] = rb * a1 + (1 - rb) * b1;
+      for (let k = 0; k < 2; k++) {
+        const b = this.buf[k];
+        // the main head: exponential glide on ln D, under the 12-semitone cap (dD/dt in [-1, +0.5])
+        const T = this.timeSamples(k);
+        this.lnD[k] += aD * (Math.log(T) - this.lnD[k]);
+        let st = Math.exp(this.lnD[k]) - this.D[k];
+        st = st > 0.5 ? 0.5 : st < -1 ? -1 : st;
+        this.D[k] = Math.min(N - SW.MARGIN - 4, Math.max(SW.MIN_D, this.D[k] + st));
+        const main = swRead(b, N, this.w, this.D[k]);
+        this.stats.reads++;
+        let cW = 0, cF = 0;
+        if (cloudOn) {
+          const S = this.cur[k], sc = this.cloud(k, S, b, f);
+          cW = sc / Math.sqrt(S.n); cF = sc / S.n;
+          if (xf < 1 && this.prev[k]) {
+            const P = this.prev[k], sp = this.cloud(k, P, b, f);
+            cW = xf * cW + (1 - xf) * sp / Math.sqrt(P.n); cF = xf * cF + (1 - xf) * sp / P.n;
+          }
+        } else { this.cur[k].fresh = true; }
+        const hv = wanderOn ? this.wander(k, b) : main;
+        if (!wanderOn) { const h = this.hop[k]; h.rA = 1; h.dA = this.D[k]; h.fi = h.fn = 0; h.dwell = Math.round(this.D[k]); }
+        let yw = W[0] * main + W[1] * cW + W[2] * hv;
+        let yf = W[3] * main + W[4] * cF + W[5] * hv;
+        // the loop filter: one-pole low cut and high cut on the wet and on the feedback, true bypass when off
+        if (this.lfB > 0) {
+          const o = 4 * k, lf = this.lf;
+          lf[o] += aHp * (yw - lf[o]); let fw = yw - lf[o]; lf[o + 1] += aLp * (fw - lf[o + 1]); fw = lf[o + 1];
+          lf[o + 2] += aHp * (yf - lf[o + 2]); let ff = yf - lf[o + 2]; lf[o + 3] += aLp * (ff - lf[o + 3]); ff = lf[o + 3];
+          yw = this.lfB * fw + (1 - this.lfB) * yw; yf = this.lfB * ff + (1 - this.lfB) * yf;
+        }
+        wet[k] = yw; fbv[k] = yf;
+      }
+      if (this.fi < this.fn && ++this.fi >= this.fn) { this.prev[0] = this.prev[1] = null; if (this.pending) { this.pending = false; this.restructure(); } }
+      // feedback routing, the ceiling on the returning term, the gain-normalised DC blocker, the write
+      for (let k = 0; k < 2; k++) {
+        const own = fbv[k], other = fbv[1 - k];
+        const v = this.g * (rb * (r1 === 1 ? other : own) + (1 - rb) * (r0 === 1 ? other : own));
+        const c = this.plant.noCeiling ? v : swCeil(v);
+        const y = dcK * (c - this.dc[2 * k]) + R * this.dc[2 * k + 1];
+        this.dc[2 * k] = c; this.dc[2 * k + 1] = y;
+        const wv = x[k] + y + this.plant.bias;
+        this.buf[k][this.w] = wv;
+        const a = Math.abs(wv); if (a > this.stats.lineMax) this.stats.lineMax = a;
+      }
+      this.w = this.w + 1 >= N ? 0 : this.w + 1;
+      // decode (SPEC 4) and the equal-power mix
+      const ms1 = r1 === 2 ? 1 : 0, ms0 = r0 === 2 ? 1 : 0, ms = rb * ms1 + (1 - rb) * ms0;
+      const wL = wet[0] + ms * wet[1], wR = (1 - ms) * wet[1] + ms * (wet[0] - wet[1]);
+      const cd = Math.cos(Math.PI / 2 * this.mx), cw = Math.sin(Math.PI / 2 * this.mx);
+      outL[s] = cd * L + cw * wL; outR[s] = cd * Rr + cw * wR;
+      this.stats.samples++;
+    }
+  }
+}
+
+/* ---------- test sources: seeded, looping two bars (the second bar is silent, so the repeats are heard) ---------- */
+const SW_CHORD = [220, 261.63, 329.63];
+const SW_PENTA = [220, 261.63, 293.66, 329.63, 392, 440, 523.25, 587.33, 659.26, 783.99];
+class SwarmSource {
+  constructor(sr) {
+    this.sr = sr; this.kind = "pluck"; this.bpm = 120; this.level = 0.5; this.seed = 7;
+    this.ph = 0; this.step = -1; this.voices = []; this.fileL = null; this.fileR = null; this.fpos = 0;
+    this.noise = mulberry32(0x5EED);
+    this.build();
+  }
+  set(q) {
+    const rebuild = q.seed !== undefined && q.seed !== this.seed;
+    Object.assign(this, q);
+    if (rebuild) this.build();
+  }
+  setFile(L, R) { this.fileL = L; this.fileR = R; this.fpos = 0; }
+  build() {
+    const g = mulberry32(swStreamSeed(this.seed, 0, 0, 9));
+    this.notes = [];
+    for (let st = 0; st < 16; st++) if (st === 0 || g() < 0.4) this.notes.push([st, SW_PENTA[Math.floor(g() * SW_PENTA.length)]]);
+    this.noise = mulberry32(swStreamSeed(this.seed, 0, 0, 10));
+  }
+  trigger(step) {
+    const v = (type, f, amp) => { if (this.voices.length < 24) this.voices.push({ type, f, amp, t: 0, ph: [0, 0, 0], lp: 0 }); };
+    if (this.kind === "pluck") { for (const [st, f] of this.notes) if (st === step) v("pluck", f, 0.35); }
+    else if (this.kind === "drums") {
+      if (step < 16) {
+        if (step === 0 || step === 8 || step === 10) v("kick", 0, 0.8);
+        if (step === 4 || step === 12) v("snare", 0, 0.45);
+        if (step % 4 === 2) v("hat", 0, 0.25);
+      }
+    } else if (this.kind === "chord") { if (step === 0) v("chord", 0, 0.22); }
+    else if (this.kind === "clicks") { if (step === 0) v("click", 0, 0.6); }
+    else if (this.kind === "noise") { if (step === 0) v("noise", 0, 0.3); }
+  }
+  fill(L, R, n) {
+    const sr = this.sr, perStep = (60 / (this.bpm > 1 ? this.bpm : 120)) / 4 * sr;
+    for (let s = 0; s < n; s++) {
+      if (this.kind === "file") {
+        if (this.fileL && this.fileL.length) {
+          L[s] = this.level * this.fileL[this.fpos]; R[s] = this.level * (this.fileR || this.fileL)[this.fpos];
+          if (++this.fpos >= this.fileL.length) this.fpos = 0;
+        } else { L[s] = R[s] = 0; }
+        continue;
+      }
+      this.ph += 1 / perStep;
+      if (this.step < 0 || this.ph >= 1) { if (this.step >= 0) this.ph -= 1; this.step = (this.step + 1) % 32; this.trigger(this.step); }
+      let y = 0;
+      for (let i = this.voices.length - 1; i >= 0; i--) {
+        const vo = this.voices[i], t = vo.t / sr;
+        let o = 0, done = false;
+        if (vo.type === "pluck") {
+          for (let h = 1; h <= 4; h++) o += Math.sin(2 * Math.PI * vo.f * h * t) * Math.exp(-t * (4 + 3 * h)) / h;
+          o *= Math.min(1, vo.t / (0.002 * sr)); done = t > 1.2;
+        } else if (vo.type === "kick") {
+          vo.ph[0] += (45 + 75 * Math.exp(-t * 30)) / sr; o = Math.sin(2 * Math.PI * vo.ph[0]) * Math.exp(-t * 9); done = t > 0.6;
+        } else if (vo.type === "snare") {
+          o = (0.7 * (2 * this.noise() - 1) + 0.5 * Math.sin(2 * Math.PI * 180 * t)) * Math.exp(-t * 22); done = t > 0.3;
+        } else if (vo.type === "hat") {
+          const nz = 2 * this.noise() - 1; o = (nz - vo.lp) * Math.exp(-t * 90); vo.lp = nz; done = t > 0.08;
+        } else if (vo.type === "chord") {
+          for (let j = 0; j < 3; j++) { vo.ph[j] += SW_CHORD[j] / sr; vo.ph[j] -= Math.floor(vo.ph[j]); o += 2 * vo.ph[j] - 1; }
+          vo.lp += 0.15 * (o - vo.lp); o = vo.lp * Math.min(1, t / 0.005) * Math.exp(-t * 4); done = t > 1.5;
+        } else if (vo.type === "click") { o = vo.t === 0 ? 1 : 0; done = vo.t > 0; }
+        else if (vo.type === "noise") { o = (2 * this.noise() - 1) * (t < 0.04 ? 1 : 0); done = t >= 0.04; }
+        y += vo.amp * o; vo.t++;
+        if (done) this.voices.splice(i, 1);
+      }
+      L[s] = R[s] = this.level * y;
+    }
+  }
+}
+
+/* ---------- offline analysis (the measurements panel and the self-checks; deterministic) ---------- */
+function swRender(p, sr, seconds, input) {
+  const e = new SwarmProto(sr); e.set(p); e.snap();
+  const n = Math.round(seconds * sr), L = new Float64Array(n), R = new Float64Array(n);
+  const B = 256, iL = new Float64Array(B), iR = new Float64Array(B), oL = new Float64Array(B), oR = new Float64Array(B);
+  for (let s0 = 0; s0 < n; s0 += B) {
+    const m = Math.min(B, n - s0);
+    for (let i = 0; i < m; i++) { const v = input(s0 + i); iL[i] = v[0]; iR[i] = v[1]; }
+    e.process(iL, iR, oL, oR, m);
+    L.set(oL.subarray(0, m), s0); R.set(oR.subarray(0, m), s0);
+  }
+  return { L, R, e };
+}
+function swImpulseIR(p, sr, seconds) {
+  return swRender(Object.assign({}, p, { mix: 100 }), sr, seconds, (i) => i === 0 ? [0.5, 0.5] : [0, 0]);
+}
+// The feedback law at rest, filters and drift out: H(f) = fm e^{-jwD} + fc (1/n) sum e^{-jw d_i} + fw e^{-jw d_head}.
+// Returns its peak and RMS over 20 Hz - min(20 kHz, 0.45 fs) on a 1 Hz grid, for line 0.
+function swLoopLaw(p, sr, normOverride) {
+  p = Object.assign({}, SW_DEFAULTS, p);
+  const S = new SwarmSet(p, 0, sr), D = swTimeSamples(p, 0, sr), W = swWeights(p);
+  const d = []; for (let i = 0; i < S.n; i++) d.push(Math.max(SW.MIN_D, D * S.r[i]));
+  const norm = normOverride ? normOverride(S.n) : 1 / S.n;
+  let pk = 0, sq = 0, cnt = 0;
+  for (let fq = 20; fq <= Math.min(20000, 0.45 * sr); fq += 1) {
+    const w = 2 * Math.PI * fq / sr;
+    let re = (W[3] + W[5]) * Math.cos(w * D), im = -(W[3] + W[5]) * Math.sin(w * D);
+    let cr = 0, ci = 0; for (const di of d) { cr += Math.cos(w * di); ci -= Math.sin(w * di); }
+    re += W[4] * norm * cr; im += W[4] * norm * ci;
+    const m = Math.hypot(re, im); if (m > pk) pk = m; sq += m * m; cnt++;
+  }
+  return { peak: pk, rms: Math.sqrt(sq / cnt), n: S.n };
+}
+function swWindows(L, R, sr, win, fn) { const out = [], W = Math.round(win * sr); for (let a = 0; a + W <= L.length; a += W) out.push(fn(L.subarray(a, a + W), R.subarray(a, a + W))); return out; }
+function swEnergyDb(L, R, sr, win) { const e = swWindows(L, R, sr, win, (l, r) => { let s = 0; for (let i = 0; i < l.length; i++) s += l[i] * l[i] + r[i] * r[i]; return s; }); const top = Math.max(...e); return e.map(v => 10 * Math.log10(v / top + 1e-30)); }
+// Normalised echo density (Abel and Huang, 2006): in each ~21 ms frame, the fraction of samples beyond one standard
+// deviation, over the Gaussian's fraction (erfc(1/sqrt 2) = 0.3173). About 1 for a diffuse (reverberant) field; near 0
+// for sparse, discrete echoes. Per window, the frames are ENERGY-weighted (L and R pooled): an unweighted mean lets
+// the DC blocker's smooth, faint tail between repeats (half its samples sit above its own sigma) read as "diffuse".
+function swDensity(L, R, sr, win) {
+  const F = 1024;
+  return swWindows(L, R, sr, win, (l, r) => {
+    let sum = 0, wsum = 0;
+    for (let a = 0; a + F <= l.length; a += F) for (const x of [l, r]) {
+      let e = 0; for (let i = a; i < a + F; i++) e += x[i] * x[i];
+      if (e === 0) continue;
+      const sd = Math.sqrt(e / F); let c = 0; for (let i = a; i < a + F; i++) if (Math.abs(x[i]) > sd) c++;
+      sum += e * c / F / 0.3173; wsum += e;
+    }
+    return wsum ? sum / wsum : NaN;
+  });
+}
+// Arrivals: local maxima of |x| above -60 dB re the largest, L and R pooled, bucketed by window over the WHOLE
+// signal (a repeat landing exactly on a window boundary must still count: T = 0.5 s puts every one there).
+function swArrivals(L, R, sr, win) {
+  let pk = 0; for (let i = 0; i < L.length; i++) pk = Math.max(pk, Math.abs(L[i]), Math.abs(R[i]));
+  const thr = pk * 1e-3, W = Math.round(win * sr), out = new Array(Math.floor(L.length / W)).fill(0);
+  for (const x of [L, R]) for (let i = 1; i < x.length - 1 && i < out.length * W; i++) { const a = Math.abs(x[i]); if (a > thr && a >= Math.abs(x[i - 1]) && a > Math.abs(x[i + 1])) out[Math.floor(i / W)]++; }
+  return out;
+}
+// The mono fold's rho (SPEC 4.1, D-044): E_M / mean(E_L, E_R), M = (L+R)/2. A mono impulse in has rho_in = 1.
+function swRho(L, R, sr, win) { return swWindows(L, R, sr, win, (l, r) => { let m = 0, el = 0, er = 0; for (let i = 0; i < l.length; i++) { const v = (l[i] + r[i]) / 2; m += v * v; el += l[i] * l[i]; er += r[i] * r[i]; } return el + er > 0 ? m / ((el + er) / 2) : NaN; }); }
+function swHash(arrs) {
+  let h = 0x811C9DC5 | 0; const dv = new DataView(new ArrayBuffer(8));
+  for (const a of arrs) for (let i = 0; i < a.length; i++) { dv.setFloat64(0, a[i]); for (let j = 0; j < 8; j++) { h ^= dv.getUint8(j); h = Math.imul(h, 0x01000193); } }
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+</script>
+
+<script>
+"use strict";
+/* ================= UI ================= */
+const $ = (id) => document.getElementById(id);
+const DSP_TEXT = $("dsp").textContent;
+const PRESETS = {
+  "Echo (swarm off)":         { mode: "off", fb: 50 },
+  "Scatter: bloom before":    { mode: "scatter", place: "before", spread: 1.2, count: 8, dist: "gaussian", cloud: 60, drift: 25, fb: 50 },
+  "Scatter: around":          { mode: "scatter", place: "around", spread: 0.6, count: 8, dist: "gaussian", cloud: 50, drift: 30, fb: 55 },
+  "Smear: halo":              { mode: "smear", place: "around", spread: 0.5, count: 8, dist: "gaussian", cloud: 50, smear: 30, drift: 30, fb: 75 },
+  "Smear: wash":              { mode: "smear", place: "around", spread: 0.6, count: 10, dist: "gaussian", cloud: 80, smear: 85, drift: 35, fb: 95 },
+  "Wander":                   { mode: "wander", place: "before", spread: 1.0, count: 6, dist: "even", cloud: 0, drift: 0, fb: 70 },
+  "Legacy law (rejected)":    { mode: "legacy", place: "around", spread: 0.6, count: 8, dist: "gaussian", drift: 30, fb: 90 },
+};
+const WHY = {
+  off: "Echo as it is: one head per line, read and fed back. The baseline.",
+  scatter: "Shape (a). A seeded cloud of output taps around each repeat; the loop is Echo's own (one head), so repeats stay discrete and each one carries the same cloud. Cost: n extra reads per line. Loop gain exactly the feedback.",
+  smear: "Shape (b). The cloud's average shares the loop with the main head (smear). Peak loop gain ≤ feedback by construction, but each pass re-spreads the cloud: density grows every generation and the highs decay faster than the lows. This is diffusion, Scape's ground — flagged.",
+  wander: "Shape (c). One head in the loop at any time; after each pass it hops (40 ms raised-cosine, equal-gain) to another of the swarm's times. Loop gain exactly the feedback; repeats stay discrete but fall off the grid. Cloud adds scatter (a) on top.",
+  legacy: "The legacy law ADR-142 rejected, inside Echo's loop: wet = cloud/√n, feedback = cloud/n (broadband loop gain feedback/√n). Reference only.",
+};
+const LOG_KEYS = new Set(["loopHp", "loopLp"]);
+const KEYS = Object.keys(SW_DEFAULTS).filter(k => k !== "bpm");
+const slots = [Object.assign({}, SW_DEFAULTS, PRESETS["Echo (swarm off)"]), Object.assign({}, SW_DEFAULTS, PRESETS["Scatter: around"])];
+let sel = 0, ctx = null, node = null, gain = null, srcKind = "pluck";
+// The dice: a seeded stream of its own, never Math.random (the page is deterministic too).
+const diceRng = mulberry32(0xD1CE);
+
+for (const d of Object.keys(SW_DIVS)) { const o = document.createElement("option"); o.textContent = d; $("p-div").appendChild(o); }
+for (const name of Object.keys(PRESETS)) { const o = document.createElement("option"); o.textContent = name; $("preset").appendChild(o); }
+$("preset").insertAdjacentHTML("afterbegin", '<option value="" selected>— apply to this slot —</option>');
+
+const fmt = {
+  ms: v => v + " ms", offR: v => (+v).toFixed(1) + " %", fb: v => (+v).toFixed(1) + " %", mix: v => (+v).toFixed(1) + " %",
+  loopHp: v => Math.round(v) + " Hz", loopLp: v => (v >= 1000 ? (v / 1000).toFixed(1) + " kHz" : Math.round(v) + " Hz"),
+  count: v => v, spread: v => "±" + (+v).toFixed(2) + " oct", cloud: v => (+v).toFixed(1) + " %", smear: v => (+v).toFixed(1) + " %",
+  drift: v => v + " ¢", driftRate: v => (0.1 * Math.pow(2, v * 5)).toFixed(2) + " Hz",
+};
+// log sliders: the range element holds 0..1000, mapped geometrically between min and max
+function toSlider(k, v) { const el = $("p-" + k); if (!LOG_KEYS.has(k)) return v; const lo = +el.dataset.lo, hi = +el.dataset.hi; return Math.round(1000 * Math.log(v / lo) / Math.log(hi / lo)); }
+function fromSlider(k, raw) { const el = $("p-" + k); if (!LOG_KEYS.has(k)) return raw; const lo = +el.dataset.lo, hi = +el.dataset.hi; return lo * Math.pow(hi / lo, raw / 1000); }
+for (const k of LOG_KEYS) { const el = $("p-" + k); el.dataset.lo = el.min; el.dataset.hi = el.max; el.min = 0; el.max = 1000; el.step = 1; }
+
+function readCtl(k) {
+  const el = $("p-" + k); if (!el) return undefined;
+  if (el.tagName === "SELECT") { const v = el.value; return ["sync", "loopOn"].includes(k) ? +v : v; }
+  return fromSlider(k, +el.value);
+}
+function showSlot() {
+  const p = slots[sel];
+  for (const k of KEYS) { const el = $("p-" + k); if (!el) continue; el.value = el.tagName === "SELECT" ? String(p[k]) : toSlider(k, p[k]); if ($("o-" + k)) $("o-" + k).textContent = fmt[k] ? fmt[k](p[k]) : p[k]; }
+  $("slotA").classList.toggle("on", sel === 0); $("slotB").classList.toggle("on", sel === 1);
+  relevance(); scheduleAnalysis();
+}
+function relevance() {
+  const p = slots[sel], m = p.mode;
+  const need = { swarm: m !== "off", cloud: m === "scatter" || m === "smear" || m === "wander", smear: m === "smear", drift: m !== "off" && m !== "wander" || (m === "wander" && p.cloud > 0) };
+  for (const row of document.querySelectorAll("[data-need]")) row.classList.toggle("off", !need[row.dataset.need]);
+  for (const row of document.querySelectorAll("[data-show]")) row.style.display = (row.dataset.show === "sync") === !!p.sync ? "" : "none";
+  $("why").textContent = WHY[m];
+}
+function push(slot) { if (node) node.port.postMessage({ type: "params", slot, p: Object.assign({}, slots[slot], { bpm: +$("bpm").value }) }); }
+function onCtl(k) {
+  slots[sel][k] = readCtl(k);
+  if ($("o-" + k)) $("o-" + k).textContent = fmt[k] ? fmt[k](slots[sel][k]) : slots[sel][k];
+  if (k === "mode" || k === "sync" || k === "cloud") relevance();
+  push(sel); scheduleAnalysis();
+}
+for (const k of KEYS) { const el = $("p-" + k); if (el) el.addEventListener("input", () => onCtl(k)); }
+$("dice").addEventListener("click", () => { $("p-seed").value = Math.floor(diceRng() * 65536); onCtl("seed"); });
+function pick(i) { sel = i; showSlot(); if (node) node.port.postMessage({ type: "sel", slot: i }); }
+$("slotA").addEventListener("click", () => pick(0));
+$("slotB").addEventListener("click", () => pick(1));
+$("copyAB").addEventListener("click", () => { slots[1 - sel] = Object.assign({}, slots[sel]); push(1 - sel); });
+$("preset").addEventListener("change", () => { const pr = PRESETS[$("preset").value]; if (!pr) return; slots[sel] = Object.assign({}, SW_DEFAULTS, pr); $("preset").value = ""; showSlot(); push(sel); });
+$("bpm").addEventListener("change", () => { push(0); push(1); if (node) node.port.postMessage({ type: "src", s: { bpm: +$("bpm").value } }); scheduleAnalysis(); });
+$("vol").addEventListener("input", () => { if (gain) gain.gain.value = +$("vol").value; });
+$("src").addEventListener("change", () => { srcKind = $("src").value; if (srcKind === "file") $("file").click(); if (node) node.port.postMessage({ type: "src", s: { kind: srcKind } }); });
+$("file").addEventListener("change", async () => {
+  const f = $("file").files[0]; if (!f || !ctx) { $("status").textContent = f ? "start audio first, then pick the file" : ""; return; }
+  const ab = await ctx.decodeAudioData(await f.arrayBuffer());
+  const L = new Float32Array(ab.getChannelData(0)), R = new Float32Array(ab.numberOfChannels > 1 ? ab.getChannelData(1) : ab.getChannelData(0));
+  node.port.postMessage({ type: "file", L, R }, [L.buffer, R.buffer]);
+  $("status").textContent = "playing " + f.name;
+});
+document.addEventListener("keydown", (ev) => {
+  if (ev.target.tagName === "INPUT" && ev.target.type === "number") return;
+  if (ev.code === "Space") { ev.preventDefault(); pick(1 - sel); }
+  const i = "12345".indexOf(ev.key); if (i >= 0) { $("p-mode").value = SW_MODES[i]; onCtl("mode"); }
+});
+
+/* ---------- the live engine: both slots run in one AudioWorklet, fed the same source ---------- */
+const PROC = `
+class SwarmProc extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.e = [new SwarmProto(sampleRate), new SwarmProto(sampleRate)];
+    this.src = new SwarmSource(sampleRate);
+    this.sel = 0; this.x = 0; this.tick = 0;
+    const B = 128; this.b = [0, 1, 2, 3, 4, 5].map(() => new Float64Array(B));
+    this.port.onmessage = (m) => {
+      const d = m.data;
+      if (d.type === "params") this.e[d.slot].set(d.p);
+      else if (d.type === "src") this.src.set(d.s);
+      else if (d.type === "file") this.src.setFile(d.L, d.R);
+      else if (d.type === "sel") this.sel = d.slot;
+    };
+  }
+  process(inputs, outputs) {
+    const o = outputs[0], n = o[0].length, [sL, sR, aL, aR, bL, bR] = this.b;
+    this.src.fill(sL, sR, n);
+    this.e[0].process(sL, sR, aL, aR, n); this.e[1].process(sL, sR, bL, bR, n);
+    const step = 1 / (0.02 * sampleRate);
+    for (let i = 0; i < n; i++) {
+      this.x += this.sel === 1 ? Math.min(step, 1 - this.x) : -Math.min(step, this.x);
+      const w = 0.5 - 0.5 * Math.cos(Math.PI * this.x);  // the slot toggle: a 20 ms raised-cosine, equal-gain
+      o[0][i] = (1 - w) * aL[i] + w * bL[i]; o[1][i] = (1 - w) * aR[i] + w * bR[i];
+    }
+    if ((this.tick += n) >= sampleRate / 4) {
+      this.tick = 0;
+      this.port.postMessage(this.e.map(e => ({ capHits: e.stats.capHits, hops: e.stats.hops, lineMax: e.stats.lineMax, rps: e.stats.reads / Math.max(1, e.stats.samples) / 2 })));
+    }
+    return true;
+  }
+}
+registerProcessor("swarm-proc", SwarmProc);`;
+let live = null;
+async function power() {
+  if (ctx) { await ctx.close(); ctx = null; node = null; $("power").classList.remove("on"); $("power").textContent = "▶ Start audio"; return; }
+  ctx = new AudioContext();
+  if (!ctx.audioWorklet) { $("status").textContent = "AudioWorklet unavailable in this browser: the measurements still work."; return; }
+  const url = URL.createObjectURL(new Blob([DSP_TEXT + PROC], { type: "application/javascript" }));
+  await ctx.audioWorklet.addModule(url);
+  node = new AudioWorkletNode(ctx, "swarm-proc", { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] });
+  gain = ctx.createGain(); gain.gain.value = +$("vol").value;
+  node.connect(gain).connect(ctx.destination);
+  node.port.onmessage = (m) => { live = m.data; renderLive(); };
+  push(0); push(1); node.port.postMessage({ type: "sel", slot: sel }); node.port.postMessage({ type: "src", s: { kind: srcKind, bpm: +$("bpm").value } });
+  $("power").classList.add("on"); $("power").textContent = "■ Stop";
+  $("status").textContent = "running at " + ctx.sampleRate + " Hz";
+  scheduleAnalysis();
+}
+$("power").addEventListener("click", power);
+
+/* ---------- the measurements panel ---------- */
+let anaTimer = null, lastAna = null;
+function scheduleAnalysis() { clearTimeout(anaTimer); anaTimer = setTimeout(analyse, 160); }
+function analyse() {
+  const sr = ctx ? ctx.sampleRate : 48000, p = Object.assign({}, slots[sel], { bpm: +$("bpm").value });
+  const e0 = new SwarmProto(sr); e0.set(p); e0.snap();
+  const T = e0.D[0] / sr, view = Math.max(2, Math.min(8, 8 * T));
+  const { L, R, e } = swImpulseIR(p, sr, view);
+  const law = swLoopLaw(p, sr);
+  lastAna = { p, sr, T, view, L, R, law, rps: e.stats.reads / e.stats.samples / 2,
+    energy: swEnergyDb(L, R, sr, 0.5).slice(0, 8), arr: swArrivals(L, R, sr, 0.5).slice(0, 8), ned: swDensity(L, R, sr, 0.5).slice(0, 8), rho: swRho(L, R, sr, 1).slice(0, 4), hash: swHash([L, R]) };
+  drawIR(); renderMeas();
+}
+function drawIR() {
+  const a = lastAna, cv = $("ir"), g = cv.getContext("2d"), W = cv.width, H = cv.height, mid = H / 2;
+  const css = getComputedStyle(document.documentElement);
+  g.clearRect(0, 0, W, H);
+  const tok = (n) => css.getPropertyValue(n).trim();
+  g.strokeStyle = tok("--line"); g.beginPath(); g.moveTo(0, mid); g.lineTo(W, mid); g.stroke();
+  g.strokeStyle = tok("--amber"); g.globalAlpha = 0.5;
+  for (let k = 1; k * a.T < a.view; k++) { const x = k * a.T / a.view * W; g.beginPath(); g.moveTo(x, 0); g.lineTo(x, 8); g.moveTo(x, H - 8); g.lineTo(x, H); g.stroke(); }
+  g.globalAlpha = 1;
+  const per = a.L.length / W, db = (v) => Math.max(0, (20 * Math.log10(v / 0.5 + 1e-12) + 72) / 72);
+  for (const [arr, col, dir] of [[a.L, "--acc", -1], [a.R, "--vio", 1]]) {
+    g.strokeStyle = tok(col); g.beginPath();
+    for (let x = 0; x < W; x++) { let m = 0; for (let i = Math.floor(x * per); i < Math.floor((x + 1) * per); i++) m = Math.max(m, Math.abs(arr[i])); const h = db(m) * (mid - 10); if (h > 0) { g.moveTo(x + 0.5, mid); g.lineTo(x + 0.5, mid + dir * h); } }
+    g.stroke();
+  }
+  g.fillStyle = tok("--dim"); g.font = "11px ui-monospace, monospace";
+  for (let t = 0; t <= a.view; t += a.view > 4 ? 1 : 0.5) g.fillText(t + " s", t / a.view * W + 3, mid - 3);
+}
+function renderMeas() {
+  const a = lastAna; if (!a) return;
+  const f = (v, d = 1) => Number.isFinite(v) ? v.toFixed(d) : "—";
+  const L = live ? live[sel] : null, g = a.p.fb / 100;
+  const rows = [
+    ["main time T (line 0)", f(a.T * 1000, 1) + " ms"],
+    ["feedback law, band peak |H|", '<span class="' + (a.law.peak <= 1 + 1e-9 ? "ok" : "bad") + '">' + a.law.peak.toFixed(3) + "</span> (SPEC 5.2 asks ≤ 1)"],
+    ["feedback law, RMS over the band", a.law.rms.toFixed(3) + " → broadband loop gain " + (g * a.law.rms).toFixed(3) + " at feedback " + (100 * g).toFixed(0) + " %"],
+    ["wet energy per 0.5 s (dB re loudest)", a.energy.map(v => f(v)).join(" ")],
+    ["arrivals per 0.5 s (> −60 dB)", a.arr.join(" ")],
+    ["echo density per 0.5 s (NED: 0 discrete … 1 diffuse)", a.ned.map(v => f(v, 2)).join(" ")],
+    ["mono fold ρ per 1 s (mono impulse, ρ_in = 1)", a.rho.map(v => f(v, 2)).join(" ")],
+    ["reads per sample per line (this IR)", a.rps.toFixed(2) + " (Echo today: 1, 2 mid-fade)"],
+    ["live: reads/sample/line · cap hits · hops", L ? L.rps.toFixed(2) + " · " + L.capHits + " · " + L.hops : '<span class="dim">start audio</span>'],
+    ["IR hash (determinism)", "<code>" + a.hash + "</code> at " + a.sr + " Hz"],
+  ];
+  $("meas").innerHTML = rows.map(r => "<tr><th>" + r[0] + "</th><td>" + r[1] + "</td></tr>").join("");
+}
+function renderLive() { if (lastAna) renderMeas(); }
+
+/* ---------- self-checks: each one runs its planted fault first ---------- */
+function buildDsp(text, poisonRandom) {
+  const M = Object.freeze(Object.assign(Object.create(null), Object.fromEntries(Object.getOwnPropertyNames(Math).map(k => [k, Math[k]])),
+    poisonRandom ? { random() { throw new Error("Math.random called inside the DSP"); } } : {}));
+  return new Function("Math", "Date", "performance", text + "\nreturn { SwarmProto, SwarmSource, swRender, swImpulseIR, swLoopLaw, swHash, SW_DEFAULTS, SW_MODES };")(M, undefined, undefined);
+}
+function selfCheck(text) {
+  const out = [], check = (ok, msg) => out.push({ ok, msg }), plant = (fired, msg) => check(fired, "plant fires: " + msg);
+  // A substitution that matches nothing would make its plant a no-op that "passes" for the wrong reason.
+  const subst = (from, to) => { if (text.split(from).length !== 2) throw new Error("plant anchor not unique: " + from.slice(0, 50)); return text.replace(from, to); };
+  const sr = 48000, staticBad = (t) => /Math\.random|Date\.now|performance\.now|new Date/.test(t.replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, ""));
+  plant(staticBad(text + "\nconst z = Math.random();"), "a Math.random in the DSP text is seen by the static scan");
+  check(!staticBad(text), "static: the DSP text calls no Math.random and reads no clock");
+  const D = buildDsp(text, true);
+  const src = (kind, secs) => { const s = new D.SwarmSource(sr); s.set({ kind }); const n = Math.round(secs * sr), L = new Float64Array(n), R = new Float64Array(n); s.fill(L, R, n); return (i) => [L[i], R[i]]; };
+  const pl = src("pluck", 2.5), dr = src("drums", 2.5);
+  // 1. no Math.random at run time, every mode
+  try {
+    const bad = buildDsp(subst("this.stats.samples++;", "this.stats.samples++; Math.random();"), true);
+    bad.swRender(D.SW_DEFAULTS, sr, 0.05, dr); plant(false, "a Math.random in process() throws under the poisoned Math");
+  } catch (e) { plant(/Math\.random/.test(e.message), "a Math.random in process() throws under the poisoned Math"); }
+  let thrown = null;
+  try { for (const mode of D.SW_MODES) D.swRender(Object.assign({}, D.SW_DEFAULTS, { mode, fb: 90 }), sr, 1, dr); } catch (e) { thrown = e.message; }
+  check(thrown === null, "runtime: every mode renders 1 s of drums with Math poisoned" + (thrown ? " — " + thrown : ""));
+  // 2. determinism
+  const P = Object.assign({}, D.SW_DEFAULTS, { mode: "smear", drift: 40, fb: 80 });
+  const h1 = D.swHash(Object.values(D.swRender(P, sr, 2, pl)).slice(0, 2)), h2 = D.swHash(Object.values(D.swRender(P, sr, 2, pl)).slice(0, 2));
+  const h3 = D.swHash(Object.values(D.swRender(Object.assign({}, P, { seed: P.seed + 1 }), sr, 2, pl)).slice(0, 2));
+  plant(h3 !== h1, "a different seed gives a different hash (the hash is not vacuous)");
+  let det = h1 === h2;
+  for (const mode of D.SW_MODES) { const q = Object.assign({}, P, { mode }); det = det && D.swHash(Object.values(D.swRender(q, sr, 1, dr)).slice(0, 2)) === D.swHash(Object.values(D.swRender(q, sr, 1, dr)).slice(0, 2)); }
+  check(det, "determinism: two renders of every mode are bit-identical (" + h1 + ")");
+  // 3. the loop bound (SPEC 5.2): the feedback law's peak over the band, every mode, several tap sets
+  const lawSqrt = D.swLoopLaw(Object.assign({}, D.SW_DEFAULTS, { mode: "smear", smear: 100, spread: 0.6 }), sr, (n) => 1 / Math.sqrt(n));
+  plant(lawSqrt.peak > 1, "a 1/sqrt(n) feedback norm breaks the bound (peak " + lawSqrt.peak.toFixed(2) + ")");
+  let worst = 0;
+  for (const mode of D.SW_MODES) for (const count of [4, 8, 12]) for (const spread of [0.1, 0.6, 2]) for (const smear of [30, 100]) for (const place of ["before", "around"])
+    worst = Math.max(worst, D.swLoopLaw(Object.assign({}, D.SW_DEFAULTS, { mode, count, spread, smear, place, sync: 0, ms: 200 }), sr).peak);
+  check(worst <= 1 + 1e-9, "loop bound: the feedback law's peak ≤ 1 in every mode, count, spread and placement (worst " + worst.toFixed(6) + ")");
+  // 4. silence in, exact zero out
+  const zero = () => [0, 0], maxAbs = (r) => { let m = 0; for (let i = 0; i < r.L.length; i++) m = Math.max(m, Math.abs(r.L[i]), Math.abs(r.R[i])); return m; };
+  { const e = new D.SwarmProto(sr); e.plant.bias = 1e-20; e.set(Object.assign({}, D.SW_DEFAULTS, { mode: "smear", mix: 100, sync: 0, ms: 5 })); e.snap(); const o = new Float64Array(2048), z = new Float64Array(2048), o2 = new Float64Array(2048); e.process(z, z, o, o2, 2048); plant(o.some(v => v !== 0), "a 1e-20 bias in the write is not exact silence"); }
+  let silent = true; for (const mode of D.SW_MODES) silent = silent && maxAbs(D.swRender(Object.assign({}, D.SW_DEFAULTS, { mode, mix: 100, fb: 110 }), sr, 1, zero)) === 0;
+  check(silent, "silence in → exact zero out, every mode, feedback 110 %");
+  // 5. bounded past unity (SPEC 5.1: once the input stops the line holds < 2.0; while it plays, ≤ input peak + 2)
+  const loud = (i) => { const v = (Math.floor(i / 2400) % 2 ? 0.9 : -0.9) * (i < 0.15 * sr ? 1 : 0); return [v, v]; };
+  { const e = new D.SwarmProto(sr); e.plant.noCeiling = true; e.set(Object.assign({}, D.SW_DEFAULTS, { mode: "scatter", fb: 120, loopOn: 0, sync: 0, ms: 100 })); e.snap(); const n = 256, a = new Float64Array(n), b = new Float64Array(n), c = new Float64Array(n), d = new Float64Array(n); for (let s0 = 0; s0 < 2 * sr; s0 += n) { for (let i = 0; i < n; i++) { const v = loud(s0 + i); a[i] = v[0]; b[i] = v[1]; } e.process(a, b, c, d, n); } plant(e.stats.lineMax > 2.9, "no ceiling at 120 % runs past the bound (line max " + e.stats.lineMax.toExponential(1) + ")"); }
+  let bounded = true, lm = 0; for (const mode of D.SW_MODES) { const r = D.swRender(Object.assign({}, D.SW_DEFAULTS, { mode, fb: 120, loopOn: 0, sync: 0, ms: 100 }), sr, 2, loud); lm = Math.max(lm, r.e.stats.lineMax); bounded = bounded && r.e.stats.lineMax <= 0.9 + 2 && r.L.every(Number.isFinite); }
+  check(bounded, "bounded at 120 %: every mode's line stays ≤ 0.9 + 2 on a ±0.9 square (max " + lm.toFixed(3) + ")");
+  // 6. the speed bound: a shortening move at the cap, drift on. "around" with taps past T is the positive control.
+  const sweep = (place) => { const e = new D.SwarmProto(sr); e.set(Object.assign({}, D.SW_DEFAULTS, { mode: "scatter", place, dist: "even", spread: 2, drift: 100, driftRate: 1, sync: 0, ms: 1500 })); e.snap(); const n = 256, z = new Float64Array(n), o = new Float64Array(n), o2 = new Float64Array(n); for (let s0 = 0; s0 < 3 * sr; s0 += n) { if (s0 === sr) e.set({ ms: 100 }); if (s0 === 2 * sr) e.set({ ms: 1900 }); e.process(z, z, o, o2, n); } return e.stats.capHits; };
+  const around = sweep("around"), before = sweep("before");
+  plant(around > 0, "taps past the main time (around, even, spread 2: up to 4 T) engage the per-tap cap in a capped move (" + around + " hits)");
+  check(before === 0, "speed bound by construction: taps at or before T (even, spread 2: T/4 to T) never engage the cap, drift 100 c at its limit (" + before + " hits)");
+  return out;
+}
+function runChecks() {
+  $("checks").innerHTML = "running…";
+  setTimeout(() => {
+    let res; try { res = selfCheck(DSP_TEXT); } catch (e) { res = [{ ok: false, msg: "harness error: " + e.message }]; }
+    const bad = res.filter(r => !r.ok).length;
+    $("checks").innerHTML = '<div class="' + (bad ? "bad" : "ok") + '">' + (bad ? bad + " FAILED" : "all " + res.length + " passed") + "</div>" +
+      res.map(r => '<div class="' + (r.ok ? "ok" : "bad") + '">' + (r.ok ? "PASS " : "FAIL ") + r.msg + "</div>").join("");
+  }, 20);
+}
+$("runChecks").addEventListener("click", runChecks);
+
+showSlot();
+if (new URLSearchParams(location.search).get("check") === "1") runChecks();
+</script>
+</body>
+</html>
