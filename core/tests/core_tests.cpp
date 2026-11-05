@@ -61,7 +61,6 @@ constexpr double kSrLoopDb = 0.5;          // srIndependence: loop filter vs 48 
 constexpr double kTapeSamples = 0.01;      // tapeLaw: vs the full-rate tape model, samples
 constexpr double kTapeCents = 2.5;         // tapeLaw: speed, cents
 constexpr double kRepitchCents = 1.0;      // repitchCents: output pitch vs 1 - dD/dt
-constexpr double kCurveRel = 1e-12;        // presetCurves: closed form, relative
 constexpr double kClearFade = 1e-12;       // clearFade, clearLiveWet: vs the no-Clear output x the ramp
 }  // namespace tol
 
@@ -3560,224 +3559,170 @@ bool clearA23(Detail& d) {
   return true;
 }
 
-// ---- M3 B3, T-017: module presets and macros (SPEC §16.3; rows A12, A13; echo/presets.h) ----
+// ---- M3 B3, T-017: module presets (SPEC §16.3; rows A12, A13; echo/presets.h) ----
+// T-039 (D-050): Echo offers no macros, so the slot model, the resolver, the curves and the checks that
+// went with them are gone; a preset is plain values and its file keeps `slots: []`.
 
 namespace P = echo::presets;
-P::Binding bnd(const char* key, double lo, double hi, P::Curve c = P::Curve::Lin) { return {*echo::paramIndex(key), lo, hi, c}; }
 
-// Fixtures exercising the whole model (the factory seven are checked in presetFactoryBank): a full
-// 8-slot modify preset with exp curves, two slots on one key (contributions add)
-// and Hz keys (octaves); and a set-law preset with a log curve and a falling range.
-P::ModulePreset richModify() {
+// A fixture exercising the whole value set: the fixed row's keys (time.scale, fb.amount, mix, and route.mode,
+// D-050's Type) and a few more all off their defaults, so A12 shows its values exact. It also sets time.change,
+// time.law, time.glide, mod.depthMs and time.offR off their defaults: every bank preset is repitch / tape at
+// the default glide, so without these A13's corners would not differ in those keys.
+P::ModulePreset valuesFixture() {
   P::ModulePreset p = P::initPreset();
-  p.id = "fx-rich";
-  p.label = "Rich";
-  p.description = "a test fixture: 8 slots under modify";
-  p.defaults[echo::kTimeScale] = 2;  // the fixed row (SPEC §16.4: Time Scale, Feedback, Mix) all off their defaults, so A12 shows its values exact
+  p.id = "fx-values";
+  p.label = "Values";
+  p.description = "a test fixture: values off their defaults";
+  p.defaults[echo::kTimeScale] = 2;
   p.defaults[echo::kFb] = 40;
   p.defaults[echo::kLoopLp] = 6000;
-  p.defaults[echo::kModDepth] = 1.5;
+  p.defaults[echo::kModDepth] = 3;
   p.defaults[echo::kMix] = 45;
-  p.slots = {{"Time", {bnd("time.ms", 0, 250)}, 0.0},
-             {"Feedback", {bnd("fb.amount", 0, 40, P::Curve::Exp)}, 0.25},
-             {"Tone", {bnd("filt.loop.lpHz", -2, 1), bnd("filt.loop.hpHz", 0, 2)}, 0.5},
-             {"Wobble", {bnd("mod.depthMs", 0, 6), bnd("mod.rateHz", -1, 1)}, 0.0},
-             {"Width", {bnd("time.offR", -20, 20)}, 0.5},
-             {"Wet", {bnd("mix", -20, 30)}, 0.5},
-             {"Push", {bnd("fb.amount", 0, 20)}, 0.0},  // a second slot on fb.amount: contributions add
-             {"Glide", {bnd("time.glide", 0, 1, P::Curve::Exp)}, 0.75}};
-  return p;
-}
-P::ModulePreset setLog() {
-  P::ModulePreset p = P::initPreset();
-  p.id = "fx-set";
-  p.label = "Set";
-  p.description = "a test fixture: set law, log and falling ranges";
-  p.law = P::Law::Set;
-  p.slots = {{"Dark", {bnd("filt.loop.lpHz", 12000, 1500, P::Curve::Log)}, 0.3}, {"Regen", {bnd("fb.amount", 90, 10)}, 1.0}};
+  p.defaults[echo::kRoute] = 1;
+  p.defaults[echo::kChange] = 1;  // crossfade
+  p.defaults[echo::kLaw] = 1;     // exponential
+  p.defaults[echo::kGlide] = 1.2;
+  p.defaults[echo::kOffR] = 15;
   return p;
 }
 
-// Validation (T-017): each refusal on its own, and the valid fixtures pass.
+// A13's four corners, and A10's corner loads: the fixture and three factory presets. They differ in the
+// continuous keys and in sync, division, routing, mod.shape, and the fixture differs from the three in
+// time.change and time.law (the bank is all repitch / tape).
+std::vector<P::ModulePreset> fourCorners() {
+  std::vector<P::ModulePreset> c{valuesFixture()};
+  for (const auto& p : P::factory())
+    if (p.id == "dub-loop" || p.id == "chorus-line" || p.id == "wide-ms") c.push_back(p);
+  return c;
+}
+
+// Validation (T-017): every way validate() and readBank() refuse, each on its own against the fixture's
+// own file (an anchor that drifted fails the check loudly, it never passes as "refused"), and the valid
+// fixtures pass. Not covered here: the JSON grammar's own limits (nesting depth, escapes).
+// A preset with a slot is refused BY NAME whatever else is wrong with it (D-050), including the old
+// echo-factory.json shape (slot plus macroLaw), a slot with no id, and a map of slots.
 bool presetValidate(Detail& d) {
   std::string why;
-  for (const auto& p : {P::initPreset(), richModify(), setLog()}) REQUIRE(P::validate(p, &why), "the valid %s was refused: %s", p.id.c_str(), why.c_str());
-  auto refused = [&](const P::ModulePreset& p) {
-    why.clear();
-    return !P::validate(p, &why);
-  };
-  P::ModulePreset nine = richModify();
-  nine.slots.push_back({"Ninth", {bnd("time.offL", 0, 5)}, 0.0});
-  REQUIRE(refused(nine), "nine slots were accepted");
-  P::ModulePreset dev = richModify();
-  dev.slots[0].bind.push_back(bnd("io.outGain", 0, 6));
-  REQUIRE(refused(dev), "a binding on the Device key io.outGain was accepted");
-  P::ModulePreset step = richModify();
-  step.slots[0].bind.push_back(bnd("route.mode", 0, 2));
-  REQUIRE(refused(step), "a binding on the stepped key route.mode was accepted");
-  P::ModulePreset zero = setLog();  // on a key whose range holds 0, so only the log rule can refuse it
-  zero.slots[0].bind[0] = bnd("time.offL", 0, 10, P::Curve::Log);
-  REQUIRE(refused(zero) && why.find("log") != std::string::npos, "a log curve on a zero endpoint was accepted (or refused for `%s`)", why.c_str());
-  P::ModulePreset mixed = setLog();
-  mixed.slots[0].bind[0] = bnd("time.offL", -10, 10, P::Curve::Log);
-  REQUIRE(refused(mixed) && why.find("log") != std::string::npos, "a log curve on mixed-sign endpoints was accepted (or refused for `%s`)", why.c_str());
-  P::ModulePreset logMod = richModify();  // same-sign, in range: ONLY the modify rule can refuse it (critic T-017 H1)
-  logMod.slots[2].bind[0] = bnd("filt.loop.lpHz", 0.5, 1, P::Curve::Log);
-  REQUIRE(refused(logMod) && why.find("modify") != std::string::npos, "a log curve under modify was accepted (or refused for `%s`)", why.c_str());
-  P::ModulePreset ctl = richModify();
-  ctl.slots[0].label = "Ti\nme";
-  REQUIRE(refused(ctl), "a control character in a slot label was accepted");
-  for (double h : {-0.01, 1.01}) {
-    P::ModulePreset home = richModify();
-    home.slots[1].home = h;
-    REQUIRE(refused(home), "a home of %g was accepted", h);
+  for (const auto& p : {P::initPreset(), valuesFixture()}) REQUIRE(P::validate(p, &why), "the valid %s was refused: %s", p.id.c_str(), why.c_str());
+  // validate() direct: strings the file's reader would already refuse as raw control characters.
+  for (const char* what : {"id", "label", "description"}) {
+    P::ModulePreset c = valuesFixture();
+    (std::string_view(what) == "id" ? c.id : std::string_view(what) == "label" ? c.label : c.description) = "Va\nlues";
+    REQUIRE(!P::validate(c), "a control character in the %s was accepted", what);
   }
-  P::ModulePreset far = setLog();
-  far.slots[1].bind[0].hi = 130;
-  REQUIRE(refused(far), "a set-law endpoint outside fb.amount's range was accepted");
-  P::ModulePreset twice = richModify();
-  twice.slots[0].bind.push_back(bnd("time.ms", 0, 10));
-  REQUIRE(refused(twice), "a key bound twice in one slot was accepted");
-  // File-level refusals: an unknown key, a Device key in internal_defaults, slots out of order.
-  const std::string good = P::writeBank({richModify()});
+  const std::string good = P::writeBank({valuesFixture()});
   std::vector<P::ModulePreset> got;
-  REQUIRE(P::readBank(good, got, &why), "the rich fixture's own file was refused: %s", why.c_str());
-  auto bad = [&](const std::string& from, const std::string& to) {
-    std::string t = good;
+  REQUIRE(P::readBank(good, got, &why), "the fixture's own file was refused: %s", why.c_str());
+  std::string lost;
+  auto swap = [&](std::string t, const std::string& from, const std::string& to) {
     const auto at = t.find(from);
-    if (at == std::string::npos) return std::string("<anchor lost>");
+    if (at == std::string::npos) { lost += (lost.empty() ? "" : "; ") + from; return t; }
     return t.replace(at, from.size(), to);
   };
-  for (const auto& [what, text] : std::vector<std::pair<const char*, std::string>>{
-           {"an unknown key", bad("\"mix\": 30", "\"mix\": 30, \"width\": 50")},
-           {"a Device key in internal_defaults", bad("\"mix\": 30", "\"mix\": 30, \"io.inGain\": 0")},
-           {"slots out of order", bad("{\"slot\": 2,", "{\"slot\": 3,")},
-           {"another module_version", bad(std::string(echo::kModuleVersion), "0000000000000000")},
-           // What the writer never produces (critic T-017 M4):
-           {"another module", bad("\"module\": \"echo\"", "\"module\": \"scape\"")},
-           {"a home as a string", bad("\"home\": 0.25", "\"home\": \"0.25\"")},
-           {"a description as a number", bad("\"description\": \"a test fixture: 8 slots under modify\"", "\"description\": 5")},
-           {"an unknown preset field", bad("\"macroLaw\"", "\"colour\": \"red\", \"macroLaw\"")},
-           {"an unknown slot field", bad("{\"slot\": 2,", "{\"slot\": 2, \"x\": 1,")},
-           {"a slot number written 2.0", bad("{\"slot\": 2,", "{\"slot\": 2.0,")},
-           {"a binding of strings", bad("\"time.ms\": [0, 250]", "\"time.ms\": [\"a\", 250]")}})
+  auto bad = [&](const std::string& from, const std::string& to) { return swap(good, from, to); };
+  const std::string slot = "{\"slot\": 1, \"label\": \"Time\", \"home\": 0.5, \"bind\": {\"time.ms\": [-1, 1]}}";
+  const std::string oldShape = swap(bad("\"internal_defaults\"", "\"macroLaw\": \"modify\", \"internal_defaults\""), "\"slots\": []", "\"slots\": [" + slot + "]");
+  const std::vector<std::pair<const char*, std::string>> cases{
+      {"an unknown key", bad("\"mix\": 45", "\"mix\": 45, \"width\": 50")},
+      {"a Device key in internal_defaults", bad("\"mix\": 45", "\"mix\": 45, \"io.inGain\": 0")},
+      {"a missing key", bad("\"mix\": 45, ", "")},
+      {"a duplicated key", bad("\"mix\": 45", "\"mix\": 45, \"mix\": 45")},
+      {"a continuous value out of range", bad("\"mix\": 45", "\"mix\": 450")},
+      {"a stepped value out of range", bad("\"mod.seed\": 1", "\"mod.seed\": 70000")},
+      {"a stepped value with a fraction", bad("\"mod.seed\": 1", "\"mod.seed\": 1.5")},
+      {"a number given as a string", bad("\"mix\": 45", "\"mix\": \"45\"")},
+      {"a bad label", bad("\"route.mode\": \"pingpong\"", "\"route.mode\": \"sideways\"")},
+      {"an empty id", bad("\"id\": \"fx-values\"", "\"id\": \"\"")},
+      {"an empty label", bad("\"label\": \"Values\"", "\"label\": \"\"")},
+      {"a description as a number", bad("\"description\": \"a test fixture: values off their defaults\"", "\"description\": 5")},
+      {"an unknown preset field", bad("\"internal_defaults\"", "\"colour\": \"red\", \"internal_defaults\"")},
+      {"a macroLaw (D-050: no longer written, so unknown)", bad("\"internal_defaults\"", "\"macroLaw\": \"modify\", \"internal_defaults\"")},
+      {"slots missing", bad(",\n   \"slots\": []", "")},
+      {"slots as an object", bad("\"slots\": []", "\"slots\": {}")},
+      {"another schema", bad("echo-module-presets/1", "echo-module-presets/2")},
+      {"another module", bad("\"module\": \"echo\"", "\"module\": \"scape\"")},
+      {"another module_version", bad(std::string(echo::kModuleVersion), "0000000000000000")},
+      {"an unknown field in the bank", bad("\"schema\"", "\"colour\": 1, \"schema\"")},
+      {"text after the bank", good + "{}"},
+      {"a slot", bad("\"slots\": []", "\"slots\": [" + slot + "]")},
+      {"a slot and a macroLaw (the old file's shape)", oldShape},
+      {"a slot with an empty id", swap(bad("\"id\": \"fx-values\"", "\"id\": \"\""), "\"slots\": []", "\"slots\": [" + slot + "]")},
+      {"a slot with no id", swap(bad("\"id\": \"fx-values\",", ""), "\"slots\": []", "\"slots\": [" + slot + "]")},
+      {"a map of slots", bad("\"slots\": []", "\"slots\": {\"1\": 1}")}};
+  REQUIRE(lost.empty(), "the test's anchor(s) `%s` are not in the fixture's file", lost.c_str());
+  for (const auto& [what, text] : cases) {
+    why.clear();
     REQUIRE(!P::readBank(text, got, &why), "%s was accepted in a bank file", what);
-  return true;
-}
-
-// A3's curves: lo and hi EXACT at v = 0 and 1 for lin, exp and log, the closed
-// form to 1e-12 at the quarters, on rising and falling ranges.
-bool presetCurves(Detail& d) {
-  struct C { P::Curve c; double lo, hi; };
-  // [0.1, 1.7] log: the bare formula lands on 1.7000000000000002, so only the
-  // special case makes v = 1 exact for log (critic T-017 M3). v = 0 is exact for
-  // every curve by construction (lo*(hi/lo)^0, lo + 0): checked, not discriminating.
-  for (const C& c : {C{P::Curve::Lin, 0.1, 0.3}, C{P::Curve::Exp, 0.1, 0.3}, C{P::Curve::Log, 0.1, 1.7}, C{P::Curve::Log, 0.1, 0.3}, C{P::Curve::Lin, 0.7, 0.1},
-                     C{P::Curve::Exp, 0.7, 0.1}, C{P::Curve::Log, 12000, 1500}, C{P::Curve::Lin, 1.0 / 3.0, 2.0 / 3.0}}) {
-    REQUIRE(P::shape(c.c, c.lo, c.hi, 0.0) == c.lo && P::shape(c.c, c.lo, c.hi, 1.0) == c.hi, "%s [%g, %g] misses an endpoint: %.17g / %.17g",
-            P::curveName(c.c), c.lo, c.hi, P::shape(c.c, c.lo, c.hi, 0.0), P::shape(c.c, c.lo, c.hi, 1.0));
-    for (double v : {0.25, 0.5, 0.75}) {
-      const double want = c.c == P::Curve::Lin ? c.lo + (c.hi - c.lo) * v
-                         : c.c == P::Curve::Exp ? c.lo + (c.hi - c.lo) * v * v
-                                                : c.lo * std::pow(c.hi / c.lo, v);
-      REQUIRE(std::fabs(P::shape(c.c, c.lo, c.hi, v) - want) <= tol::kCurveRel * std::max(1.0, std::fabs(want)), "%s at %g is off its closed form",
-              P::curveName(c.c), v);
+    const std::string w = what;
+    if (w.rfind("a slot", 0) == 0 || w == "a map of slots") {
+      const bool noId = w.find("id") != std::string::npos;
+      REQUIRE(why.find(noId ? "a preset with no id: a slot" : "fx-values: a slot") == 0, "`%s` was refused, but not for the slot by name: `%s`", what, why.c_str());
     }
   }
-  // An invalid log met by the resolver (outside validation) resolves as lin, never NaN (critic T-017 M2).
-  const double inv = P::shape(P::Curve::Log, 0, 10, 0.5), mix2 = P::shape(P::Curve::Log, -2, 2, 0.25);
-  REQUIRE(inv == 5.0 && mix2 == -1.0, "an invalid log is not resolved as lin (%.17g, %.17g)", inv, mix2);
+  // All or nothing: a second preset that is refused leaves the caller's bank untouched, the first preset's read discarded.
+  std::string two = P::writeBank({valuesFixture(), P::initPreset()});
+  const auto lastSlots = two.rfind("\"slots\": []");
+  REQUIRE(lastSlots != std::string::npos, "the test's anchor for the second preset's slots is lost");
+  two.replace(lastSlots, std::string("\"slots\": []").size(), "\"slots\": [" + slot + "]");
+  std::vector<P::ModulePreset> keep{P::initPreset()};
+  REQUIRE(!P::readBank(two, keep, &why) && keep.size() == 1 && keep[0].id == "init" && why.find("init: a slot") == 0,
+          "a refused second preset changed the caller's bank (%zu presets) or was not refused by name: `%s`", keep.size(), why.c_str());
   return true;
 }
 
-// The two laws (§5, ADR-251): set sets; modify offsets from internal_defaults,
-// contributions from several slots add, a key in Hz moves in octaves, the result
-// clamps to the key's range, and at v = 0 with lo = 0 the preset sounds as itself.
-bool presetLaws(Detail& d) {
-  auto p = richModify();  // not const: the presetResolveMutates plant writes through it (no UB, critic T-017 L1)
-  const auto at0 = P::resolve(p, std::vector<double>(8, 0.0));
-  for (int k = 0; k < echo::kNumParams; ++k)
-    if (k != echo::kLoopLp && k != echo::kModRate && k != echo::kOffR && k != echo::kMix)  // keys whose lo != 0 move at v = 0
-      REQUIRE(at0[static_cast<std::size_t>(k)] == p.defaults[static_cast<std::size_t>(k)], "at v = 0 key %d is not the preset's own value", k);
-  std::vector<double> v(8, 0.0);
-  v[2] = 1.0;  // Tone at 1: filt.loop.lpHz +1 octave, filt.loop.hpHz +2 octaves
-  auto r = P::resolve(p, v);
-  REQUIRE(r[echo::kLoopLp] == 12000.0, "filt.loop.lpHz at +1 octave from 6000 is %.6f, not 12000", r[echo::kLoopLp]);
-  REQUIRE(r[echo::kLoopHp] == 240.0, "filt.loop.hpHz at +2 octaves from 60 is %.6f, not 240", r[echo::kLoopHp]);
-  v = std::vector<double>(8, 0.0);
-  v[1] = 0.5;
-  v[6] = 1.0;  // two slots on fb.amount: 40 + 40*0.25 + 20 = 70
-  r = P::resolve(p, v);
-  REQUIRE(r[echo::kFb] == 70.0, "fb.amount with two slots is %.6f, not 40 + 10 + 20 = 70", r[echo::kFb]);
-  v[1] = 1.0;  // 40 + 40 + 20 = 100, then Time pushed past the range clamps
-  v[0] = 1.0;
-  auto big = p;
-  big.defaults[echo::kTimeMs] = 11900;
-  r = P::resolve(big, v);
-  REQUIRE(r[echo::kFb] == 100.0 && r[echo::kTimeMs] == 12000.0, "modify did not add or clamp (fb %.3f, time.ms %.3f)", r[echo::kFb], r[echo::kTimeMs]);
-  auto s = setLog();
-  r = P::resolve(s, {0.0, 0.5});
-  REQUIRE(r[echo::kLoopLp] == 12000.0 && r[echo::kFb] == 50.0, "set did not set (lpHz %.3f, fb %.3f)", r[echo::kLoopLp], r[echo::kFb]);
-  return true;
-}
-
-// A12: every preset saves and loads with slot order, labels, bindings, curves,
-// home, macroLaw and every internal value exact; written again, byte-identical.
+// A12: Echo offers no macros (RS-5.1: a module may offer none; D-050), so every preset's `slots` is empty in the
+// file. What the row still checks: every preset saves and loads with its id, label, description and every value exact
+// (the fixed row's keys included, the fixture has them off their defaults); written again, byte-identical.
 bool presetA12(Detail& d) {
   auto bank = P::factory();
-  bank.push_back(richModify());
-  bank.push_back(setLog());
+  bank.push_back(valuesFixture());
   const std::string t1 = P::writeBank(bank);
   std::vector<P::ModulePreset> got;
   std::string why;
   REQUIRE(P::readBank(t1, got, &why), "the bank's own text was refused: %s", why.c_str());
   REQUIRE(got.size() == bank.size(), "%zu presets read back, %zu written", got.size(), bank.size());
+  constexpr std::string_view kEmpty = "\"slots\": []", kAny = "\"slots\": [";
+  std::size_t any = 0, empty = 0;
+  for (auto at = t1.find(kAny); at != std::string::npos; at = t1.find(kAny, at + 1)) {
+    ++any;
+    if (t1.compare(at, kEmpty.size(), kEmpty) == 0) ++empty;
+  }
+  REQUIRE(any == bank.size() && empty == bank.size(), "%zu of %zu presets write empty slots (macros are not offered, RS-5.1)", empty, bank.size());
   for (std::size_t i = 0; i < bank.size(); ++i) {
     const auto &a = bank[i], &b = got[i];
-    REQUIRE(a.id == b.id && a.label == b.label && a.description == b.description && a.law == b.law, "preset %zu's header changed", i);
+    REQUIRE(a.id == b.id && a.label == b.label && a.description == b.description, "preset %zu's header changed", i);
     for (int k = 0; k < echo::kNumParams; ++k)
       if (echo::kParams[static_cast<std::size_t>(k)].morph != echo::Morph::Device)
         REQUIRE(a.defaults[static_cast<std::size_t>(k)] == b.defaults[static_cast<std::size_t>(k)], "%s: internal value %d changed", a.id.c_str(), k);
-    REQUIRE(a.slots.size() == b.slots.size(), "%s: slot count changed", a.id.c_str());
-    for (std::size_t s = 0; s < a.slots.size(); ++s) {
-      const auto &x = a.slots[s], &y = b.slots[s];
-      REQUIRE(x.label == y.label && x.home == y.home && x.bind.size() == y.bind.size(), "%s: slot %zu (%s) changed or moved", a.id.c_str(), s + 1,
-              x.label.c_str());
-      for (std::size_t j = 0; j < x.bind.size(); ++j)
-        REQUIRE(x.bind[j].key == y.bind[j].key && x.bind[j].lo == y.bind[j].lo && x.bind[j].hi == y.bind[j].hi && x.bind[j].curve == y.bind[j].curve,
-                "%s: slot %zu's binding %zu changed", a.id.c_str(), s + 1, j);
-    }
   }
   REQUIRE(P::writeBank(got) == t1, "written again, the bank text differs");
   return true;
 }
 
-// A13 (critic T-017 H2: one ENGINE taken through the corners, not only the
-// resolver): the preset text round-trips first (readBank of writeBank); then
-// for each corner c, one engine loads c, then every other corner in turn (each
-// a load mid-play, with input running), then c again; once the last fade ends,
-// its saved state equals a fresh engine's loaded at c, byte for byte, and a
-// fresh engine restored from it renders as that fresh one, both channels.
+// A13 (critic T-017 H2: one ENGINE taken through the corners): the corners' text round-trips first (readBank of
+// writeBank); then for each corner c, one engine loads c, then every other corner in turn (each a load mid-play,
+// with input running), then c again; once the last fade ends, its saved state equals a fresh engine's loaded at c,
+// byte for byte, AND is the corner's own values (T-039: with the resolver gone, a load that drops a key is what a
+// corner flip can still get wrong), and a fresh engine restored from it renders as that fresh one, both channels.
 bool presetA13(Detail& d) {
   std::vector<P::ModulePreset> read;
   std::string why;
-  REQUIRE(P::readBank(P::writeBank({richModify()}), read, &why), "the fixture's text was refused: %s", why.c_str());
-  auto& p = read[0];
-  const std::vector<std::vector<double>> corners{
-      {0, 0.25, 0.5, 0, 0.5, 0.5, 0, 0.75}, {1, 1, 0, 1, 0, 1, 1, 0}, {0.3, 0.6, 0.9, 0.2, 0.8, 0.1, 0.4, 0.5}, {0.5, 0, 1, 0.5, 1, 0, 0.5, 1}};
+  REQUIRE(P::readBank(P::writeBank(fourCorners()), read, &why), "the corners' text was refused: %s", why.c_str());
+  REQUIRE(read.size() == 4, "%zu corners read back, not 4", read.size());
   auto loadAt = [&](Echo& e, std::size_t c) {
-    const auto kv = P::patchOf(P::resolve(p, corners[c]));
+    const auto kv = P::patchOf(read[c].defaults);
     e.loadState(std::span<const echo::KeyValue>(kv.data(), kv.size()));
   };
   g_rng = 61;
   Vec live(S(0.05));
   for (auto& v : live) v = 0.3 * noise();
   const Vec in = impulse(S(0.4), 10, 0.5);
-  for (std::size_t c = 0; c < corners.size(); ++c) {
+  for (std::size_t c = 0; c < read.size(); ++c) {
     auto e = mk({});
     loadAt(*e, c);
     run(*e, live, live);
-    for (std::size_t o = 0; o < corners.size(); ++o)
+    for (std::size_t o = 0; o < read.size(); ++o)
       if (o != c) { loadAt(*e, o); run(*e, live, live); }  // a corner flip mid-play, its fade run out
     loadAt(*e, c);
     run(*e, live, live);
@@ -3785,6 +3730,15 @@ bool presetA13(Detail& d) {
     loadAt(*ref, c);
     const std::string se = saveText(*e), sr = saveText(*ref);
     REQUIRE(se == sr, "corner %zu: after flipping through the corners the engine's state differs from a fresh load", c);
+    echo::state::Values saved{};
+    const char* swhy = "";
+    REQUIRE(echo::state::parse(se, saved, &swhy), "corner %zu: the engine's saved state does not parse (%s)", c, swhy);
+    for (int k = 0; k < echo::kNumParams; ++k) {
+      const auto u = static_cast<std::size_t>(k);
+      if (echo::kParams[u].morph == echo::Morph::Device) continue;
+      REQUIRE(saved[u] == read[c].defaults[u], "corner %zu: the saved %s is %.17g, the corner's value is %.17g", c, echo::kParams[u].key.data(), saved[u],
+              read[c].defaults[u]);
+    }
     auto t = mk({});
     REQUIRE(restore(*t, se, nullptr), "corner %zu: the state did not restore", c);
     const auto rt = run(*t, in, in), rr = run(*ref, in, in);
@@ -3799,25 +3753,22 @@ bool presetA13(Detail& d) {
 const char* const kFactoryIds[] = {"init", "slap", "pingpong-dotted", "dub-loop", "chorus-line", "wide-ms", "tape-throw", "runaway"};
 
 // A preset loaded into a prepared engine the way a host loads it (patchOf of its
-// resolve at the homes), and the state that engine then saves (SPEC §16.2).
+// values), and the state that engine then saves (SPEC §16.2).
 struct FactoryLoad {
-  echo::state::Values at{};
   std::string text;
   bool loaded = false;
 };
 FactoryLoad loadFactory(const P::ModulePreset& p) {
   FactoryLoad f;
-  f.at = P::resolve(p, {});
   auto e = mk({});
-  const auto kv = P::patchOf(f.at);
+  const auto kv = P::patchOf(p.defaults);
   f.loaded = e->loadState(std::span<const echo::KeyValue>(kv.data(), kv.size()));
   f.text = saveText(*e);
   return f;
 }
 
-// A12 over the bank: each factory preset is valid, has its homes at offset exactly 0, and
-// a host that loads it at those homes gets the preset's OWN values (read back from the
-// engine's saved state, not from the resolver the load started from).
+// A12 over the bank: each factory preset is valid, and a host that loads it gets the preset's OWN values
+// (read back from the engine's saved state, not from the preset the load started from).
 bool presetFactoryBank(Detail& d) {
   const auto bank = P::factory();
   REQUIRE(bank.size() == 8, "the factory bank holds %zu presets, not the init plus seven", bank.size());
@@ -3826,21 +3777,8 @@ bool presetFactoryBank(Detail& d) {
     const auto& p = bank[i];
     REQUIRE(p.id == kFactoryIds[i], "factory preset %zu is `%s`, not `%s`", i, p.id.c_str(), kFactoryIds[i]);
     REQUIRE(P::validate(p, &why), "%s was refused: %s", p.id.c_str(), why.c_str());
-    REQUIRE(p.law == P::Law::Modify && p.slots.size() <= static_cast<std::size_t>(P::kMaxSlots) && (i == 0) == p.slots.empty(),
-            "%s: the init has no macros, the seven are modify with 1 - 8", p.id.c_str());
-    // The voicing's rule: every home puts its offset at exactly 0. Per binding, so an offset
-    // that the key's range would clamp away at the resolve cannot hide behind the clamp.
-    for (const auto& s : p.slots)
-      for (const auto& b : s.bind)
-        REQUIRE(P::shape(b.curve, b.lo, b.hi, s.home) == 0.0, "%s, slot `%s`: the offset at its home is %.17g, not 0", p.id.c_str(), s.label.c_str(),
-                P::shape(b.curve, b.lo, b.hi, s.home));
     const auto f = loadFactory(p);
     REQUIRE(f.loaded, "%s: the engine refused the load", p.id.c_str());
-    for (int k = 0; k < echo::kNumParams; ++k) {
-      const auto u = static_cast<std::size_t>(k);
-      REQUIRE(f.at[u] == p.defaults[u], "%s: at its homes %s resolves to %.17g, its internal value is %.17g", p.id.c_str(), echo::kParams[u].key.data(), f.at[u],
-              p.defaults[u]);
-    }
     echo::state::Values saved{};
     const char* swhy = "";
     REQUIRE(echo::state::parse(f.text, saved, &swhy), "%s: the engine's saved state does not parse (%s)", p.id.c_str(), swhy);
@@ -3881,7 +3819,7 @@ bool presetFactoryStateSize(Detail& d) {
 bool presetFactoryStereo(Detail& d) {
   for (const auto& p : P::factory()) {
     echo::IrPatch patch{};
-    const auto at = P::resolve(p, {});
+    const auto& at = p.defaults;
     for (std::size_t k = 0; k < patch.size(); ++k) patch[k] = at[k];
     const auto t = fold::take(patch, echo::IrInput::Mono, kSr, -1, std::int64_t{1} << 19);
     REQUIRE(t.ok, "%s: the renderer refused the patch", p.id.c_str());
@@ -3975,19 +3913,30 @@ bool a8Image(Detail& d) {
 }
 
 // A10: a scripted session on the audio thread: sweeps of every continuous key,
-// macro-style moves (a preset resolved at moving slot values), corner loads,
+// preset-to-preset moves (every key set to a point between two presets' values), corner loads,
 // a staged state adopted, Clear, tempo moves, sleep and wake, varied blocks.
 // Zero allocations. (Locks and syscalls are checked by review only: no
 // RealtimeSanitizer on this toolchain; the engine calls nothing that locks.)
 bool a10Session(Detail& d) {
   auto e = mk({{"time.sync", 0}, {"mod.depthMs", 3}});
-  const auto rich = richModify();
+  const auto cs = fourCorners();
   std::vector<std::vector<echo::KeyValue>> corners;
-  for (double v : {0.0, 0.33, 0.66, 1.0}) corners.push_back(P::patchOf(P::resolve(rich, std::vector<double>(8, v))));
-  std::vector<std::vector<double>> macro;
-  for (int s = 0; s < 64; ++s) macro.push_back(std::vector<double>(8, (s % 16) / 15.0));
-  std::vector<echo::state::Values> resolved;  // resolution allocates; it is the host's, off the audio thread: done before arming
-  for (const auto& m : macro) resolved.push_back(P::resolve(rich, m));
+  for (const auto& c : cs) corners.push_back(P::patchOf(c.defaults));  // patchOf allocates; the host's, off the audio thread: done before arming
+  // 64 value sets at (s % 16) / 15 of the way from the fixture's values to tape-throw's: every continuous key the two presets differ in
+  // moves (time.ms, fb.amount, mix, the filters, mod depth and rate, time.offR, glide, ...), the stepped and Device keys hold the
+  // fixture's. Between two valid values every key stays in range.
+  const auto& from = cs[0].defaults;
+  const auto to = P::factory()[6].defaults;
+  std::vector<echo::state::Values> moves;
+  for (int s = 0; s < 64; ++s) {
+    echo::state::Values v = from;
+    const double w = (s % 16) / 15.0;
+    for (int k = 0; k < echo::kNumParams; ++k) {
+      const auto u = static_cast<std::size_t>(k);
+      if (!echo::kParams[u].stepped && echo::kParams[u].morph != echo::Morph::Device) v[u] = from[u] + (to[u] - from[u]) * w;
+    }
+    moves.push_back(v);
+  }
   auto other = mk({{"fb.amount", 70}, {"time.ms", 222}});
   const std::string staged = saveText(*other);
   e->stageState(staged);  // stageState runs off the audio thread too
@@ -4005,7 +3954,7 @@ bool a10Session(Detail& d) {
       const int bs = blocks[step++ % 6];
       e->process(in.data(), in.data(), oL.data(), oR.data(), bs, 100.0 + pass);
     }
-    for (int k = 0; k < echo::kNumParams; ++k) e->setParam(k, resolved[static_cast<std::size_t>((step + k) % 64)][static_cast<std::size_t>(k)]);
+    for (int k = 0; k < echo::kNumParams; ++k) e->setParam(k, moves[static_cast<std::size_t>((step + k) % 64)][static_cast<std::size_t>(k)]);
     e->loadState(std::span<const echo::KeyValue>(corners[static_cast<std::size_t>(pass % 4)].data(), corners[static_cast<std::size_t>(pass % 4)].size()));
     e->fireAction(echo::Echo::kActionClear, 10);
     e->process(in.data(), in.data(), oL.data(), oR.data(), 512, 140.0);
@@ -4109,7 +4058,7 @@ bool b265Port(Detail& d) {
           const double from = dir ? k.b : k.a, to = dir ? k.a : k.b;
           auto mkAt = [&](double v) {
             auto e = mk({}, sr);
-            const auto kv = P::patchOf(P::resolve(pt.preset, {}));
+            const auto kv = P::patchOf(pt.preset.defaults);
             e->loadState(std::span<const echo::KeyValue>(kv.data(), kv.size()));
             if (pt.modulated) { e->setParam("mod.depthMs", 3); e->setParam("mod.rateHz", 0.8); }
             if (k.change >= 0) e->setParam("time.change", k.change);
@@ -4398,25 +4347,23 @@ const std::vector<Check> kChecks = {
     {"Clear A23: same actions, same offsets, bit-identical at blocks 1/64/4096; no allocation; unknown refused; the cap refuses", clearA23,
      {"actionAtBlockStart"}},
     // ---- M3 B3, T-017 ----
-    {"presets: every validation refusal (slots, Device and stepped keys, log endpoints and law, home, range); the reader takes only what the writer writes",
-     presetValidate, {"presetDeviceAccepted", "presetLogAccepted", "presetLogModifyAccepted"}},
-    {"presets: lin, exp, log hit lo and hi exactly and their closed forms at the quarters, rising and falling", presetCurves, {"presetEndpointInexact"}},
-    {"presets: set sets; modify adds contributions, Hz in octaves, clamps, and is the preset itself at v = 0", presetLaws, {"presetHzLinear"}},
-    {"presets A12: the bank saves and loads exactly (order, labels, bindings, curves, home, law, values incl. the fixed row); re-written byte-identical",
+    {"presets: every validation refusal (control characters, an empty id or label, Device, unknown, missing, duplicated and out-of-range keys, wrong kinds, another schema, module or version, trailing text, a macroLaw); all or nothing; a slot is refused first, by naming the preset (D-050)",
+     presetValidate, {"presetDeviceAccepted"}},
+    {"presets A12: no macros, every preset's slots empty (RS-5.1); the bank saves and loads exactly (id, label, description, values incl. the fixed row's keys); re-written byte-identical",
      presetA12,
-     {"presetReordersSlots"}},
-    {"presets A13: one engine through all four corners and back, mid-play, equals a fresh load; restored, it renders the same (L and R)", presetA13,
-     {"presetResolveMutates"}},
+     {"factoryCarriesSlot"}},
+    {"presets A13: one engine through four corners and back, mid-play, equals a fresh load and holds the corner's own values; restored, it renders the same (L and R)", presetA13,
+     {"presetPatchOfDropsKey"}},
     // ---- M3 B4, T-021 ----
-    {"presets A12: the factory bank is the init plus seven (ids, order), each valid, homes at offset 0; loaded, its saved state is the preset's own values",
-     presetFactoryBank, {"presetPatchOfDropsKey", "factoryHomeOffset", "factoryLabelTypo"}},
+    {"presets A12: the factory bank is the init plus seven (ids, order), each valid; loaded, its saved state is the preset's own values",
+     presetFactoryBank, {"presetPatchOfDropsKey", "factoryLabelTypo"}},
     {"presets A19: every factory preset's saved state is within 2 KiB (reported)", presetFactoryStateSize, {"presetStateOversized"}},
     {"B408 for the bank: each preset's line times, colouring flag and worst 1/3-octave fold, REPORTED never judged", presetFactoryStereo, {}},
     // ---- M3 B3, T-018 ----
     {"A2 reset identity: 2 s of seeded noise at the defaults and a stress patch; reset() mid-ramp, mid-modulation = fresh", a2ResetIdentity, {"resetKeepsModPhase"}},
     {"A4 latency truth: an impulse and a swept sine pass the dry path at the declared 0 samples", a4Latency, {"dryLate"}},
     {"A8 stereo image: L 220 / R 330 Hz, |L - R| kept in stereo routing", a8Image, {"monoSum"}},
-    {"A10 real time: a scripted session (sweeps, macros, corner loads, staged state, Clear, tempo, sleep and wake) allocates nothing", a10Session,
+    {"A10 real time: a scripted session (sweeps, preset moves, corner loads, staged state, Clear, tempo, sleep and wake) allocates nothing", a10Session,
      {"allocInProcess"}},
     {"A14 feedback: in horde's n = 1 cycle at loop gain 1.2, silence in gives exact silence out (defaults, stress)", a14Cycle, {"selfStart"}},
     {"B265 port: horde's click metric matches horde's JS (54caca8) to 1e-9 on eight pinned vectors (click, peak time, floor)", b265Port,
@@ -4475,15 +4422,13 @@ bool* plantFlag(std::string_view n) {
       {"clearWritesState", &clearWritesState}, {"clearRestartsFade", &clearRestartsFade},
       {"clearFreezesHeads", &clearFreezesHeads}, {"clearFreezesWet", &clearFreezesWet},
 
-      {"presetReordersSlots", &presetReordersSlots}, {"presetDeviceAccepted", &presetDeviceAccepted}, {"presetLogAccepted", &presetLogAccepted},
-      {"presetEndpointInexact", &presetEndpointInexact}, {"presetHzLinear", &presetHzLinear}, {"presetResolveMutates", &presetResolveMutates},
-      {"presetLogModifyAccepted", &presetLogModifyAccepted},
+      {"presetDeviceAccepted", &presetDeviceAccepted},
       {"resetKeepsModPhase", &resetKeepsModPhase}, {"dryLate", &dryLate}, {"monoSum", &monoSum}, {"selfStart", &selfStart}, {"b265HoodHalved", &b265HoodHalved},
       {"stereoInvertsR", &stereoInvertsR}, {"pingpongBothLines", &pingpongBothLines}, {"foldScaleSlip", &foldScaleSlip},
       {"foldOctaveNarrow", &foldOctaveNarrow}, {"foldNotchUnsmoothed", &foldNotchUnsmoothed}, {"zoneAnyMode", &zoneAnyMode}, {"zoneAtEqual", &zoneAtEqual},
       {"pingpongInvertsR", &pingpongInvertsR},
-      {"presetStateOversized", &presetStateOversized}, {"presetPatchOfDropsKey", &presetPatchOfDropsKey}, {"factoryHomeOffset", &factoryHomeOffset},
-      {"factoryLabelTypo", &factoryLabelTypo},
+      {"presetStateOversized", &presetStateOversized}, {"presetPatchOfDropsKey", &presetPatchOfDropsKey},
+      {"factoryLabelTypo", &factoryLabelTypo}, {"factoryCarriesSlot", &factoryCarriesSlot},
       {"scaleIgnoredSynced", &scaleIgnoredSynced}, {"scaleNotSnapped", &scaleNotSnapped}, {"scaleBypassesChange", &scaleBypassesChange},
       {"scaleAfterClamp", &scaleAfterClamp}, {"scaleResendIsMove", &scaleResendIsMove}, {"scaleTailUnscaled", &scaleTailUnscaled},
       {"scaleMoveSwallowed", &scaleMoveSwallowed}, {"scaleSnapRounds", &scaleSnapRounds}, {"scaleOffsetRewrite", &scaleOffsetRewrite},
@@ -4544,7 +4489,8 @@ const std::vector<AdmissionRow>& admissionRows() {
       {"A11", "Parameter classes",
        {switchesClickFree, crossfadeEqualGain, jumpIsShortFade, deferral, modSeeded, clickSweep, reversalClick, onsetClick, phaseSweepWorks, expSlewBinds, scaleControlMove, stepClick, outgoingBound, tapeCatchUp, loadLeavesDevice, presetValidate, b265Port},
        "structural: every flip key's switch declaration in params.json (`check_manifest.py`, with planted bare and length-less switches); the B265 reading REPORTED, never judged (`.harness/b265-report.txt`)"},
-      {"A12", "Macros", {presetA12, presetCurves, presetValidate, presetFactoryBank}, "the factory bank: the init plus seven, each valid, loading as its own values (T-021); B408 for the bank is stated in the run's REPORT lines"},
+      {"A12", "Macros", {presetA12, presetValidate, presetFactoryBank},
+       "macros are not offered (RS-5.1; D-050): every preset's slots are empty and a slot is refused by name; the row still round-trips every preset's values, the fixed row's keys included, byte-identical, and the factory bank (the init plus seven) loads as its own values (T-021); B408 for the bank is stated in the run's REPORT lines"},
       {"A13", "Corner presets", {presetA13}, "the horde preset's own save and reload is horde's"},
       {"A14", "Feedback", {a14Cycle}, "refusing a min_block > 1 module is the slot's; Echo declares 1"},
       {"A15", "Determinism", {determinism}, ""},
@@ -4602,10 +4548,9 @@ std::string admissionDoc(const std::vector<bool>& passed) {
                 "| determinism, reset, state | bit-identical | determinism, a2ResetIdentity, stateComplete, stateExact |\n"
                 "| repitch | output pitch within %g cent; the tape model within %g sample and %g cents | repitchCents, tapeLaw |\n"
                 "| moving-time clicks | M2 metric <= %g at s = 2.25, zero backstop hits (D-023); reversals and exponential onsets at the worst of 8 probe phases (D-049) | clickSweep, reversalClick, onsetClick |\n"
-                "| macro curves | endpoints exact; closed form within %g (relative) | presetCurves |\n"
                 "| Clear's fade | within %g of the no-Clear output times the 20 ms ramp | clearFade, clearLiveWet |\n",
                 tol::kCentroidSamples, tol::kGen2Ratio, tol::kGenLater, tol::kLoopGainSlack, tol::kSrLoopDb, tol::kRepitchCents, tol::kTapeSamples,
-                tol::kTapeCents, kClickProposed, tol::kCurveRel, tol::kClearFade);
+                tol::kTapeCents, kClickProposed, tol::kClearFade);
   o += t;
   return o;
 }
@@ -4676,11 +4621,10 @@ int main(int argc, char** argv) {
                         "stateAcceptsUnknown", "adoptResets",
                         "actionAtBlockStart", "clearCuts", "clearLandsValues", "clearWritesState", "clearRestartsFade",
                         "clearFreezesHeads", "clearFreezesWet",
-                        "presetReordersSlots", "presetDeviceAccepted", "presetLogAccepted", "presetEndpointInexact", "presetHzLinear",
-                        "presetResolveMutates", "presetLogModifyAccepted",
+                        "presetDeviceAccepted",
                         "resetKeepsModPhase", "dryLate", "monoSum", "selfStart", "b265HoodHalved",
                         "stereoInvertsR", "pingpongBothLines", "foldScaleSlip", "foldOctaveNarrow", "foldNotchUnsmoothed",
-                        "zoneAnyMode", "zoneAtEqual", "pingpongInvertsR", "presetStateOversized", "presetPatchOfDropsKey", "factoryHomeOffset", "factoryLabelTypo",
+                        "zoneAnyMode", "zoneAtEqual", "pingpongInvertsR", "presetStateOversized", "presetPatchOfDropsKey", "factoryLabelTypo", "factoryCarriesSlot",
                         "scaleIgnoredSynced", "scaleNotSnapped", "scaleBypassesChange", "scaleAfterClamp", "scaleResendIsMove", "scaleTailUnscaled",
                         "scaleMoveSwallowed", "scaleSnapRounds", "scaleOffsetRewrite", "stateMissingScaleDefaults", "expSlewOff", "expSlewLong", "phaseSweepCollapsed", "expSlewBlockStart", "expSpuriousRetarget",
                         "tapeKinkUnbounded", "tapeNoBrake", "tapeNoTargetBrake", "fbClampUnsigned", "fbFrozenOutgoing", "fadeLinear",

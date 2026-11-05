@@ -1493,3 +1493,44 @@ not a clean fix. **Ruled:** the SPEC states it as measured: the read's speed cha
 about 3 a when the floor stops the read, and the M2 bar is what governs. No engine change for this. `outgoingBound`'s
 contact gesture keeps its 2 a gate, and its comment does not claim a general limit. The same re-check swept 26,496 rows
 over every gesture family at 16 LFO phases: worst M2 1.59.
+
+## D-050 — Echo offers no macros; Time is exact, in Sec, Hz or Sync, on one knob; the row is Time, Feedback, Mix, Type (2026-11-03, the human, by polls; supersedes D-048 rulings 1 - 3 and D-035 ruling 3)
+
+**Why.** Trying to revoice T-021's bank under D-048's rule, the human ruled the machinery itself too much for this module:
+"since Echo is supposed to be one of the simpler FX modules, it can have a less complex output. It doesn't need the macro
+system at all, which is really only necessary for the more complex FX. Time should also be precise and have Hz/Sec and
+Sync modes ... instead of the multiplier macro which is confusing." horde's contract agrees on the first half: a module
+"may" offer macros, and they are expected of modules with deep internals (RS-5.1, the bar's macro row). Factory presets stay
+required.
+
+**Ruled:**
+1. **No macros.** Every preset's slots are empty; the bindings, the resolver and their plants leave `presets.h`, and a preset
+   with a slot is refused. The file keeps `slots: []` for horde's reader. The Feedback-macro and Time-Scale-macro questions
+   that opened this are moot, and T-039 is rewritten. The bank stays an init plus seven, as plain values.
+2. **`time.scale` goes** (nothing has shipped, so no saved text holds it). D-048 A1's refusal of a missing key still stands.
+3. **Three saved modes:** `time.mode` (Sec, Hz, Sync) replaces `time.sync`. Sec and Hz read and set the same stored `time.ms`,
+   so switching between them moves nothing (1 s is 1 Hz); the range is 1 ms - 12 s, or 1000 - 0.083 Hz. 29 keys.
+4. **The dot and triplet toggles add steps to the knob:** straight values only with both off; Dots adds the dotted values and
+   Triplets the triplets, in time order. The saved value stays horde's division name, so `time.div` and its 22 names do not
+   change, and the toggles do not change the sound. (Lead's reading, for T-022: a DAW lane spans all 22, since the toggles
+   filter a gesture on the face and cannot make one host value mean two things.)
+5. **The fixed row is Time, Feedback, Mix, Type,** and with no macros it is everything the DAW sees by default. **One Time
+   knob follows the mode.** The contract as written does not allow that: one unit and range per parameter (RS-2.1), one class
+   (RS-4.2, 4.3), one law (ADR-203). Rejected: one stored position key (time stops being exact, divisions stop being saved by
+   name, a mode switch jumps the time). **Echo briefs horde** to let a row entry name its key by mode, `time.ms` in Sec and
+   Hz, `time.div` in Sync, on one stable host id; no answer or a refusal comes back to the human. Considered and set aside on
+   the way: Time and Division as two entries (always one dead control), and Time as the free time only.
+6. **Type is `route.mode` on the row,** and the same brief asks horde to draw a stepped entry as a selector (all three sibling
+   rows read are continuous). The first label becomes `standard`: Standard, Ping-Pong, Mid/Side.
+7. **The protected edits are authorised:** SPEC (§3, §13, §16), `spec/params.json`, the lab's mirror of it, the manifest lock
+   with `--decision D-050` (`module_version` moves, and so the presets file), `tools/check_manifest.py` only if the row's shape
+   needs it. The earlier poll's C++ fixed list and the rule's SPEC sentence fall away with the rule. horde was told "four" at
+   spin-up: the brief says what changed, and T-027 still carries the readiness notice.
+
+**D-050 A1 — T-039's critic rulings (2026-11-03, the human, three polls on the T-039 critic's FIX-THEN-SHIP).**
+1. **The presets fp-contract probe and its pragma go:** the `./verify` block, the two CMake targets and the pragma in `presets.h`. No
+   float arithmetic is left there, so it tested nothing, printed a false reason, and could stay green with the pragma deleted (it scans
+   only code the tool reaches). The engine's probe is untouched. Arithmetic returning to `presets.h` brings the probe back.
+2. **SPEC §12's edit is accepted,** outside ruling 7's list: it removes a sentence D-050 made false.
+3. **horde is asked** (`echo-003`'s PR had merged by then, so as its own artifact, seq 2 of the thread): whether Echo's bank file imports as it is (`slots: []`, a file-level `module`, no `macroLaw`), since
+   SPEC-MODULE-MACROS §4 draws a map with `module` per preset and no reader is in our record. Echo changes only if horde says so.
