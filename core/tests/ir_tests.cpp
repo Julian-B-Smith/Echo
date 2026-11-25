@@ -165,7 +165,7 @@ const std::vector<Named> kPatches = {
     {"I/O gains +6 / -12 dB", {{"time.mode", 0}, {"time.ms", 150}, {"io.inGain", 6}, {"io.outGain", -12}, {"fb.amount", 50}}},
     {"sine modulation", {{"time.mode", 0}, {"time.ms", 220}, {"fb.amount", 60}, {"mod.depthMs", 3}, {"mod.rateHz", 2}, {"mod.spread", 50}}},
     {"drift modulation", {{"time.mode", 0}, {"time.ms", 160}, {"fb.amount", 70}, {"mod.shape", 1}, {"mod.depthMs", 5}, {"mod.seed", 777}}},
-    {"synced 1/8 dotted at 93 bpm, exp law", {{"time.div", 10}, {"time.offR", 25}, {"time.change", 1}, {"time.law", 1}, {"fb.amount", 40}}},
+    {"synced 1/8 dotted at 93 bpm, exp law", {{"time.div", *echo::divisionIndex("1/8D")}, {"time.offR", 25}, {"time.change", 1}, {"time.law", 1}, {"fb.amount", 40}}},
 };
 
 // ---- the checks ---------------------------------------------------------------
@@ -725,7 +725,7 @@ bool tempoGrid(Detail& d) {
   for (std::size_t k = 0; k < n; ++k)
     REQUIRE(std::fabs(out[k] - static_cast<double>(k) * 48000.0 * 60.0 / 93.0) < 1e-6, "93 bpm: beat %zu at %.4f", k, out[k]);
   REQUIRE(n == 16, "93 bpm: %zu beats in 10 s, want 16", n);
-  n = echo::irDivisionMarks(48000.0, 120.0, 10, 96000, out);  // 1/8D = 0.75 beat = 18000 samples
+  n = echo::irDivisionMarks(48000.0, 120.0, *echo::divisionIndex("1/8D"), 96000, out);  // 1/8D = 0.75 beat = 18000 samples
   REQUIRE(n == 6 && out[1] == 18000.0 && out[5] == 90000.0, "1/8D marks: %zu, mark 1 at %.3f", n, out[1]);
   return true;
 }

@@ -72,34 +72,33 @@ enum P : int {
   kOutHp, kOutLp, kModDepth, kModRate, kModShape, kModSpread, kModSeed, kNumParams
 };
 
-// horde's division list (intake/tempo-divisions.md), slow to fast: name,
-// accepted alias ("" = none), beats in quarter notes. Stored by NAME in state.
-struct Division { std::string_view name, alias; double beats; };
+// horde's standard tempo divisions, SPEC-ENGINE RC-7.4 (intake/tempo-divisions.md), shortest first: the
+// name and the length in quarter notes. Stored by NAME in state. RC-7.4's bar rows are the time
+// signature's bar; Echo has no meter yet (echo-005 Ask 1), so a bar is four quarters (SPEC §3.1).
+struct Division { std::string_view name; double beats; };
 inline constexpr std::array<Division, 22> kDivisions{{
-    {"2/1", "", 8.0},           {"3/2", "1/1D", 6.0},        {"2/1T", "", 16.0 / 3.0},
-    {"1/1", "", 4.0},           {"3/4", "1/2D", 3.0},        {"1/1T", "", 8.0 / 3.0},
-    {"1/2", "", 2.0},           {"3/8", "1/4D", 1.5},        {"1/2T", "", 4.0 / 3.0},
-    {"1/4", "", 1.0},           {"3/16", "1/8D", 0.75},      {"1/4T", "", 2.0 / 3.0},
-    {"1/8", "", 0.5},           {"3/32", "1/16D", 0.375},    {"1/8T", "", 1.0 / 3.0},
-    {"1/16", "", 0.25},         {"3/64", "1/32D", 0.1875},   {"1/16T", "", 1.0 / 6.0},
-    {"1/32", "", 0.125},        {"3/128", "1/64D", 0.09375}, {"1/32T", "", 1.0 / 12.0},
-    {"1/64", "", 0.0625},
+    {"1/32", 0.125},         {"1/16T", 1.0 / 6.0},    {"1/32D", 0.1875},
+    {"1/16", 0.25},          {"1/8T", 1.0 / 3.0},     {"1/16D", 0.375},
+    {"1/8", 0.5},            {"1/4T", 2.0 / 3.0},     {"1/8D", 0.75},
+    {"1/4", 1.0},            {"1/2T", 4.0 / 3.0},     {"1/4D", 1.5},
+    {"1/2", 2.0},            {"1 bar T", 8.0 / 3.0},  {"1/2D", 3.0},
+    {"1 bar", 4.0},          {"2 bars T", 16.0 / 3.0}, {"1 bar D", 6.0},
+    {"2 bars", 8.0},         {"4 bars T", 32.0 / 3.0}, {"2 bars D", 12.0},
+    {"4 bars", 16.0},
 }};
 
-// The division index for a canonical name or an alias (aliases are accepted
-// on load and stored as the canonical name, SPEC §3.1).
+// The division index for a name. RC-7.4 has no aliases, so none is accepted (T-045).
 constexpr std::optional<int> divisionIndex(std::string_view name) {
   for (std::size_t i = 0; i < kDivisions.size(); ++i)
-    if (kDivisions[i].name == name || (!kDivisions[i].alias.empty() && kDivisions[i].alias == name))
-      return static_cast<int>(i);
+    if (kDivisions[i].name == name) return static_cast<int>(i);
   return std::nullopt;
 }
 
 namespace labels {
 inline constexpr std::array<std::string_view, 3> kTimeMode{"sec", "hz", "sync"};
 inline constexpr std::array<std::string_view, 22> kDiv{
-    "2/1", "3/2", "2/1T", "1/1", "3/4", "1/1T", "1/2", "3/8", "1/2T", "1/4", "3/16",
-    "1/4T", "1/8", "3/32", "1/8T", "1/16", "3/64", "1/16T", "1/32", "3/128", "1/32T", "1/64"};
+    "1/32", "1/16T", "1/32D", "1/16", "1/8T", "1/16D", "1/8", "1/4T", "1/8D", "1/4", "1/2T",
+    "1/4D", "1/2", "1 bar T", "1/2D", "1 bar", "2 bars T", "1 bar D", "2 bars", "4 bars T", "2 bars D", "4 bars"};
 inline constexpr std::array<std::string_view, 3> kChange{"repitch", "crossfade", "jump"};
 inline constexpr std::array<std::string_view, 2> kLaw{"tape", "exponential"};
 inline constexpr std::array<std::string_view, 3> kTempoMode{"crossfade", "glide", "follow"};
@@ -107,6 +106,13 @@ inline constexpr std::array<std::string_view, 3> kRoute{"standard", "pingpong", 
 inline constexpr std::array<std::string_view, 2> kOnOff{"off", "on"};
 inline constexpr std::array<std::string_view, 2> kShape{"sine", "drift"};
 }  // namespace labels
+
+// The two spellings of the division list must agree: kParams carries the labels, kDivisions the lengths.
+static_assert([] {
+  for (std::size_t i = 0; i < kDivisions.size(); ++i)
+    if (kDivisions[i].name != labels::kDiv[i]) return false;
+  return true;
+}());
 
 inline constexpr std::array<ParamDef, kNumParams> kParams{{
     {"io.inGain", "Input Gain", "dB", false, -24, 24, 0, Morph::Device, "io", {}, "continuous", "gain"},
@@ -150,5 +156,44 @@ constexpr std::optional<int> paramIndex(std::string_view key) {
     if (kParams[i].key == key) return static_cast<int>(i);
   return std::nullopt;
 }
+
+// The fixed row (RS-5.8, SPEC §16.4; params.json `fixedControls`, which check_manifest.py holds this table to).
+// A plain entry names its `key`. A keyed entry (D-050 A5, horde ADR-399) names a stepped key, `keyBy`, and
+// `map`, parallel to that key's labels, says which key the entry carries under each label: Time is `time.ms`
+// in sec and hz and `time.div` in sync. At most one keyed entry, and at most two keys in its map.
+struct FixedControl {
+  int k;
+  std::string_view label;
+  std::string_view key;    // a plain entry's key; "" for a keyed one
+  std::string_view keyBy;  // a keyed entry's selector key; "" for a plain one
+  std::span<const std::string_view> map;
+};
+namespace fixedmap {
+inline constexpr std::array<std::string_view, 3> kTime{"time.ms", "time.ms", "time.div"};  // sec, hz, sync
+}
+inline constexpr std::array<FixedControl, 4> kFixedControls{{
+    {1, "Time", "", "time.mode", fixedmap::kTime},
+    {2, "Feedback", "fb.amount", "", {}},
+    {3, "Mix", "mix", "", {}},
+    {4, "Type", "route.mode", "", {}},
+}};
+
+// The key a fixed entry carries while its selector stands at label index `at` (a plain entry: its key).
+// The plant swaps the first and last label of the map, as a transcription slip would (sync <-> sec).
+inline std::string_view fixedKey(const FixedControl& f, std::size_t at) {
+  if (f.keyBy.empty()) return f.key;
+  if (plant::keyedRowSwapped) at = f.map.size() - 1 - at;
+  return f.map[at];
+}
+
+// A keyed entry's map is parallel to its selector's labels, and the selector is a stepped key.
+static_assert([] {
+  for (const auto& f : kFixedControls) {
+    if (f.keyBy.empty()) continue;
+    const auto sel = paramIndex(f.keyBy);
+    if (!sel || !kParams[static_cast<std::size_t>(*sel)].stepped || kParams[static_cast<std::size_t>(*sel)].labels.size() != f.map.size()) return false;
+  }
+  return true;
+}());
 
 }  // namespace echo

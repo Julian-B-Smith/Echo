@@ -41,6 +41,8 @@ const poisonedMath = Object.freeze(Object.assign(Object.create(null),
 const clock = () => { throw new Error("wall-clock read inside the lab DSP"); };
 const build = src => new Function("Math", "Date", "performance", src + "\n;" + EXPORTS)(poisonedMath, clock, { now: clock });
 const X = build(dsp);
+// A time.div index by NAME (RC-7.4's table is shortest first; a bare index silently changes its musical length when the table moves, T-045). Throws on a name that is no row.
+const DIV = name => { const i = X.ECHO_PARAMS.find(q => q.key === "time.div").labels.indexOf(name); if (i < 0) throw new Error("no division " + name); return i; };
 
 // ---- shared helpers ------------------------------------------------------------
 const SR = 16000;   // the lab's invariants are rate-free (times in s, rates per s); 16 kHz keeps the gate fast
@@ -65,7 +67,7 @@ const engine = (Xm, params, lab, sr) => { const e = new Xm.EchoLab(sr || SR, lab
 
 // The stress patch: every stateful path live (drift with spread, all filters,
 // past-unity feedback, a routing switch, a division flip, a tempo saw).
-const STRESS = { "time.mode": 2, "time.div": 12, "time.offR": 20, "fb.amount": 110, mix: 60, "route.mode": 2,
+const STRESS = { "time.mode": 2, "time.div": DIV("1/8"), "time.offR": 20, "fb.amount": 110, mix: 60, "route.mode": 2,
   "filt.in.on": 1, "filt.in.hpHz": 120, "filt.out.on": 1, "filt.out.lpHz": 6000, "mod.depthMs": 6, "mod.shape": 1, "mod.spread": 70, "mod.seed": 4242 };
 const STRESS_EV = [{ t: 0.6, key: "time.div", v: 9 }, { t: 1.1, key: "route.mode", v: 1 }, { t: 1.4, key: "filt.loop.on", v: 0 }];
 const saw = t => 100 + 40 * ((t * 1.7) % 1);
@@ -101,8 +103,10 @@ const diff = manifestDiff(specParams, X.ECHO_PARAMS);
 check(diff.length === 0, `manifest: lab ECHO_PARAMS == spec/params.json (${specParams.length} keys, switch declarations included)` + (diff.length ? " — " + diff.slice(0, 4).join("; ") : ""));
 {
   const m1 = JSON.parse(JSON.stringify(specParams)); m1[2].def += 0.5;          // never lands on an integer default
-  const m2 = JSON.parse(JSON.stringify(specParams)); m2.find(p => p.switch).switch += " ";
-  plant(manifestDiff(m1, X.ECHO_PARAMS).length > 0 && manifestDiff(m2, X.ECHO_PARAMS).length > 0, "manifest check detects a planted default change and a planted switch-declaration change");
+  const m2 = JSON.parse(JSON.stringify(specParams)); m2.find(p => p.switch).switch += " ";   // the first is time.mode's: still prose (echo-005 Ask 2)
+  const m3 = JSON.parse(JSON.stringify(specParams)); m3.find(p => typeof p.switch === "object").switch.length_s += 0.01;   // a §12.7 object
+  plant(manifestDiff(m1, X.ECHO_PARAMS).length > 0 && manifestDiff(m2, X.ECHO_PARAMS).length > 0 && manifestDiff(m3, X.ECHO_PARAMS).length > 0,
+    "manifest check detects a planted default change and a planted switch-declaration change (prose and §12.7 object)");
 }
 
 // ---- 4. Determinism and instance isolation (admission row A15): two instances
@@ -555,7 +559,7 @@ function generations(params, sr, lab) {
 {
   const n = blocks(5 * SR), src = new Float32Array(n);
   src.set(noise(0.4 * SR, 3), 0); src.set(noise(0.6 * SR, 4), blocks(3.2 * SR));
-  const p = { "time.mode": 2, "time.div": 15, "fb.amount": 20, mix: 60, "mod.depthMs": 8, "mod.shape": 0, "mod.rateHz": 1.3 };
+  const p = { "time.mode": 2, "time.div": DIV("1/16"), "fb.amount": 20, mix: 60, "mod.depthMs": 8, "mod.shape": 0, "mod.rateHz": 1.3 };
   const tempo = t => (t < 2 ? 120 : 96);
   function pair(Xm) {
     const twin = engine(Xm, p), sleeper = engine(Xm, p);
@@ -580,7 +584,7 @@ function generations(params, sr, lab) {
   const lab = plantName => (plantName ? { plant: plantName } : {});
   const timesOf = (Xm, mode, bpm, plantName) => {
     const e = new Xm.EchoLab(SR, lab(plantName));
-    e.setParam("time.mode", mode); e.setParam("time.ms", 100); e.setParam("time.div", 12);   // 1/8 at 97 bpm is 309.28 ms
+    e.setParam("time.mode", mode); e.setParam("time.ms", 100); e.setParam("time.div", DIV("1/8"));   // 1/8 at 97 bpm is 309.28 ms
     return e._timesNow(bpm).slice(0, 2).join();
   };
   // sec (0) and hz (1) read time.ms alone: the same times at any tempo; sync (2) reads the division at the tempo.
@@ -620,7 +624,7 @@ function generations(params, sr, lab) {
     const e = new X.EchoLab(SR, lab(plantName));
     e.setParam("time.mode", 2); e.setParam("time.div", 9); e._resolveBoth(120);
     const sent = (k, v) => { e.paramMoved = false; e.setParam(k, v); const moved = e.paramMoved; if (e.timeDirty) { e._resolveBoth(120); e.timeDirty = false; } return moved; };
-    return [sent("time.ms", 200), sent("time.ms", 250), sent("time.div", 12), sent("time.offL", 10), sent("time.offL", 0)];
+    return [sent("time.ms", 200), sent("time.ms", 250), sent("time.div", DIV("1/8")), sent("time.offL", 10), sent("time.offL", 0)];
   }
   const kflags = keyFlags().join();
   check(kflags === "false,false,true,true,true", `time.mode: while synced, time.ms moves nothing; a division or an offset that moves the time does (${kflags})`);
@@ -661,7 +665,7 @@ function generations(params, sr, lab) {
   const synced = { "time.mode": 2, "time.ms": 500, "time.change": 0, "time.law": 0, "fb.amount": 0, "filt.loop.on": 0, mix: 100 };
   const swing = t => 120 + 60 * Math.sin(2 * Math.PI * t);
   // A cell found by the critic's sweep (it reads in 2 of 32; the lab's soft-landing tape law rarely lands within half a sample of a swinging target).
-  const onSwing = lab => worst(1.5, Object.assign({}, synced, { "time.div": 9, "time.tempoMode": 0, "time.glide": 0.05 }), [{ t: 1.1, key: "time.div", v: 12 }], swing, lab);
+  const onSwing = lab => worst(1.5, Object.assign({}, synced, { "time.div": 9, "time.tempoMode": 0, "time.glide": 0.05 }), [{ t: 1.1, key: "time.div", v: DIV("1/8") }], swing, lab);
   const fixed = onSwing({}), swingStopped = onSwing({ plant: "movingHeadStopsDead" });
   check(fixed < 2.5, `M2: a time.div move handed to time.tempoMode crossfade on 120 +- 60 bpm reads clean at 96 kHz (${fixed.toFixed(2)} < 2.5)`);
   plant(swingStopped > 2.5, `M2 flags a moving head that stops dead when the tempo takes over (${swingStopped.toFixed(2)})`);
@@ -675,7 +679,7 @@ function generations(params, sr, lab) {
   check(moved < 2.5, `M2: a retarget to within half a sample of a moving head leaves through a fade at 96 kHz (${moved.toFixed(2)} < 2.5)`);
   plant(stopped > 2.5, `M2 flags a moving head that stops dead on such a retarget (${stopped.toFixed(2)})`);
   const stepAfter = t => 120 + 0.5 * Math.sin(2 * Math.PI * t) + (t >= 1.2 ? 13 : 0);
-  const inCap = lab => worst(1.6, Object.assign({}, synced, { "time.div": 12, "time.tempoMode": 2, "time.glide": 0.01 }), [{ t: 1.0, key: "time.div", v: 9 }], stepAfter, lab);
+  const inCap = lab => worst(1.6, Object.assign({}, synced, { "time.div": DIV("1/8"), "time.tempoMode": 2, "time.glide": 0.01 }), [{ t: 1.0, key: "time.div", v: 9 }], stepAfter, lab);
   const capFixed = inCap({}), capDropped = inCap({ plant: "followCapDropsSpeed" });
   check(capFixed < 2.5, `M2: a fast glide handed to time.tempoMode follow inside the cap reads clean at 96 kHz (${capFixed.toFixed(2)} < 2.5)`);
   plant(capDropped > capFixed + 0.5, `M2 flags follow dropping a speed past the cap, lengthening (${capDropped.toFixed(2)} against ${capFixed.toFixed(2)})`);
@@ -683,27 +687,27 @@ function generations(params, sr, lab) {
   // Fades on line 0 by the end of the render: the tempo alone starts one fade per crossfade, so a key's glide that kept the key's starts none past the count before it.
   const fades = (seconds, events, lab) => X.echoRender({ sr: SR, seconds, srcL: new Float32Array(blocks(seconds * SR)).fill(0.1), lab: Object.assign({ fallback: true }, lab), bpmAt: swing,
     params: Object.assign({}, synced, { "time.div": 9, "time.tempoMode": 0, "time.glide": 0.3 }), events }).stats[0].fades;
-  const before = fades(1.0, []), move = [{ t: 1.0, key: "time.div", v: 12 }];
+  const before = fades(1.0, []), move = [{ t: 1.0, key: "time.div", v: DIV("1/8") }];
   const held = fades(1.15, move) - before, stolen = fades(1.15, move, { plant: "tempoStealsKeyMove" }) - before;
   check(held <= 0, `a key's glide in flight under a moving tempo stays the key's: the tempo starts no fade during it (${held})`);
   plant(stolen > 0, `the in-flight check detects a tempo move taking a key's glide (${stolen} fades)`);
   // D-050 A4: a key's fade that has ended hands over: a crossfade on a 1 bpm/s ramp, then follow takes the ramp with no fade. It used to chain the key's fades for the whole ramp.
   const ramp = t => 120 + Math.max(0, t - 1);
   const onRamp = lab => X.echoRender({ sr: SR, seconds: 3, srcL: new Float32Array(blocks(3 * SR)).fill(0.1), lab: Object.assign({ fallback: true }, lab), bpmAt: ramp,
-    params: Object.assign({}, synced, { "time.div": 9, "time.change": 1, "time.tempoMode": 2 }), events: [{ t: 1.0, key: "time.div", v: 12 }] }).stats[0].fades;
+    params: Object.assign({}, synced, { "time.div": 9, "time.change": 1, "time.tempoMode": 2 }), events: [{ t: 1.0, key: "time.div", v: DIV("1/8") }] }).stats[0].fades;
   const chainFixed = onRamp({}), chained = onRamp({ plant: "keyFadeChains" });
   check(chainFixed <= 2, `a key's crossfade on a ramp hands over to time.tempoMode follow when its fade ends (${chainFixed} fades)`);
   plant(chained > 10, `the handover check detects a key's fades chaining for the whole ramp (${chained} fades)`);
   plant(onRamp({ plant: "followNoTrackInFade" }) > 10, "the handover check detects a follow fade that does not track the grid (it ends off it and queues another)");
   // D-050 A4: a time.change flip during a key's glide on a ramp waits for the next move: bit-identical to no flip.
   const glideOnRamp = (flip, lab) => X.echoRender({ sr: SR, seconds: 1.4, srcL: noise(blocks(1.4 * SR), 23), lab: Object.assign({ fallback: true }, lab), bpmAt: ramp,
-    params: Object.assign({}, synced, { "time.div": 9, "time.tempoMode": 2, "time.glide": 0.3 }), events: [{ t: 1.0, key: "time.div", v: 12 }].concat(flip ? [{ t: 1.1, key: "time.change", v: 1 }] : []) }).L;
+    params: Object.assign({}, synced, { "time.div": 9, "time.tempoMode": 2, "time.glide": 0.3 }), events: [{ t: 1.0, key: "time.div", v: DIV("1/8") }].concat(flip ? [{ t: 1.1, key: "time.change", v: 1 }] : []) }).L;
   const unflipped = glideOnRamp(false);
   check(sameBits(glideOnRamp(true), unflipped), "a time.change flip during a key's glide on a ramp renders bit-identically to no flip");
   plant(!sameBits(glideOnRamp(true, { plant: "tempoTickRelatches" }), unflipped), "the deferral check detects a tempo tick applying the flip at once");
   // D-050 A4: a follow handover leaves no speed behind in the head.
   const speedLeft = lab => X.echoRender({ sr: SRx, seconds: 2.4, srcL: new Float32Array(blocks(2.4 * SRx)).fill(0.1), lab: Object.assign({ fallback: true }, lab), bpmAt: t => 120 + 0.5 * Math.sin(2 * Math.PI * t),
-    params: Object.assign({}, synced, { "time.div": 12, "time.tempoMode": 2, "time.glide": 0.05 }), events: [{ t: 1.0, key: "time.div", v: 9 }] }).engine.heads[0].V;
+    params: Object.assign({}, synced, { "time.div": DIV("1/8"), "time.tempoMode": 2, "time.glide": 0.05 }), events: [{ t: 1.0, key: "time.div", v: 9 }] }).engine.heads[0].V;
   const left = speedLeft({}), stale = speedLeft({ plant: "followKeepsStaleSpeed" });
   check(left === 0, `a follow handover leaves no speed in the head (${left})`);
   plant(stale !== 0, `the speed check detects one left behind (${stale})`);

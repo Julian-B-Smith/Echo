@@ -14,6 +14,36 @@ int main(int argc, char** argv) {
     std::printf("]\n");
     return 0;
   }
+  // --fixed: the C++ fixed row (params.h kFixedControls) in params.json's shape, a keyed entry's map
+  // spelled out label by label from its selector key's labels, for check_manifest.py (T-045).
+  if (argc > 1 && std::string_view(argv[1]) == "--fixed") {
+    auto q = [](std::string_view v) { std::printf("\"%.*s\"", static_cast<int>(v.size()), v.data()); };
+    std::printf("[");
+    for (std::size_t i = 0; i < echo::kFixedControls.size(); ++i) {
+      const auto& f = echo::kFixedControls[i];
+      std::printf("%s{\"k\":%d,\"label\":", i ? "," : "", f.k);
+      q(f.label);
+      if (f.keyBy.empty()) {
+        std::printf(",\"key\":");
+        q(f.key);
+      } else {
+        std::printf(",\"keyBy\":{\"key\":");
+        q(f.keyBy);
+        std::printf(",\"map\":{");
+        const auto sel = echo::paramIndex(f.keyBy);
+        for (std::size_t j = 0; sel && j < f.map.size(); ++j) {
+          std::printf("%s", j ? "," : "");
+          q(echo::kParams[static_cast<std::size_t>(*sel)].labels[j]);
+          std::printf(":");
+          q(f.map[j]);
+        }
+        std::printf("}}");
+      }
+      std::printf("}");
+    }
+    std::printf("]\n");
+    return 0;
+  }
   const char* morph[] = {"continuous", "jump", "device"};
   std::printf("[\n");
   for (std::size_t i = 0; i < echo::kParams.size(); ++i) {

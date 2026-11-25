@@ -192,23 +192,25 @@ bit-reproducible. The choices made here are recorded in DECISIONS by poll: <b>Q-
  */
 "use strict";
 
-// horde's division list, slow to fast, stored by NAME (intake/tempo-divisions.md).
-// Beats are quarter notes; the host's bpm counts quarters.
+// horde's standard tempo divisions (RC-7.4, intake/tempo-divisions.md), shortest first, stored by NAME.
+// Beats are quarter notes; the host's bpm counts quarters. A bar row is four quarters until the meter
+// arrives as data (SPEC §3.1, echo-005 Ask 1).
 const ECHO_DIVS = [
-  ["2/1", 8], ["3/2", 6], ["2/1T", 16 / 3], ["1/1", 4], ["3/4", 3], ["1/1T", 8 / 3],
-  ["1/2", 2], ["3/8", 1.5], ["1/2T", 4 / 3], ["1/4", 1], ["3/16", 0.75], ["1/4T", 2 / 3],
-  ["1/8", 0.5], ["3/32", 0.375], ["1/8T", 1 / 3], ["1/16", 0.25], ["3/64", 0.1875], ["1/16T", 1 / 6],
-  ["1/32", 0.125], ["3/128", 0.09375], ["1/32T", 1 / 12], ["1/64", 0.0625],
+  ["1/32", 0.125], ["1/16T", 1 / 6], ["1/32D", 0.1875], ["1/16", 0.25], ["1/8T", 1 / 3], ["1/16D", 0.375],
+  ["1/8", 0.5], ["1/4T", 2 / 3], ["1/8D", 0.75], ["1/4", 1], ["1/2T", 4 / 3], ["1/4D", 1.5],
+  ["1/2", 2], ["1 bar T", 8 / 3], ["1/2D", 3], ["1 bar", 4], ["2 bars T", 16 / 3], ["1 bar D", 6],
+  ["2 bars", 8], ["4 bars T", 32 / 3], ["2 bars D", 12], ["4 bars", 16],
 ];
 
-// Switch declarations of the flip-class keys, in contract A11's vocabulary as
-// amended (§12.1: an equal-gain crossfade of a stated length, or `gate`; §12.2:
-// a seeded jump — the state that starts running is seeded from the value being
-// applied, so the value does not step and only its slope changes).
+// Switch declarations of the flip-class keys. Nine are §12.7 objects (ADR-309: method, length_s, law);
+// time.mode and time.div stay prose until echo-005 Ask 2 is answered (D-050 A5). The key order inside an
+// object is spec/params.json's, because lab_smoke compares them as JSON text. §12.1: a crossfade is
+// equal-gain; §12.2: a seeded jump starts from the value being applied, so the value does not step and
+// only its slope changes; `silent` changes no sound at the flip itself.
 const SW_TIME = "moves the read head: repitch = seeded jump of the read position (continuous, slope within the law's cap); crossfade = equal-gain crossfade, time.xfadeMs; jump = equal-gain crossfade, 3 ms";
 const SW_TIME_MODE = SW_TIME + "; deferred: a flip between sec and hz moves nothing: both read one time.ms and no signal-path state switches";
-const SW_DEFER = "deferred: no signal-path state switches at the flip; applies from the next time move";
-const SW_XF20 = "equal-gain crossfade, 20 ms";
+const SW_DEFER = { method: "silent", length_s: 0 };  // applies from the next time move
+const SW_XF20 = { method: "crossfade", length_s: 0.02, law: "equal-gain" };
 
 // The manifest as the lab implements it (mirror of spec/params.json).
 // morph: continuous | jump (flip-class) | device — Bulwark's local enum, which
@@ -245,10 +247,10 @@ const ECHO_PARAMS = [
   P("mod.depthMs", "Mod Depth", "ms", "scalar", 0, 20, 0, "continuous", "lin", "mod"),
   P("mod.rateHz", "Mod Rate", "Hz", "scalar", 0.05, 10, 0.6, "continuous", "log", "mod"),
   P("mod.shape", "Mod Shape", "", "stepped", 0, 1, 0, "jump", "step", "mod", ["sine", "drift"],
-    "seeded jump of the modulation offset: it starts from the value being applied (250 ms value blend, slew-limited)"),
+    { method: "seeded-jump", length_s: 0.25 }),  // the offset's 250 ms value blend, slew-limited
   P("mod.spread", "Mod Spread", "%", "scalar", 0, 100, 0, "continuous", "lin", "mod"),
   P("mod.seed", "Mod Seed", "", "stepped", 0, 65535, 1, "jump", "step", "mod", null,
-    "seeded jump (contract §12.2): the new streams start from the value being applied"),
+    { method: "seeded-jump", length_s: 0 }),  // §12.2: the new streams start from the value being applied
 ];
 const ECHO_PARAM_INDEX = Object.fromEntries(ECHO_PARAMS.map((p, i) => [p.key, i]));
 const EI = ECHO_PARAM_INDEX;
@@ -1239,13 +1241,13 @@ function echoQA1Spec(moveIdx, source, sr, opts) {
 }
 
 // The Q-A2 material (prior-art §3.4): tempo curves at D = 0.25 s (1/8 at 120)
-// and D = 3 s (3/2 at 120). bpm is data, sampled per block.
+// and D = 3 s (1 bar D at 120). bpm is data, sampled per block.
 const ECHO_QA2_TEMPO = [
   ["slow ramp 120 → 132 (1.25 %/s)", t => t < 2 ? 120 : t < 10 ? 120 + 1.5 * (t - 2) : 132, 14],
   ["2× step 120 → 60 → 120", t => t < 4 ? 120 : t < 9 ? 60 : 120, 15],
   ["sawtooth 100 ↗ 140 every 2 s", t => t < 2 ? 120 : 100 + 20 * ((t - 2) % 2), 14],
 ];
-const ECHO_QA2_DIVS = [["D = 0.25 s (1/8)", 12], ["D = 3 s (3/2)", 1]];
+const ECHO_QA2_DIVS = [["D = 0.25 s (1/8)", 6], ["D = 3 s (1 bar D)", 17]];
 const ECHO_QA2_CANDS = [
   ["xfade", "(A) crossfade to the new grid", { tempoPolicy: "xfade" }],
   ["glide", "(B) follow through the repitch law", { tempoPolicy: "glide" }],
@@ -1266,7 +1268,7 @@ function echoQA2Spec(tempoIdx, divIdx, source, sr, opts) {
 // morph (A11 as amended, contract §12). Material: division flips on a synced
 // line, and a time knob swept at 1 Hz (control-rate setParam every 10 ms).
 const ECHO_QA5_MAT = [
-  ["division flips every 1.5 s (1/4, 3/16, 1/8T, 1/8)", 9],
+  ["division flips every 1.5 s (1/4, 1/8D, 1/8T, 1/8)", 9],
   ["time knob swept 1 Hz, 150 \u2194 450 ms", 8],
 ];
 const ECHO_QA5_CANDS = [
@@ -1280,7 +1282,7 @@ function echoQA5Spec(matIdx, source, sr, opts) {
   let params;
   if (matIdx === 0) {
     params = { "time.mode": 2, "time.div": 9 };
-    [10, 14, 12, 9, 10].forEach((d, i) => events.push({ t: 1.5 * (i + 1), key: "time.div", v: d }));
+    [8, 4, 6, 9, 8].forEach((d, i) => events.push({ t: 1.5 * (i + 1), key: "time.div", v: d }));
   } else {
     params = { "time.mode": 0, "time.ms": 300 };
     for (let t = 1; t < secs; t += 0.01) events.push({ t, key: "time.ms", v: 300 + 150 * Math.sin(2 * Math.PI * (t - 1)) });

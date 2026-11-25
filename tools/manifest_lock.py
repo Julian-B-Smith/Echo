@@ -4,7 +4,8 @@
 core/manifest.lock.json freezes what a release may never silently change:
   - every parameter's identity, in order: key, unit, type, morph class, rate class and stepped labels
     (params.json order is the state format's order and the C++ handle, so a reorder is a change too);
-  - the fixed row (RS-5.8), in order: horde gives each fixed control a host parameter id by POSITION;
+  - the fixed row (RS-5.8), in order: horde gives each fixed control a host parameter id by POSITION; an entry names its
+    `key` or, keyed (T-045, horde ADR-399), its `keyBy` (the selector key and its label -> key map), carried whole;
   - the actions (RS-4.12), by key and label;
   - the scope list, SPEC §1, by sha256 (bar row 1: "frozen at the feature freeze").
 Ranges, defaults, names and laws are NOT locked here: check_manifest.py holds the C++ table to
@@ -55,7 +56,9 @@ def model(params_json, spec_md):
     p = json.loads(params_json)
     return {
         "params": [dict({f: x[f] for f in IDENTITY}, labels=x.get("labels", [])) for x in p["params"]],
-        "fixedControls": [{"k": f["k"], "label": f["label"], "key": f["key"]} for f in p.get("fixedControls", [])],
+        # `keyBy` (T-045) is carried whole: a changed map is a changed id's meaning, so it must move module_version.
+        "fixedControls": [dict({"k": f["k"], "label": f["label"]}, **({"keyBy": f["keyBy"]} if "keyBy" in f else {"key": f["key"]}))
+                          for f in p.get("fixedControls", [])],
         "actions": [{"key": a["key"], "label": a["label"]} for a in p.get("actions", [])],
         "scope_sha256": hashlib.sha256(scope_text(spec_md).encode()).hexdigest(),
     }
@@ -166,6 +169,7 @@ def check():
         ("an unlisted new key", planted(lambda c: c["params"].append(dict(c["params"][2], key="mix.width")))),
         ("a removed key", planted(lambda c: c["params"].pop())),
         ("a reordered pair", planted(lambda c: c["params"].__setitem__(slice(6, 8), c["params"][7:5:-1]))),
+        ("a keyBy map's sync entry changed", planted(lambda c: c["fixedControls"][0]["keyBy"]["map"].__setitem__("sync", "time.ms"))),
         ("a dropped action", planted(lambda c: c["actions"].clear())),
         ("an edited scope list", planted(lambda c: c.__setitem__("scope_sha256", "0" * 64))),
     ]

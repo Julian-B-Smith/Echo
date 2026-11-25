@@ -178,7 +178,7 @@ ECHO_PLANT(zoneAtEqual)          // TEST-SIDE: the colouring flag is raised at e
 // ---- M3, B4 (T-021: the factory bank) ----
 ECHO_PLANT(presetStateOversized) // TEST-SIDE: one factory preset's saved text is padded past 4 KiB (A19 over the bank)
 ECHO_PLANT(presetPatchOfDropsKey) // patchOf leaves fb.amount out of the load: the engine keeps its default (critic T-021 M1)
-ECHO_PLANT(factoryLabelTypo)     // pingpong-dotted's division label is "3/16 ": step() answers -1 and validate() must refuse it (critic T-021 M2)
+ECHO_PLANT(factoryLabelTypo)     // pingpong-dotted's division label is "1/8D ": step() answers -1 and validate() must refuse it (critic T-021 M2)
 // ---- M3, B4 (T-039: no macros, D-050) ----
 ECHO_PLANT(factoryCarriesSlot)   // the bank's file gives dub-loop a slot: Echo offers no macros (RS-5.1), so readBank must refuse it, naming the preset
 // ---- M3, B4 (T-038: the offset's expression, kept after the scale key left, D-050) ----
@@ -222,6 +222,8 @@ ECHO_PLANT(followCapDropsShortening)  // the same when the delay is shortening (
 ECHO_PLANT(followKeepsStaleSpeed)   // follow's in-cap branch leaves the law's last speed in the head: it never moves again by it, but it makes a head at rest look moving, so a later time.tempoMode flip and a tiny tempo move start a fade
 ECHO_PLANT(keyFadeChains)           // a key's fade that ends on a moved target queues another key's fade, however the target moved: time.tempoMode never takes over during a ramp (2,667 jumps over 8 s)
 ECHO_PLANT(tempoTickRelatches)      // a tempo tick under a key's move in flight re-latches it: a time.change or time.law flip applies on the next tick of a moving tempo, not from the next move
+// ---- M3, B4 (T-045: the keyed Time row and RC-7.4's divisions, D-050 A5) ----
+ECHO_PLANT(keyedRowSwapped)         // the keyed Time entry's map is read back to front: sync names time.ms and sec names time.div (a lane written to the wrong key)
 }  // namespace echo::plant
 
 #undef ECHO_PLANT

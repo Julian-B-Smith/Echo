@@ -6,5 +6,5 @@
 #include <string_view>
 
 namespace echo {
-inline constexpr std::string_view kModuleVersion = "dfaf94fb0f74491d";
+inline constexpr std::string_view kModuleVersion = "6690a4358094fb7d";
 }  // namespace echo
