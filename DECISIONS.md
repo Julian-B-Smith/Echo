@@ -1550,6 +1550,35 @@ required.
 6. **Tempo-owned motion keeps re-latching on every tick (2026-11-05, by poll, on the critic's round-2 question).** A ramp is a stream of moves, so a `time.law` or `time.tempoMode` flip during tempo-owned motion applies at the next tick. It reads clean (360 rows, at most 1.058). SPEC §3.5 states it.
 `kClickMax` stays 2.5. No factory preset moves: every one of these needs a moving tempo, or a change of `time.change` mid-glide.
 
+**D-050 A5 — horde's answer on the row, and T-045's scope (2026-11-24, the human, two polls on horde's seq 3 of `echo-fixed-row-modes`).**
+horde answered `echo-003` and `echo-004` on 2026-11-15 (horde ADR-399; `integrations/echo/response-fixed-row-modes.md` in horde's tree).
+It accepted the keyed Time entry for the face but ruled two DAW lanes; moved `time.div` to its standard table (SPEC-ENGINE RC-7.4);
+found Echo's switch declarations in prose, which §12.7 (ADR-309) reads as Undeclared; and confirmed the bank imports as it is.
+1. **Two lanes are accepted** (the refusal D-050 ruling 5 sends back to the human). One Time knob on horde's face follows `time.mode`
+   (`time.ms` in sec and hz, `time.div` in sync); in the DAW, `FX<n> Fixed 1` always carries `time.ms` and the slot's second id
+   (horde's proposed `FX<n> Fixed Alt`) always carries `time.div`. The dead lane D-050 set aside shows only in the DAW's list.
+2. **`time.div` adopts RC-7.4 in T-045:** its 22 rows, their order (shortest first, 1/32 to 4 bars) and names (a D suffix, bar rows).
+   Bar rows are the time signature's bar, so **Echo asks horde for the meter as data beside bpm** (the `process()` signature is
+   still open until FOUNDATIONS' ABI). The bank's 3/16 and 3/8 become 1/8D and 1/4D.
+3. **`time.mode` and `time.div` ask horde for a §12.7 form** that names `time.change` as the switch's source; the other nine flip
+   keys declare §12.7 objects as horde read them.
+4. **Type's buttons read Standard, Ping-Pong, Mid/Side;** the saved labels stay `standard`, `pingpong`, `midside`.
+5. **The triplet and dotted toggles stay face gestures** (D-050 ruling 4 stands): no saved keys; a DAW lane spans all 22 rows.
+6. **`intake/` is re-pinned** to horde's current contract (with §12.7 and §12.9) and RC-7.4's table, as T-010 did.
+7. **The filing goes now,** before the build (the meter needs an answer before 2026-12-11): `echo-005` in horde's
+   `integrations/echo/`, its text approved by the human before it is filed.
+8. **`mod.seed` declares `{"method": "seeded-jump", "length_s": 0}`**: SPEC §7's seed change is instant, and only its slope is
+   bounded, by the offset's slew limit.
+9. **The C++ copy of the row leaves the public header** (2026-11-24, by poll, on T-045's critic's M4). D-050 ruling 7 dropped the C++ fixed
+   list; T-045 needs one only so the suite and the manifest tool can hold it equal to `params.json`, so it lives in a header only they
+   include, and horde sees no new symbol.
+10. **Type's `display` list is gated and mirrored:** parallel to `labels`, required on `route.mode`, with a planted fault; the lab carries
+   it. Its field name and shape go to horde with T-027's readiness notice.
+11. **The A12 round trip across sec -> sync -> hz gets its own must-fail plant** (on the critic's M3).
+12. **A value is the rest of its line, and the old division names are not aliases** (the implementer's two readings, checked by the
+   critic). RC-7.4 names contain spaces ("1 bar T"); stray spaces, tabs and blanks are still refused (SPEC §16.2). RC-7.4 keeps no
+   aliases, nothing shipped with the old names, and horde's import calls Echo's own parser.
+
 ## D-051 — The state budget is 4 KiB per corner, as horde ruled (2026-11-24, the human's go-ahead on T-043; horde ADR-401)
 
 horde's human ruled the re-derived state budgets on 2026-11-15 (ADR-401, by poll; `integrations/hypersaw/notice-state-budgets-ruled.md`,

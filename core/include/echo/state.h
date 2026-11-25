@@ -11,8 +11,8 @@
 //
 // Every patch key, one per line, in manifest order (params.h, = params.json);
 // then the Device keys in their own instance block. Stepped keys with labels are
-// written BY NAME (divisions by horde's names; an alias is read and written back
-// as the name, SPEC §3.1); mod.seed as a decimal integer; every other value as
+// written BY NAME (divisions by horde's RC-7.4 names, which have no aliases,
+// SPEC §3.1); mod.seed as a decimal integer; every other value as
 // the SHORTEST decimal that this file's own parser reads back exactly.
 //
 // WHY NOT std::to_chars / std::from_chars: the dev Mac's libc++ deletes
@@ -29,7 +29,7 @@
 //
 // Parsing is strict and ALL OR NOTHING: an unknown, missing or duplicated key, a
 // value out of range or not a whole number for a stepped key, a label that is
-// neither the key's nor a division alias, a key in the wrong block, a different
+// not one of the key's labels, a key in the wrong block, a different
 // version, or a text over 4 KiB refuses the whole text. The size is checked
 // FIRST, before anything else is done with the text (A19). Numbers follow a
 // strict grammar (no '+', hex, whitespace, "30." or ".5"; the seed is a plain
@@ -182,8 +182,6 @@ inline bool parseValue(int i, std::string_view tok, double& out) {
     bool found = false;
     for (std::size_t k = 0; k < d.labels.size(); ++k)
       if (d.labels[k] == tok) { v = static_cast<double>(k); found = true; }
-    if (!found && i == kDiv)
-      if (const auto k = divisionIndex(tok)) { v = *k; found = true; }
     if (!found) return false;
   } else {
     if (!parseNumber(tok, v, d.stepped)) return false;  // a stepped key without labels (mod.seed): a plain decimal integer
@@ -207,7 +205,12 @@ inline std::size_t write(const Values& p, char* out, std::size_t cap, bool latch
   };
   char b[48];
   auto line = [&](int i) {
-    const std::size_t len = formatValue(i, p[static_cast<std::size_t>(i)], b, sizeof b);
+    double v = p[static_cast<std::size_t>(i)];
+    if (plant::stateDropsInactiveKey) {  // the planted writer that saves only the active time key
+      if (i == kDiv && p[kTimeMode] != 2.0) v = kParams[static_cast<std::size_t>(i)].def;
+      if (i == kTimeMs && p[kTimeMode] == 2.0) v = kParams[static_cast<std::size_t>(i)].def;
+    }
+    const std::size_t len = formatValue(i, v, b, sizeof b);
     return len > 0 && put(kParams[static_cast<std::size_t>(i)].key) && put(" ") && put(std::string_view(b, len)) && put("\n");
   };
   if (!put(kVersion) || !put("\n")) return 0;
@@ -251,8 +254,9 @@ inline bool parse(std::string_view text, Values& out, const char** why = nullptr
       continue;
     }
     const std::size_t sp = ln.find(' ');
-    if (sp == std::string_view::npos || sp == 0 || ln.find(' ', sp + 1) != std::string_view::npos)
-      return refuse("a line is not `key value`");
+    // The value is the REST of the line: RC-7.4's division names hold spaces ("1 bar T", T-045). A number
+    // or label with a stray space still fails parseValue's exact match and strict grammar.
+    if (sp == std::string_view::npos || sp == 0) return refuse("a line is not `key value`");
     const auto i = paramIndex(ln.substr(0, sp));
     if (!i) {
       if (plant::stateAcceptsUnknown) continue;  // the planted silent skip (FOUNDATIONS' note to Scape)
@@ -261,7 +265,12 @@ inline bool parse(std::string_view text, Values& out, const char** why = nullptr
     const auto u = static_cast<std::size_t>(*i);
     if (seen[u]) return refuse("a duplicated key");
     if ((kParams[u].morph == Morph::Device) != device) return refuse("a key in the wrong block");
-    if (!parseValue(*i, ln.substr(sp + 1), v[u])) return refuse("a value out of range or not the key's");
+    std::string_view val = ln.substr(sp + 1);
+    if (plant::stateTrimsValue)  // the planted lenient reader
+      while (!val.empty() && val.back() == ' ') val.remove_suffix(1);
+    if (plant::stateTrimsValue)
+      while (!val.empty() && val.front() == ' ') val.remove_prefix(1);
+    if (!parseValue(*i, val, v[u])) return refuse("a value out of range or not the key's");
     seen[u] = true;
   }
   if (first) return refuse("empty");

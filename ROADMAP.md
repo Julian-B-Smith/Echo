@@ -22,7 +22,7 @@ with HIGH findings the author's own suite had passed.
   (D-037 – D-040), T-016 on its own PR (D-041): **batch 2 done**. Batch 3's four items done
   2026-10-28 (D-042 – D-045): T-017 on PR #24 (2975c34), T-018 on PR #25 (1a78af5), T-019 on
   PR #26 (2966256), T-020 on PR #27 (985c1d1); the T-021 bank draft B3 also plans is not
-  started (the bank holds the init only). Batch 4 (T-021 finished, T-022, T-023) next; D-048 (2026-10-29) adds T-038 and T-039 ahead of T-022's face; D-049 adds T-040, T-041 and T-042 before T-023 (all three done); D-050 (2026-11-03) removes macros and `time.scale`: T-039 rewritten, T-044 and T-045 added (T-039, T-044 and T-046 done; T-046 added by D-050 A3, widened by A4). T-043 done 2026-11-24 (D-051: the state budget is 4 KiB, horde ADR-401); T-045 unblocked by horde's answer of 2026-11-15. **M4 (the IR
+  started (the bank holds the init only). Batch 4 (T-021 finished, T-022, T-023) next; D-048 (2026-10-29) adds T-038 and T-039 ahead of T-022's face; D-049 adds T-040, T-041 and T-042 before T-023 (all three done); D-050 (2026-11-03) removes macros and `time.scale`: T-039 rewritten, T-044 and T-045 added (T-039, T-044 and T-046 done; T-046 added by D-050 A3, widened by A4). T-043 done 2026-11-24 (D-051: the state budget is 4 KiB, horde ADR-401); T-045 done 2026-11-24 (D-050 A5: the keyed Time row, two DAW lanes, `time.div` on RC-7.4, §12.7 switch objects; `echo-005` open). **M4 (the IR
   display and Echo's screen) is under way beside it** (D-027, D-030): T-030 – T-032 done (PR #15,
   PR #16); T-033 open (T-014 is on main, PR #20); T-036 (gate 4's flicker) done 2026-10-28 (D-046).
 - **Oracle:** `./verify fast` = kit integrity, leak gate, private-name gate,
@@ -1088,15 +1088,25 @@ filings need the human's go-ahead each time.
      determinism, SR and block independence hold; `./verify fast` green.
 - **Out of scope:** the row's mode-following entry (T-045); the toggles (the face, T-022).
 
-### T-045 — M3: the Time entry follows the mode; Type as a selector (D-050)
-- **Status:** blocked (on horde's answer to `echo-003`, `integrations/echo/brief-fixed-row-modes.md` in horde's tree, PR #1359, merged; respond by 2026-11-13).
-- **Scope:** `spec/params.json`, SPEC §16.4, the lock (`--decision D-NNN`), `tools/manifest_lock.py` and `tools/check_manifest.py`
-  if the shape needs them (a human gate), `docs/face.md`.
+### T-045 — M3: the Time entry follows the mode; Type as a selector; `time.div` on RC-7.4 (D-050, D-050 A5)
+- **Status:** done 2026-11-24 (D-050 A5, rulings 1 - 12; trace `traces/2026-11-24-t045-row-divisions.md`; critic FIX-THEN-SHIP, all fixed).
+  Stacked on T-043's PR. `echo-005` (horde PR #1521) is open, respond by 2026-12-01: until it is answered, bar rows count four quarters
+  and `time.mode` / `time.div` declare their switch in prose (A11 reads them Undeclared, stated).
+- **Scope:** `spec/params.json`, SPEC §3.1, §9, §16.2, §16.4, the lock (`--decision D-050`, its rulings 7 and A5), `tools/manifest_lock.py`
+  and `tools/check_manifest.py` for the row's `keyBy` and §12.7's switch objects, `params.h`, `engine.h`'s division lengths,
+  `presets.h` and the bank file, the lab's mirror and `tools/lab_smoke.mjs`, the suite's `time.div` uses, README and CODEMAP counts.
 - **Acceptance criteria:**
-  1. The row is declared in the shape horde rules, A12's round trip includes it, and T-044's "provisional" is gone.
+  1. The row is declared in the shape horde rules (Time `keyBy` on `time.mode`: `time.ms` in sec and hz, `time.div` in sync), A12's
+     round trip includes it, and T-044's "provisional" is gone.
   2. A refusal or no answer goes to the human with the options D-050 set aside; nothing is chosen for them.
-  3. `./verify fast` green.
-- **Out of scope:** horde's side of it.
+  3. `time.div` is RC-7.4's table (`intake/tempo-divisions.md`): its 22 names, order and lengths, bar rows as four quarter notes each
+     until horde answers `echo-005` Ask 1, stated in SPEC. Every factory preset renders bit-identical to `077de66` at 48 kHz; only
+     division names move (3/16 -> 1/8D, 3/8 -> 1/4D). Every suite row that names a division keeps its musical length.
+  4. Nine flip keys declare §12.7 `switch` objects as D-050 A5 ruling 3 and ruling 8 state; `time.mode` and `time.div` keep prose until
+     `echo-005` Ask 2 is answered, and the A11 gate reads both forms, each with a must-fail control.
+  5. Type's display names (Standard, Ping-Pong, Mid/Side) are declared for horde; the saved labels do not change.
+  6. `./verify fast` green.
+- **Out of scope:** horde's side of it; the meter input itself (until `echo-005` Ask 1 is answered); the face (T-022).
 
 ### T-046 — M3: a move landing on a moving tempo stays under the bar (D-050 A3)
 - **Status:** done 2026-11-05 (stacked on T-044's PR; D-050 A4 widened the scope; trace `traces/2026-11-05-t046-tempo-handover.md`; critic FIX-THEN-SHIP, then SHIP).

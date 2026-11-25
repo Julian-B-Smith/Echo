@@ -102,9 +102,9 @@ Windows x64 AVX2; 44.1 kHz at a 128-sample buffer; 8-voice poly. The budget spli
 | Sources: the swarm, blades, Sub, 8 voices | **≤ 34 %** | the composed engine |
 | FX: both racks together | **≤ 12 %** | every hosted FX module |
 | Modulation, morph, intent bus | **≤ 2 %** | the modulators |
-| Master strip and mixer meters | **≤ 1 %** | the master limiter and the meter taps |
+| Master strip and mixer meters | **≤ 1.5 %** (was 1 %; ADR-275) | the master limiter and the meter taps |
 | GUI with the editor closed | **0 %** | feed gating (B432) |
-| Headroom | 1 % | |
+| Headroom | 0.5 % (was 1 %; ADR-275) | |
 
 **Per FX module, one instance at its defaults:** ≤ 2 % of min-spec. At its worst settings:
 ≤ 4 %. This is what the bar's "fits the per-module budget" means.
@@ -114,7 +114,7 @@ Windows x64 AVX2; 44.1 kHz at a 128-sample buffer; 8-voice poly. The budget spli
   presets may default to the oversampled mode, provided they stay within 4 % (the worst-case figure); the cheaper
   mode stays available. (It was: factory defaults within 2 %, so a preset never imposed the expensive mode. Shriek's
   2× by ear puts 10 of 13 presets between 2 % and 3.8 %.)
-- **Master limiter:** ≤ 0.5 %. **Each modulator:** ≤ 0.25 %.
+- **Master limiter:** ≤ 1.0 %, always on, for true-peak limiting (was 0.5 %; ADR-275, 2026-10-23). **Each modulator:** ≤ 0.25 %.
 
 **How it is measured.** Use the B262 / B236 pattern: Release build, ratio to the calibration
 loop, at the module's default and worst settings. Measurement happens on this Mac (Apple M3).

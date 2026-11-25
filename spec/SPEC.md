@@ -35,9 +35,11 @@ the read, and the M2 bar is what governs; this replaces A9's "a away from the fl
 slot is refused; the rest of D-050 — Time, the saved modes, the fixed row — is amended in its own tickets).
 **Revision 5, by D-050 and D-050 A2 (2026-11-04, T-044):** `time.mode` (`sec`, `hz`, `sync`) replaces the two-label sync key, and the 30th key (the scale) goes: 29 keys again
 (§3.1, §3.4, §3.5, §9, §11, §16.2); `route.mode`'s first label is `standard` (§1, §3.2, §4, §9, §16.2); macros leave the scope list (§1); the fixed row is
-Time (`time.ms`), Feedback, Mix and Type (`route.mode`), provisional until T-045 (§16.4). The other keys' ranges, defaults and classes are unchanged.
+Time, Feedback, Mix and Type (`route.mode`) (§16.4). The other keys' ranges, defaults and classes are unchanged.
 **Amended 2026-11-05 by D-050 A4** (§3.5, §3.8, T-046: a head still moving leaves through a fade; a key's fade that ends hands over to `time.tempoMode`; a tempo tick does not re-latch a key's move; the handover and its limit stated).
 **Amended 2026-11-24 by D-051** (§11, §16.2, T-043: the state budget is 4 KiB per corner, as horde's ADR-401 ruled; the refusal stays first).
+**Amended 2026-11-24 by D-050 A5** (§3.1, §9, §16.2, §16.4, T-045: `time.div` is horde's RC-7.4 table, shortest first, with no aliases, and its bar rows are four quarter notes
+until horde delivers the meter; the Time entry of the fixed row follows `time.mode`, in two DAW lanes; Type's display names; nine flip keys declare §12.7 `switch` objects; a state line's value is the rest of the line).
 
 **What this is.** The behaviour Echo must have, stated so the C++ core (M1–M3) can be built and tested against it.
 The machine-readable half is [`params.json`](params.json): every key, unit, range, default, morph class, rate
@@ -111,8 +113,27 @@ between them, so **a switch between sec and hz moves no time and no read head** 
 it was set to, never rounded to the display's precision, and a saved one reads back **bit for bit** (RS-6.11; §16.2): a Hz
 value turned into milliseconds (3 Hz is 1000 / 3 = 333.3333333333333 ms) is not a short decimal. The default is `sync`.
 
-The 22 division names are horde's list, slow to fast, `2/1` to `1/64`; aliases (`1/1D` for `3/2`, …) are accepted
-on load and stored as the canonical name. bpm ≤ 1 falls back to 120; re-sending an unchanged tempo is a no-op.
+**The 22 divisions are horde's standard tempo divisions, SPEC-ENGINE RC-7.4** (`intake/tempo-divisions.md`; D-050 A5, T-045), **shortest
+first**: index 0 is `1/32`, index 21 is `4 bars`, and an index always names the same row. They have no aliases: a name from the
+earlier list (`3/16`, `3/8`, `2/1`, …) is refused on load. A name may hold spaces (`1 bar T`; §16.2).
+
+| index | name | quarters | index | name | quarters | index | name | quarters |
+|---|---|---|---|---|---|---|---|---|
+| 0 | `1/32` | 0.125 | 8 | `1/8D` | 0.75 | 16 | `2 bars T` | 16/3 |
+| 1 | `1/16T` | 1/6 | 9 | `1/4` | 1 | 17 | `1 bar D` | 6 |
+| 2 | `1/32D` | 0.1875 | 10 | `1/2T` | 4/3 | 18 | `2 bars` | 8 |
+| 3 | `1/16` | 0.25 | 11 | `1/4D` | 1.5 | 19 | `4 bars T` | 32/3 |
+| 4 | `1/8T` | 1/3 | 12 | `1/2` | 2 | 20 | `2 bars D` | 12 |
+| 5 | `1/16D` | 0.375 | 13 | `1 bar T` | 8/3 | 21 | `4 bars` | 16 |
+| 6 | `1/8` | 0.5 | 14 | `1/2D` | 3 | | | |
+| 7 | `1/4T` | 2/3 | 15 | `1 bar` | 4 | | | |
+
+A note row is a fraction of a whole note, a triplet two thirds and a dotted row three halves of its base; `quarters` is
+that length in quarter notes, written as decimals or thirds so no length reads as a division name (the host's bpm counts quarters). **A bar row is four quarter notes** (`1 bar` = 4, `1 bar D` = 6,
+`4 bars T` = 32/3). RC-7.4 measures a bar in the time signature's bars, but Echo is given bpm and no meter, so it reads every
+bar as 4/4 **until horde answers `echo-005` Ask 1** and delivers the meter as data beside bpm (D-050 A5 ruling 2; the
+`process()` signature stays open until FOUNDATIONS' ABI). The default is `1/4` (index 9). Sync reads the row's quarters × 60 / bpm
+(§3.4 folds anything past 12 s). bpm ≤ 1 falls back to 120; re-sending an unchanged tempo is a no-op.
 The face's dot and triplet toggles (T-022) filter the steps a gesture on the Division control lands on; they store
 nothing and change no sound, and the stored name stays horde's (D-050 ruling 4).
 
@@ -148,7 +169,7 @@ time × (1 + offset), the offsets (§3.2) before this clamp, never after it. The
 - a **free** time (sec or hz) longer than 12 s is clamped to 12 s (only reachable through a positive offset);
 - every time is clamped below at **1 ms**.
 
-Example: `2/1` at 30 bpm is 16 s, which plays at 8 s; `2/1` at 40 bpm with a +50 % right offset is 12 s left and
+Example: `2 bars` at 30 bpm is 16 s, which plays at 8 s; `2 bars` at 40 bpm with a +50 % right offset is 12 s left and
 18 s right, which play at 6 s and 9 s.
 
 ### 3.5 What a moving time does: `time.change`
@@ -450,7 +471,7 @@ a normalised law (ADR-203): `lin`, `log` (geometric between min and max), `io` (
 | `mix` | Mix | % | 0 … 100 | 30 | continuous | lin | 20 ms ramp |
 | `time.mode` | Time Mode | sec / hz / sync | — | sync | flip | step | moves the time when it changes it (below) |
 | `time.ms` | Time | ms | 1 … 12000 | 375 | continuous | log | moves the time (§3.5) |
-| `time.div` | Division | 22 names | 2/1 … 1/64 | 1/4 | flip | step | moves the time (below) |
+| `time.div` | Division | 22 names | 1/32 … 4 bars (§3.1) | 1/4 | flip | step | moves the time (below) |
 | `time.offL` | Left Offset | % | −50 … 50 | 0 | continuous | lin | moves the time (§3.5) |
 | `time.offR` | Right Offset | % | −50 … 50 | 0 | continuous | lin | moves the time (§3.5) |
 | `time.change` | Time Change | repitch / crossfade / jump | — | repitch | flip | step | deferred |
@@ -459,7 +480,7 @@ a normalised law (ADR-203): `lin`, `log` (geometric between min and max), `io` (
 | `time.glide` | Glide | s | 0.01 … 5 | 0.3 | continuous | log | the law's time constant |
 | `time.xfadeMs` | Crossfade | ms | 2 … 500 | 60 | continuous | log | latched per fade |
 | `fb.amount` | Feedback | % | 0 … 120 | 35 | continuous | lin | 20 ms ramp |
-| `route.mode` | Routing | standard / pingpong / midside | — | standard | flip | step | equal-gain crossfade, 20 ms |
+| `route.mode` | Routing | standard / pingpong / midside | — | standard | flip | step | equal-gain crossfade, 20 ms (displayed Standard, Ping-Pong, Mid/Side) |
 | `filt.in.on` | Input Filter | off / on | — | off | flip | step | equal-gain crossfade, 20 ms |
 | `filt.in.hpHz` | Input Low Cut | Hz | 20 … 2000 | 20 | continuous | log | 10 ms log glide |
 | `filt.in.lpHz` | Input High Cut | Hz | 500 … 20000 | 20000 | continuous | log | 10 ms log glide |
@@ -477,16 +498,21 @@ a normalised law (ADR-203): `lin`, `log` (geometric between min and max), `io` (
 
 **Switch declarations, in A11's vocabulary as amended** (§12.1: an equal-gain crossfade of a stated length, or
 `gate`; §12.2: a seeded jump — the state that starts running is seeded from the value being applied, so the value
-does not step and only its slope changes; it needs a reported click reading and a planted unseeded-jump control):
-- **`time.mode`, `time.div`** move the read head, by the active time-change mode: **repitch = a seeded jump of the
-  read position** (the position is continuous; only its slope changes, within the cap); **crossfade = equal-gain,
-  `time.xfadeMs`**; **jump = equal-gain, 3 ms**. A key whose method depends on another key's value is new to horde;
-  Echo asks horde, in the readiness filing, whether a mode-dependent declaration is admissible (a ROADMAP
-  follow-up). The planted bare jump is the unseeded control. `time.mode` adds one clause, a deferral: **a flip between
-  sec and hz moves nothing**, because both read one `time.ms` and no signal-path state switches.
-- **`time.change`, `time.law`, `time.tempoMode`: deferred** — no signal-path state switches at the flip (§3.5).
-- **`route.mode`, `filt.*.on`: equal-gain crossfade, 20 ms.**
-- **`mod.shape`, `mod.seed`: seeded jump of the modulation offset**, with a planted unseeded reseed as the control.
+does not step and only its slope changes; it needs a reported click reading and a planted unseeded-jump control).
+**Nine keys declare the §12.7 `switch` object** (ADR-309: `method`, `length_s` in seconds, `law`; `params.json`; D-050 A5 rulings 3, 8):
+- **`route.mode`, `filt.in.on`, `filt.loop.on`, `filt.out.on`: `{"method": "crossfade", "length_s": 0.02, "law": "equal-gain"}`** — an equal-gain crossfade, 20 ms.
+- **`time.change`, `time.law`, `time.tempoMode`: `{"method": "silent", "length_s": 0}`** — deferred: no signal-path state switches at the flip; it applies from the next time move (§3.5).
+- **`mod.shape`: `{"method": "seeded-jump", "length_s": 0.25}`** — a seeded jump of the modulation offset (a 250 ms value blend, slew-limited), with a planted unseeded reseed as the control.
+- **`mod.seed`: `{"method": "seeded-jump", "length_s": 0}`** — the seed's change is instant (§7); only the offset's slope is bounded, by its slew limit.
+
+**`time.mode` and `time.div` keep prose** until horde answers `echo-005` Ask 2 (a §12.7 form that names `time.change` as the switch's source): they
+move the read head, by the active time-change mode: **repitch = a seeded jump of the read position** (the position is continuous; only its slope
+changes, within the cap); **crossfade = equal-gain, `time.xfadeMs`**; **jump = equal-gain, 3 ms**. A key whose method depends on another key's
+value is new to horde. The planted bare jump is the unseeded control. `time.mode` adds one clause, a deferral: **a flip between sec and hz moves
+nothing**, because both read one `time.ms` and no signal-path state switches. `tools/check_manifest.py` reads both forms, each with its planted controls.
+
+**Display names.** `route.mode` also carries `display`, `["Standard", "Ping-Pong", "Mid/Side"]`, parallel to its labels, for horde's three buttons
+(D-050 A5 ruling 4). The saved labels stay `standard`, `pingpong`, `midside`.
 
 Keys freeze at the first release (B428). The defaults of `time.law` (tape) and `time.tempoMode` (glide: horde's
 rule as written) were ratified with the spec (D-017).
@@ -657,16 +683,17 @@ io.outGain 0
   manifest order (`params.json`), then a `[device]` line and the Device keys (`io.inGain`, `io.outGain`), saved once
   per instance, outside every corner (RS-4.5).
 - **Values by name:** stepped keys with labels (`time.mode`, `time.div`, `time.change`, `time.law`,
-  `time.tempoMode`, `route.mode`, `filt.*.on`, `mod.shape`) are written by label, divisions by horde's names (§3.1;
-  an alias is accepted on load and written back as the name); `mod.seed` as a decimal integer.
+  `time.tempoMode`, `route.mode`, `filt.*.on`, `mod.shape`) are written by label, divisions by RC-7.4's names (§3.1; no alias is
+  accepted). A division name may hold spaces (`time.div 1 bar T`), so **a line is the key, one space, and the rest of the line as
+  the value**: a label matches whole, and a number is held to its strict grammar, so a stray space is still refused; `mod.seed` as a decimal integer.
 - **Each value at its target**, never mid-ramp, so a state saved during a ramp, a ringing tail or a latched clip
   equals one saved at rest with the same parameters (A20).
 - **Floats: the shortest decimal that reads back exactly**, proven by reading it back as it is written; never
   `%.6g` (RS-6.11). Save → load → save is byte-identical. This holds for `time.ms` at the values a Hz reading produces
   (§3.1): a saved Time reads back bit for bit.
 - **At most 4 KiB** (4096 bytes, the whole text as Echo writes it; horde ADR-401 moved RS-6.12's 2 KiB). A larger text is **refused before anything is allocated** (A19).
-- **Loading is all or nothing:** an unknown, missing, duplicated or out-of-range key, a label that is neither the key's
-  label nor a division alias, or a different version refuses the whole text and changes nothing. Out of range is refused, never clamped.
+- **Loading is all or nothing:** an unknown, missing, duplicated or out-of-range key, a label that is not the key's
+  label (a retired division name included), or a different version refuses the whole text and changes nothing. Out of range is refused, never clamped.
 - Nothing outside the saved state and `reset()` shapes the sound (A17): the 29 keys are the whole patch.
 
 ### 16.3 Module presets (SPEC-MODULE-MACROS §4; RS-5.1 – 5.6; D-050)
@@ -681,24 +708,38 @@ io.outGain 0
 - **A preset whose `slots` is not empty is refused**, with a message naming the preset. So is a `macroLaw` or any
   other field the writer does not produce, and a Device key, an unknown or missing key, or a value out of range.
 
-### 16.4 Fixed controls (RS-5.8) — PROVISIONAL until T-045
+### 16.4 Fixed controls (RS-5.8)
 
-Echo declares **four**, in this order (also `params.json` → `fixedControls`, with its `fixedControlsStatus`):
+Echo declares **four**, in this order (also `params.json` → `fixedControls`; `core/include/echo/params.h` `kFixedControls` mirrors it and
+`check_manifest.py` holds the two equal):
 
 | k | label | key |
 |---|---|---|
-| 1 | Time | `time.ms` |
+| 1 | Time | **keyed on `time.mode`:** `time.ms` in `sec` and `hz`, `time.div` in `sync` |
 | 2 | Feedback | `fb.amount` |
 | 3 | Mix | `mix` |
 | 4 | Type | `route.mode` |
 
-**This row is provisional until T-045 (D-050 A2).** Time is `time.ms`, which Echo reads in sec and hz (§3.1) and does not read
-in sync, so **while a patch is synced, its Time control does nothing**: `time.ms` is stored but not read, and the division is
-`time.div`, not on the row. D-050 ruling 5 wants one Time control that follows the mode, `time.ms` in sec and hz and `time.div` in
-sync, on one host id; the contract as written allows one unit, range and law per parameter (RS-2.1, RS-4.2, RS-4.3, ADR-203), so
-horde is asked (`echo-003`) to let an entry name its key by mode, and to draw Type, a stepped key, as a selector. Until horde
-answers, the row stands as declared here and the lock holds it without a mark (the lock file carries no note, D-050 A2). A fixed
-control is an ordinary parameter: saved in the state (§16.2), present in every preset, and in A12's round trip.
+The Time entry is `{"k": 1, "label": "Time", "keyBy": {"key": "time.mode", "map": {"sec": "time.ms", "hz": "time.ms", "sync": "time.div"}}}`
+(D-050 ruling 5; horde ADR-399 accepted the shape for its face, answer `response-fixed-row-modes` seq 3; D-050 A5, T-045). With `keyBy` an
+entry has no plain `key`; at most one entry is keyed and its map names at most two keys (horde's proposed refusals, which
+`check_manifest.py` enforces, each with a planted control).
+
+- **On horde's face there is one Time control.** It shows the key `time.mode` names now, with that key's own law and unit: `time.ms` on its
+  log law (read as Hz = 1000 / ms in `hz`), or `time.div` as its divisions. The triplet and dotted toggles are face gestures (D-050
+  ruling 4; A5 ruling 5): no saved keys, and a DAW lane spans all 22 rows.
+- **In the DAW there are two lanes** (D-050 A5 ruling 1, the refusal of D-050 ruling 5's single id, which the human accepted): `FX<n> Fixed 1` always
+  carries `time.ms`, and the slot's second id (horde's proposed `FX<n> Fixed Alt`) always carries `time.div`, in every mode, on its step
+  law (v = index / 21). A lane never changes meaning across a mode flip. The cost, as horde states it: in `sync` the Fixed 1 lane writes `time.ms`,
+  which Echo stores and does not read, and in `sec` and `hz` the second lane writes `time.div` the same way.
+- **Morph is per key:** `time.mode` flips at its threshold, `time.ms` blends, `time.div` flips (RS-4.3).
+- **Type is `route.mode`, a stepped key drawn by horde as three buttons** (its widget rule, ADR-319 item 5). Its display names are
+  **Standard, Ping-Pong, Mid/Side** (`params.json` `display`, parallel to the labels); the saved labels stay `standard`, `pingpong`,
+  `midside`. horde maps its lane by v = index / 2 (0, 0.5, 1), so the three labels keep their order (a new label would shift every recorded lane).
+- A fixed control is an ordinary parameter: saved in the state (§16.2), present in every preset, and in A12's round trip, which includes the keyed
+  row: a Time lane written to the key the row names, across a `time.mode` flip, loses neither `time.ms` nor `time.div`.
+- Open with horde: `echo-005` Ask 1 (the meter as data beside bpm, so a bar row is the time signature's bar) and Ask 2 (a §12.7 form for
+  `time.mode` and `time.div` that names `time.change` as the switch's source).
 
 ### 16.5 The tail declaration's mapping
 

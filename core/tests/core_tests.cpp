@@ -38,6 +38,7 @@
 #include "echo/ir_render.h"
 #include "echo/presets.h"
 #include "b265.h"
+#include "fixed_row.h"
 #include "fold.h"
 
 using echo::Echo;
@@ -48,6 +49,12 @@ namespace {
 constexpr double kSr = 48000.0;
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kProbeHz = 431.7;  // incommensurate with the test times (SPEC §15 probe finding)
+
+// A time.div index BY NAME (T-045: RC-7.4's table is shortest first, and a bare index silently changes its musical length
+// whenever the table moves). A name that is not a row fails to compile. The 1/4 literal 9 stays in some rows, as the
+// default's index; this pins it.
+constexpr int dv(std::string_view name) { return echo::divisionIndex(name).value(); }
+static_assert(dv("1/4") == 9 && dv("1/8") == 6 && dv("4 bars") == 21, "RC-7.4's rows moved: re-read every time.div index in this file");
 
 // The fidelity thresholds (1.0 bar row 10), named once: each check below reads its
 // own, and docs/admission.md's table is printed from these same constants, so the
@@ -423,7 +430,7 @@ bool blockIndependence(Detail& d) {
                               // the time (56000), a division change while synced moves it (57000, 62500), and a flip out of sync
                               // into hz moves it again (64500); hz -> sec at 67000 moves nothing
                               set(14000, "time.mode", 1), set(36000, "time.mode", 0), set(56000, "time.mode", 2),
-                              set(57000, "time.div", 6), set(62500, "time.div", 12), set(64500, "time.mode", 1),
+                              set(57000, "time.div", dv("1/2")), set(62500, "time.div", dv("1/8")), set(64500, "time.mode", 1),
                               // back to repitch, so the 68000 / 68001 pair is a live exponential-law move
                               // (synced from 56000 it moved nothing; under jump from 40000 the law never mattered)
                               set(67000, "time.mode", 0), set(67500, "time.change", 0)};
@@ -824,10 +831,10 @@ bool clampFold(Detail& d) {
     run(*e, z, z, {}, bpm);
     return std::make_pair(e->resolvedTimes(), e->folded());
   };
-  auto [t1, f1] = at({{"time.mode", 2}, {"time.div", 0}}, 30.0);
-  REQUIRE(std::fabs(t1[0] - 8.0) < 1e-9 && f1, "2/1 at 30 bpm plays at %.3f s (expected 8 s, folded)", t1[0]);
-  auto [t2, f2] = at({{"time.mode", 2}, {"time.div", 0}, {"time.offR", 50}}, 40.0);
-  REQUIRE(std::fabs(t2[0] - 6.0) < 1e-9 && std::fabs(t2[1] - 9.0) < 1e-9 && f2, "2/1 at 40 bpm, +50 %% R: %.3f / %.3f s (expected 6 / 9)", t2[0], t2[1]);
+  auto [t1, f1] = at({{"time.mode", 2}, {"time.div", dv("2 bars")}}, 30.0);
+  REQUIRE(std::fabs(t1[0] - 8.0) < 1e-9 && f1, "2 bars at 30 bpm plays at %.3f s (expected 8 s, folded)", t1[0]);
+  auto [t2, f2] = at({{"time.mode", 2}, {"time.div", dv("2 bars")}, {"time.offR", 50}}, 40.0);
+  REQUIRE(std::fabs(t2[0] - 6.0) < 1e-9 && std::fabs(t2[1] - 9.0) < 1e-9 && f2, "2 bars at 40 bpm, +50 %% R: %.3f / %.3f s (expected 6 / 9)", t2[0], t2[1]);
   auto [t3, f3] = at({{"time.mode", 0}, {"time.ms", 12000}, {"time.offR", 50}}, 120.0);
   REQUIRE(t3[1] == 12.0 && !f3, "free 12 s +50 %% R clamps to %.3f s (expected 12)", t3[1]);
   auto [t4, f4] = at({{"time.mode", 0}, {"time.ms", 1}, {"time.offL", -50}}, 120.0);
@@ -956,8 +963,9 @@ bool sleepTwin(Detail& d) {
 }
 
 // Parameter validation: unknown keys, non-finite, out-of-range and fractional
-// stepped values are refused, not clamped; aliases resolve to the canonical
-// division; a load reports refusals but lands what it accepted.
+// stepped values are refused, not clamped; RC-7.4's division names resolve and
+// the retired Echo names (no aliases, T-045) do not; a load reports refusals
+// but lands what it accepted.
 bool paramValidation(Detail& d) {
   auto e = mk({});
   REQUIRE(!e->setParam("nope", 1), "an unknown key was accepted");
@@ -965,7 +973,10 @@ bool paramValidation(Detail& d) {
   REQUIRE(!e->setParam("mix", std::nan("")), "NaN was accepted");
   REQUIRE(!e->setParam("route.mode", 1.5), "a fractional stepped value was accepted");
   REQUIRE(e->setParam("time.div", 21) && e->resolve("fb.amount") == echo::kFb, "valid values and handles");
-  REQUIRE(echo::divisionIndex("1/4D") == 7 && echo::divisionIndex("3/8") == 7 && !echo::divisionIndex("1/5"), "division aliases");
+  REQUIRE(echo::divisionIndex("1/4D") == 11 && echo::divisionIndex("1 bar T") == 13 && echo::divisionIndex("4 bars") == 21 && !echo::divisionIndex("1/5"),
+          "RC-7.4's division names");
+  REQUIRE(!echo::divisionIndex("3/8") && !echo::divisionIndex("3/16") && !echo::divisionIndex("2/1") && !echo::divisionIndex("1/1D") && !echo::divisionIndex("1/64"),
+          "a retired Echo division name (or an alias) resolved");
   const std::array<echo::KeyValue, 2> kv{{{"bogus", 1}, {"mix", 40}}};
   REQUIRE(!e->loadState(kv) && e->getParam(echo::kMix) == 40, "a load must report the refusal and land the rest");
   return true;
@@ -1276,7 +1287,7 @@ bool tempoModes(Detail& d) {
     REQUIRE(f1 >= 1 && e->speedStats(0).clamps == 0 && e->speedStats(0).sMax <= std::pow(2.0, 50.0 / 1200) + 1e-9 && e->headDelay(0) == 12000.0,
             "follow: a 2x tempo step must crossfade (%llu fades, %llu backstop hits, max speed %.4f, head %.1f)",
             static_cast<unsigned long long>(f1), static_cast<unsigned long long>(e->speedStats(0).clamps), e->speedStats(0).sMax, e->headDelay(0));
-    run(*e, in, in, {set(S(0.5), "time.div", 12)}, 240.0, [](long) { return 480; });
+    run(*e, in, in, {set(S(0.5), "time.div", dv("1/8"))}, 240.0, [](long) { return 480; });
     REQUIRE(e->fadeCount(0) == f1, "follow: a key move must obey time.change (repitch), not crossfade");
   }
   return true;
@@ -1328,7 +1339,7 @@ bool seedRules(Detail& d) {
 // it never keeps a residual off the grid.
 bool keyAndFollow(Detail& d) {
   {  // a key glide in flight under tempoMode crossfade, then a tempo ramp: no crossfade
-    auto e = mk({{"time.mode", 2}, {"time.div", 6}, {"time.tempoMode", 0}, {"time.glide", 0.5}, {"fb.amount", 0}});
+    auto e = mk({{"time.mode", 2}, {"time.div", dv("1/2")}, {"time.tempoMode", 0}, {"time.glide", 0.5}, {"fb.amount", 0}});
     const long n = S(2.0);
     const Vec in(n, 0.1);
     runEach(*e, in, in, {set(S(0.3), "time.div", 9)}, [](long i) { return i < S(0.35) ? 120.0 : 120.0 + 2.0 * (i - S(0.35)) / kSr; },
@@ -1352,7 +1363,7 @@ bool keyAndFollow(Detail& d) {
     auto e = mk({{"time.mode", 2}, {"time.div", 9}, {"time.tempoMode", 2}, {"time.glide", 0.05}, {"fb.amount", 0}});
     const long n = S(5.0);
     const Vec in(n, 0.1);
-    runEach(*e, in, in, {set(S(0.2), "time.div", 12)},
+    runEach(*e, in, in, {set(S(0.2), "time.div", dv("1/8"))},
             [](long i) { return i < S(0.25) ? 120.0 : i < S(2.0) ? 120.0 + 1.0 * (i - S(0.25)) / kSr : 121.75; }, [](long, Echo&) {});
     const double off = std::fabs(e->headDelay(0) - e->resolvedTimes()[0] * kSr);
     REQUIRE(off < 1e-6, "follow left the head %.4f samples off the grid at a steady tempo", off);
@@ -1523,7 +1534,7 @@ std::vector<ClickCase> clickCases() {
     return ev;
   };
   auto divSteps = [](long) {
-    return std::vector<Event>{set(S(0.7), "time.div", 6), set(S(1.7), "time.div", 9), set(S(2.7), "time.div", 12), set(S(3.7), "time.div", 9)};
+    return std::vector<Event>{set(S(0.7), "time.div", dv("1/2")), set(S(1.7), "time.div", 9), set(S(2.7), "time.div", dv("1/8")), set(S(3.7), "time.div", 9)};
   };
   return {
       {"full sweep, repitch tape", false, {{"time.mode", 0}, {"time.ms", 500}, {"time.change", 0}, {"time.law", 0}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, sweep(1, 12000), nullptr, 3.0},
@@ -1577,7 +1588,7 @@ struct RevCase { int law; RevKey key; int oct; bool up; double revMs; double sr;
 
 ClickRun reversalRun(const RevCase& c, long shift) {
   const double sr = c.sr, ratio = std::ldexp(1.0, c.oct);
-  constexpr int kDiv[] = {9, 12, 15};  // 1/4, 1/8, 1/16
+  const int kDiv[] = {dv("1/4"), dv("1/8"), dv("1/16")};  // octave steps shorter
   std::vector<std::pair<const char*, double>> kv = {{"time.change", 0}, {"time.law", static_cast<double>(c.law)}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}};
   const char* key = "time.ms";
   double first = 0, back = 0;  // the key's value for the move, and for the reversal
@@ -1974,7 +1985,7 @@ std::vector<ClickCase> stepCases() {
       ClickCase c = stepCase(std::string("time.mode ") + f.what + ", 500 ms / 1/8 (250 ms), " + changeName[m.change], m.law, m.change, 500, {{1.0, "time.mode", f.to}}, 3.0, m.change == 2);
       for (auto& kv : c.kv)
         if (std::string_view(kv.first) == "time.mode") kv.second = f.from;
-      c.kv.push_back({"time.div", 12});
+      c.kv.push_back({"time.div", dv("1/8")});
       cs.push_back(c);
     }
   // T-046 (D-050 A3, A4): a key move landing on a moving tempo. The move follows time.change until the head reaches the moving target, then
@@ -1998,14 +2009,14 @@ std::vector<ClickCase> stepCases() {
     cs.push_back(c);
   };
   const TempoMove tempoMoves[] = {
-      {"time.mode sec -> sync", 0, 12, 60, 1.1, "time.mode", 2},  // T-044's critic's row: 3.925 at 192 kHz before the fix
-      {"time.mode sec -> sync", 0, 12, 40, 1.25, "time.mode", 2},
-      {"time.mode sync -> sec", 2, 12, 60, 1.25, "time.mode", 0},
-      {"time.div 1/4 -> 1/8", 2, 9, 60, 1.75, "time.div", 12},
-      {"time.div 1/4 -> 1/8", 2, 9, 60, 0.7, "time.div", 12},
-      {"time.div 1/8 -> 1/4", 2, 12, 60, 1.5, "time.div", 9},
-      {"time.div 1/8 -> 1/4", 2, 12, 40, 1.1, "time.div", 9},  // and its 4.47, under follow
-      {"time.offL +20 %", 2, 12, 60, 1.25, "time.offL", 20},
+      {"time.mode sec -> sync", 0, dv("1/8"), 60, 1.1, "time.mode", 2},  // T-044's critic's row: 3.925 at 192 kHz before the fix
+      {"time.mode sec -> sync", 0, dv("1/8"), 40, 1.25, "time.mode", 2},
+      {"time.mode sync -> sec", 2, dv("1/8"), 60, 1.25, "time.mode", 0},
+      {"time.div 1/4 -> 1/8", 2, 9, 60, 1.75, "time.div", dv("1/8")},
+      {"time.div 1/4 -> 1/8", 2, 9, 60, 0.7, "time.div", dv("1/8")},
+      {"time.div 1/8 -> 1/4", 2, dv("1/8"), 60, 1.5, "time.div", 9},
+      {"time.div 1/8 -> 1/4", 2, dv("1/8"), 40, 1.1, "time.div", 9},  // and its 4.47, under follow
+      {"time.offL +20 %", 2, dv("1/8"), 60, 1.25, "time.offL", 20},
   };
   for (const TempoMove& m : tempoMoves)
     for (const int tm : {0, 2}) tempoRow(m, 0, tm);
@@ -2017,8 +2028,8 @@ std::vector<ClickCase> stepCases() {
   // falls from 0.445 to 0.028 in one sample, M2 5.72, and no fade is involved. The shortening glide reads 4.15 under its plant with no step.
   for (const int tm : {0, 2}) {
     const std::size_t before = cs.size();
-    tempoRow({"time.div 1/8 -> 1/4, glide 0.01, a 13 bpm step 200 ms on", 2, 12, 0.5, 1.0, "time.div", 9}, 0, tm);
-    tempoRow({"time.div 1/2 -> 1/4, glide 0.01", 2, 6, 0.5, 1.125, "time.div", 9}, 0, tm);
+    tempoRow({"time.div 1/8 -> 1/4, glide 0.01, a 13 bpm step 200 ms on", 2, dv("1/8"), 0.5, 1.0, "time.div", 9}, 0, tm);
+    tempoRow({"time.div 1/2 -> 1/4, glide 0.01", 2, dv("1/2"), 0.5, 1.125, "time.div", 9}, 0, tm);
     for (std::size_t i = before; i < cs.size(); ++i)
       for (auto& kv : cs[i].kv)
         if (std::string_view(kv.first) == "time.glide") kv.second = 0.01;
@@ -2078,7 +2089,7 @@ bool keyFadeHandsOver(Detail& d) {
         const Vec in = clickProbeAt(n, sr);
         const auto bpm = [&](long i) { const double t = static_cast<double>(i) / sr; return 120.0 + (t - 1.0 > 0.0 ? 1.0 * (t - 1.0) : 0.0); };
         std::uint64_t atT1 = 0;
-        runEach(*e, in, in, {set(t0, "time.div", 12)}, bpm, [&](long i, Echo& en) { if (i == t1) atT1 = en.fadeCount(0); });
+        runEach(*e, in, in, {set(t0, "time.div", dv("1/8"))}, bpm, [&](long i, Echo& en) { if (i == t1) atT1 = en.fadeCount(0); });
         const std::uint64_t fades = e->fadeCount(0) - atT1;
         const double xf = 0.060, perRamp = (8.0 - 1.25) / xf;  // time.xfadeMs at its default
         if (tm == 0) {
@@ -2105,7 +2116,7 @@ bool deferralOnMovingTempo(Detail& d) {
           auto e = mk({{"time.mode", 2}, {"time.div", 9}, {"time.change", 0}, {"time.law", 0}, {"time.glide", 0.3}, {"time.tempoMode", static_cast<double>(tm)}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}}, sr);
           const long n = S(1.4, sr);
           const Vec in = clickProbeAt(n, sr);
-          std::vector<Event> ev = {set(S(1.0, sr), "time.div", 12)};
+          std::vector<Event> ev = {set(S(1.0, sr), "time.div", dv("1/8"))};
           if (flip) ev.push_back(set(S(1.1, sr), f.key, f.v));
           return runEach(*e, in, in, ev, [&](long i) { return 120.0 + static_cast<double>(i) / sr; }, [](long, Echo&) {});
         };
@@ -2119,7 +2130,7 @@ bool deferralOnMovingTempo(Detail& d) {
 // tempo move of 1e-5 bpm, far under half a sample: a head at rest starts no fade. A speed left in the head (+0.0205, T-046's critic's gesture) makes it look moving and
 // starts one (the plant followKeepsStaleSpeed); it would survive a rest too, since a rest lands only a head off its target.
 bool handoverLeavesNoSpeed(Detail& d) {
-  auto e = mk({{"time.mode", 2}, {"time.div", 12}, {"time.change", 0}, {"time.law", 0}, {"time.glide", 0.05}, {"time.tempoMode", 2}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}});
+  auto e = mk({{"time.mode", 2}, {"time.div", dv("1/8")}, {"time.change", 0}, {"time.law", 0}, {"time.glide", 0.05}, {"time.tempoMode", 2}, {"fb.amount", 0}, {"filt.loop.on", 0}, {"mix", 100}});
   const long n = S(4.0), tN = n - S(0.2);
   const Vec in = clickProbeAt(n, kSr);
   const auto bpm = [&](long i) { const double t = static_cast<double>(i) / kSr; return i >= tN ? 121.5 + 1e-5 : (t < 1.0 ? 120.0 : (t < 2.5 ? 120.0 + (t - 1.0) : 121.5)); };
@@ -2617,7 +2628,7 @@ bool timeResolution(Detail& d) {
   //    that give another time (1/8 at 97 bpm is 309.28 ms)
   for (const int mode : {0, 1})
     for (const double ms : {1.0, 2.0, 1000.0 / 440.0, 100.0, 1000.0 / 3.0, 375.0, 1000.0, 5000.0, 12000.0})
-      cases.push_back({mode, ms, 12, 97, 0, 0, "time.ms with the offsets at zero"});
+      cases.push_back({mode, ms, dv("1/8"), 97, 0, 0, "time.ms with the offsets at zero"});
   // 2. offsets come first; the clamp and the floor come after them
   for (const int mode : {0, 1}) {
     cases.push_back({mode, 12000, 9, 120, 0, 50, "12 s, +50 % R (clamped to 12 s)"});
@@ -2628,11 +2639,11 @@ bool timeResolution(Detail& d) {
   // 3. sync reads the division at the host tempo, every division, and folds past 12 s (never clamps)
   for (int div = 0; div < 22; ++div) cases.push_back({2, 123, div, 120, 0, 0, "every division at 120 bpm"});
   for (const double bpm : {30.0, 40.0, 61.0, 133.3, 240.0}) {
-    cases.push_back({2, 123, 0, bpm, 0, 0, "2/1 across the fold's edge"});
-    cases.push_back({2, 123, 3, bpm, 0, 50, "1/1, +50 % R"});
-    cases.push_back({2, 123, 12, bpm, -25, 40, "1/8, -25 / +40 %"});
+    cases.push_back({2, 123, dv("2 bars"), bpm, 0, 0, "2 bars across the fold's edge"});
+    cases.push_back({2, 123, dv("1 bar"), bpm, 0, 50, "1 bar, +50 % R"});
+    cases.push_back({2, 123, dv("1/8"), bpm, -25, 40, "1/8, -25 / +40 %"});
   }
-  cases.push_back({2, 123, 0, 40, 0, 50, "2/1 at 40 bpm, +50 % R (18 s, halved once)"});
+  cases.push_back({2, 123, dv("2 bars"), 40, 0, 50, "2 bars at 40 bpm, +50 % R (18 s, halved once)"});
   for (double sr : {44100.0, 96000.0})
     for (const auto& c : cases) {
       const auto [t, folded] = engineTimes(c, sr);
@@ -2645,11 +2656,11 @@ bool timeResolution(Detail& d) {
   {
     const auto [t, f] = engineTimes({0, 12000, 9, 120, 0, 50, ""}, 48000);
     REQUIRE(same(t[0], 12.0) && same(t[1], 12.0) && !f, "sec 12 s with +50 %% R plays %.6f / %.6f s, expected 12 / 12", t[0], t[1]);
-    const auto [u, g] = engineTimes({2, 100, 0, 30, 0, 0, ""}, 48000);
-    REQUIRE(same(u[0], 8.0) && g, "2/1 at 30 bpm (16 s) plays %.6f s, expected 8 (halved once)", u[0]);
+    const auto [u, g] = engineTimes({2, 100, dv("2 bars"), 30, 0, 0, ""}, 48000);
+    REQUIRE(same(u[0], 8.0) && g, "2 bars at 30 bpm (16 s) plays %.6f s, expected 8 (halved once)", u[0]);
     const auto [v, h] = engineTimes({0, 1, 9, 120, -50, 0, ""}, 48000);
     REQUIRE(v[0] == 0.001 && !h, "1 ms with -50 %% L (0.5 ms) must floor at 1 ms, resolved %.6f s", v[0]);
-    const auto [w, k] = engineTimes({1, 1000, 12, 97, 0, 0, ""}, 48000);  // hz: 1 s is 1 Hz, whatever the division and the tempo
+    const auto [w, k] = engineTimes({1, 1000, dv("1/8"), 97, 0, 0, ""}, 48000);  // hz: 1 s is 1 Hz, whatever the division and the tempo
     REQUIRE(same(w[0], 1.0) && !k, "hz with time.ms 1000 (1 Hz) plays %.9f s, expected 1 (the division and the tempo are not read)", w[0]);
   }
   return true;
@@ -2667,7 +2678,7 @@ bool modeFlipControlMove(Detail& d) {
   struct Mode { int change, law; const char* name; };
   // A flip, with the tempo it runs at: from / to are time.mode values. Into sync the flip lands on division 9 (1/4: 500 ms
   // at 120 bpm, 400 ms at 150) and the twin's time.ms move lands on the same instant; out of sync the flip lands on a
-  // time.ms of that instant and the twin's time.div move on division 9. The start is division 12 (1/8) or time.ms 100.
+  // time.ms of that instant and the twin's time.div move on division 9. The start is division 1/8 or time.ms 100.
   struct Flip { int from, to; bool stepped; const char* what; };
   const Flip flips[] = {{0, 2, false, "sec -> sync"},  {1, 2, false, "hz -> sync"},  {2, 1, false, "sync -> hz"},
                         {0, 2, true, "sec -> sync after a tempo step"},  {2, 1, true, "sync -> hz after a tempo step"},
@@ -2683,7 +2694,7 @@ bool modeFlipControlMove(Detail& d) {
       const double landMs = f.stepped ? 400.0 : 500.0;  // division 9 at the tempo the flip runs at
       const bool fromSync = f.from == 2;
       auto make = [&] {
-        return mk({{"time.mode", static_cast<double>(f.from)}, {"time.div", fromSync ? 12.0 : 9.0}, {"time.ms", fromSync ? landMs : 100.0},
+        return mk({{"time.mode", static_cast<double>(f.from)}, {"time.div", fromSync ? dv("1/8") : 9.0}, {"time.ms", fromSync ? landMs : 100.0},
                    {"time.change", static_cast<double>(m.change)}, {"time.law", static_cast<double>(m.law)}, {"time.tempoMode", tempoMode},
                    {"time.glide", 0.2}, {"fb.amount", 50}, {"mix", 100}});
       };
@@ -2856,7 +2867,7 @@ bool timeModeFlip(Detail& d) {
         auto bpmAt = [](long i) { return 120.0 + 30.0 * std::sin(2 * kPi * static_cast<double>(i) / kSr); };
         auto render = [&](int variant) {  // 0: never flips, 1: flips sec <-> hz, 2: hz throughout
           auto e = mk({{"route.mode", static_cast<double>(route)}, {"time.mode", variant == 2 ? 1.0 : 0.0}, {"time.change", static_cast<double>(m.change)},
-                       {"time.law", static_cast<double>(m.law)}, {"time.ms", 400}, {"time.div", 12}, {"fb.amount", 60}, {"mix", 60}, {"time.offR", 12},
+                       {"time.law", static_cast<double>(m.law)}, {"time.ms", 400}, {"time.div", dv("1/8")}, {"fb.amount", 60}, {"mix", 60}, {"time.offR", 12},
                        {"time.glide", 0.15}, {"mod.depthMs", 3}, {"mod.rateHz", 1.7}, {"mod.shape", 1}});
           std::vector<Event> ev;
           if (moving) {
@@ -2891,7 +2902,7 @@ bool timeModeFlip(Detail& d) {
 // a rewrite of base x (1 + offset / 100) as base + base x offset / 100 can round another way at a nonzero offset (at 0 both are exactly base), and
 // nothing else would see it; kept after the scale key left, D-050). offsetTimes is resolveBoth as it was before the scale key (312d70e) written out: base, then
 // base x (1 + offset / 100), the synced halving past 12 s, the clamp to [1 ms, 12 s], then x sr and back / sr as
-// resolvedTimes() reads it. A grid of every division, tempi (40 bpm puts 2/1 on the fold's edge, 30 past it), offsets
+// resolvedTimes() reads it. A grid of every division, tempi (40 bpm puts 2 bars on the fold's edge, 30 past it), offsets
 // and free times (the 12 s clamp and the 1 ms floor included), in each of the three modes, at 44.1, 48 and 96 kHz.
 std::array<double, 2> offsetTimes(bool sync, double ms, int div, double bpm, double offL, double offR, double sr) {
   const double b = (bpm > 1.0) ? bpm : 120.0;
@@ -2950,7 +2961,7 @@ bool offsetExpressionBits(Detail& d) {
 // (c) The offline renderer renders hz as sec and sync at its division's time, and reports the matching times and tail.
 bool timeModesTail(Detail& d) {
   struct Cfg { const char* what; int mode; double ms; int div; };
-  const Cfg secP{"sec", 0, 100, 9}, hzP{"hz", 1, 100, 9}, syncP{"sync", 2, 375, 9}, twinP{"sec twin of 1/4 at 120 bpm", 0, 500, 12};
+  const Cfg secP{"sec", 0, 100, 9}, hzP{"hz", 1, 100, 9}, syncP{"sync", 2, 375, 9}, twinP{"sec twin of 1/4 at 120 bpm", 0, 500, dv("1/8")};
   for (const double sr : {44100.0, 96000.0}) {
     auto build = [&](const Cfg& c) {
       return mk({{"time.mode", static_cast<double>(c.mode)}, {"time.ms", c.ms}, {"time.div", static_cast<double>(c.div)}, {"fb.amount", 40}, {"mix", 100}}, sr);
@@ -3022,7 +3033,7 @@ bool timeModesIndependence(Detail& d) {
   struct M { int mode; const char* name; };
   const double bpm = 150.0;
   for (const M m : {M{0, "sec"}, M{1, "hz"}, M{2, "sync"}}) {
-    const double ms = m.mode == 2 ? 250.0 : 100.0, div = m.mode == 2 ? 15.0 : 12.0;  // 1/16 = 100 ms, 1/8 = 200 ms at 150 bpm
+    const double ms = m.mode == 2 ? 250.0 : 100.0, div = m.mode == 2 ? dv("1/16") : dv("1/8");  // 1/16 = 100 ms, 1/8 = 200 ms at 150 bpm
     // 1. determinism: two instances driven alternately each equal a solo render
     g_rng = 17 + static_cast<std::uint32_t>(m.mode);
     const long n = S(1.2);
@@ -3052,7 +3063,7 @@ bool timeModesIndependence(Detail& d) {
       REQUIRE(orr.L[i] == orf.L[i] && orr.R[i] == orf.R[i], "%s: reset() differs from a fresh instance at %ld", m.name, i);
     // 2. block independence: a time move, then a time.change flip and a second move, under every block pattern
     auto evs = [&] {
-      return m.mode == 2 ? std::vector<Event>{set(S(0.3), "time.div", 12), set(S(0.5), "time.change", 2), set(S(0.55), "time.div", 9)}
+      return m.mode == 2 ? std::vector<Event>{set(S(0.3), "time.div", dv("1/8")), set(S(0.5), "time.change", 2), set(S(0.55), "time.div", 9)}
                          : std::vector<Event>{set(S(0.3), "time.ms", 250), set(S(0.5), "time.change", 2), set(S(0.55), "time.ms", 130)};
     };
     auto ref = patch();
@@ -3411,7 +3422,7 @@ void awkward(Echo& e) {
   e.setParam("time.offL", -50);
   e.setParam("time.offR", 49.999999999999993);
   e.setParam("mod.seed", 65535);
-  e.setParam("time.div", 19);  // 3/128, the longest label
+  e.setParam("time.div", dv("4 bars T"));  // one of the longest labels (8 characters)
   e.setParam("route.mode", 2);
   e.setParam("time.tempoMode", 2);
   e.setParam("io.inGain", -24);
@@ -3554,7 +3565,7 @@ bool stateSize(Detail& d) {
     const auto& p = echo::kParams[static_cast<std::size_t>(i)];
     if (!p.stepped) w->setParam(i, p.min < 0 ? p.min + (p.max - p.min) * (1.0 / 3.0) * 1e-6 : p.min + (p.max - p.min) / 3.0);
   }
-  w->setParam("time.div", 19);
+  w->setParam("time.div", dv("4 bars T"));  // one of the longest labels
   w->setParam("mod.seed", 65535);
   const std::string worst = saveText(*w);
   REQUIRE(!worst.empty() && worst.size() <= echo::state::kMaxBytes, "the worst-case state is %zu bytes (budget %zu)", worst.size(), echo::state::kMaxBytes);
@@ -3629,9 +3640,9 @@ bool stateUndo(Detail& d) {
   return true;
 }
 
-// All or nothing, and the alias rule: each malformed text is refused and leaves
-// the instance and the staging slot untouched; an alias reads and is written
-// back as the canonical name.
+// All or nothing: each malformed text is refused and leaves the instance and the
+// staging slot untouched; a division reads and is written back by its RC-7.4 name
+// (no aliases, and a retired Echo name is refused, T-045).
 // A load DURING PLAY (critic T-015 H1): stage + adopt on a ringing instance is
 // exactly a load (D-020: the old repeats fade under their old settings) plus the
 // Device keys through setParam (they ramp), bit for bit, against a twin that
@@ -3684,6 +3695,13 @@ bool stateRefusals(Detail& d) {
       {"the retired labels free and sync as time.mode's own (free)", replace("time.mode sync\n", "time.mode free\n")},
       {"a time mode by index", replace("time.mode sync\n", "time.mode 2\n")},
       {"a division by index", replace("time.div 1/4\n", "time.div 9\n")},
+      {"a retired division name (3/16 is now 1/8D; RC-7.4 has no aliases)", replace("time.div 1/4\n", "time.div 3/16\n")},
+      // A value is the rest of the line (RC-7.4's names hold spaces), so a stray space must still be refused (T-045):
+      {"a stray space after a division name", replace("time.div 1/4\n", "time.div 1/4 \n")},
+      {"a stray space inside a division name", replace("time.div 1/4\n", "time.div 1 /4\n")},
+      {"two spaces before a value", replace("time.div 1/4\n", "time.div  1/4\n")},
+      {"a number with a space in it", replace("mix 30\n", "mix 3 0\n")},
+      {"a trailing space after a number", replace("mix 30\n", "mix 30 \n")},
       {"a fractional seed", replace("mod.seed 1\n", "mod.seed 1.5\n")},
       {"non-finite", replace("mix 30\n", "mix nan\n")},
       {"another version", replace("echo-state 1\n", "echo-state 2\n")},
@@ -3723,8 +3741,8 @@ bool stateRefusals(Detail& d) {
     REQUIRE(!e->stageState(without, &whyMissing) && !e->adoptStaged() && saveText(*e) == s, "a text without %s was accepted", key.c_str());
   }
   const char* why = "";
-  REQUIRE(restore(*e, replace("time.div 1/4\n", "time.div 1/8D\n"), &why), "the alias 1/8D was refused (%s)", why);
-  REQUIRE(saveText(*e).find("\ntime.div 3/16\n") != std::string::npos, "the alias was not written back as its name 3/16");
+  REQUIRE(restore(*e, replace("time.div 1/4\n", "time.div 1/8D\n"), &why), "the division 1/8D was refused (%s)", why);
+  REQUIRE(saveText(*e).find("\ntime.div 1/8D\n") != std::string::npos, "the division 1/8D was not written back by name");
   for (const char* mode : {"sec", "hz", "sync"}) {  // each label reads, and is written back by name
     REQUIRE(restore(*e, replace("time.mode sync\n", std::string("time.mode ") + mode + "\n"), &why), "time.mode %s was refused (%s)", mode, why);
     REQUIRE(saveText(*e).find(std::string("\ntime.mode ") + mode + "\n") != std::string::npos, "time.mode %s was not written back by name", mode);
@@ -4087,6 +4105,68 @@ bool presetA12(Detail& d) {
   return true;
 }
 
+// A12 and the fixed row (T-045, D-050 A5; SPEC §16.4; RS-5.8, horde ADR-399): the row is Time, Feedback, Mix, Type, and Time is
+// KEYED on time.mode: time.ms in sec and hz, time.div in sync. Echo's own reading of horde's round trip: (1) the keyed entry names
+// the right key under each mode label, every plain entry its own key, and every key on the row exists and is not a Device key
+// (RS-4.5); (2) a host that writes the Time lane to the key the row names, across a mode flip (sec -> sync -> hz), loses neither
+// time.ms nor time.div: each is saved exactly, the other untouched by the write, and a fresh engine restored from the text saves
+// the same text. The plant keyedRowSwapped reads the map back to front (sync names time.ms, sec names time.div).
+bool fixedRowKeyed(Detail& d) {
+  const auto& row = echo::kFixedControls;
+  REQUIRE(row.size() == 4, "the fixed row has %zu entries, not 4", row.size());
+  const char* const labels[4] = {"Time", "Feedback", "Mix", "Type"};
+  const char* const plain[4] = {nullptr, "fb.amount", "mix", "route.mode"};
+  for (std::size_t j = 0; j < row.size(); ++j) {
+    REQUIRE(row[j].k == static_cast<int>(j) + 1 && row[j].label == labels[j], "entry %zu is k %d `%.*s`, not k %zu `%s`", j, row[j].k,
+            static_cast<int>(row[j].label.size()), row[j].label.data(), j + 1, labels[j]);
+    if (plain[j]) REQUIRE(row[j].keyBy.empty() && echo::fixedKey(row[j], 0) == plain[j], "the %s entry does not carry %s", labels[j], plain[j]);
+  }
+  REQUIRE(row[0].keyBy == "time.mode", "Time is keyed on `%.*s`, not time.mode", static_cast<int>(row[0].keyBy.size()), row[0].keyBy.data());
+  const std::array<const char*, 3> want{"time.ms", "time.ms", "time.div"};  // sec, hz, sync: horde's seq 3 quotes this map
+  const auto sel = echo::paramIndex("time.mode");
+  REQUIRE(sel && echo::kParams[static_cast<std::size_t>(*sel)].labels.size() == want.size(), "time.mode does not have the three labels the row maps");
+  for (std::size_t m = 0; m < want.size(); ++m) {
+    const auto got = echo::fixedKey(row[0], m);
+    REQUIRE(got == want[m], "under time.mode %.*s the Time entry carries `%.*s`, not %s", static_cast<int>(echo::labels::kTimeMode[m].size()),
+            echo::labels::kTimeMode[m].data(), static_cast<int>(got.size()), got.data(), want[m]);
+  }
+  for (const auto& f : row)
+    for (std::size_t m = 0; m < (f.keyBy.empty() ? 1 : f.map.size()); ++m) {
+      const auto k = echo::paramIndex(echo::fixedKey(f, m));
+      REQUIRE(k && echo::kParams[static_cast<std::size_t>(*k)].morph != echo::Morph::Device, "the row names a key that is missing or a Device key");
+    }
+
+  // (2) the Time lane as a host writes it: to the key the row names under the mode in force.
+  auto e = mk({});
+  std::string why;
+  auto both = [&](const char* when, double ms, double div) {
+    const std::string text = saveText(*e);
+    echo::state::Values v{};
+    const char* swhy = "";
+    REQUIRE(echo::state::parse(text, v, &swhy), "%s: the saved state does not parse (%s)", when, swhy);
+    REQUIRE(v[echo::kTimeMs] == ms && v[echo::kDiv] == div, "%s: the saved time.ms is %.17g (want %.17g) and time.div %.17g (want %.17g)", when,
+            v[echo::kTimeMs], ms, v[echo::kDiv], div);
+    auto t = mk({});
+    REQUIRE(restore(*t, text, &swhy) && saveText(*t) == text, "%s: a fresh engine restored from the state does not save the same text", when);
+    return true;
+  };
+  // `value` is what the lane carries in this mode: a time in ms (sec), a Hz reading as ms (hz) or a division index (sync).
+  auto lane = [&](const char* when, std::size_t mode, double value) {
+    REQUIRE(e->setParam("time.mode", static_cast<double>(mode)), "%s: time.mode was refused", when);
+    const std::string key(echo::fixedKey(row[0], mode));
+    REQUIRE(e->setParam(key.c_str(), value), "%s: the Time lane's write of %.17g to `%s` was refused", when, value, key.c_str());
+    return true;
+  };
+  const double kSecMs = 250.123456789, kHzMs = 1000.0 / 3.0, kDefDiv = dv("1/4"), kDivSet = dv("1/8D");
+  const std::size_t kSec = 0, kHz = 1, kSync = 2;
+  if (!lane("sec", kSec, kSecMs) || !both("sec", kSecMs, kDefDiv)) return false;
+  if (!lane("sync", kSync, kDivSet) || !both("sync", kSecMs, kDivSet)) return false;  // the sync write leaves time.ms alone
+  REQUIRE(e->setParam("time.mode", static_cast<double>(kHz)), "time.mode hz was refused");
+  if (!both("hz flip", kSecMs, kDivSet)) return false;  // a flip alone moves nothing stored
+  if (!lane("hz", kHz, kHzMs) || !both("hz", kHzMs, kDivSet)) return false;  // the hz write leaves time.div alone
+  return true;
+}
+
 // A13 (critic T-017 H2: one ENGINE taken through the corners): the corners' text round-trips first (readBank of
 // writeBank); then for each corner c, one engine loads c, then every other corner in turn (each a load mid-play,
 // with input running), then c again; once the last fade ends, its saved state equals a fresh engine's loaded at c,
@@ -4426,8 +4506,8 @@ bool b265Port(Detail& d) {
   const long n = S(3.4), t0 = S(2.0) + 12;
   struct K { const char* key; double a, b; double change; double fadeS; };  // change < 0: leave time.change alone
   const K keys[] = {{"route.mode", 0, 1, -1, 0.02},  {"filt.in.on", 0, 1, -1, 0.02}, {"filt.loop.on", 1, 0, -1, 0.02}, {"filt.out.on", 0, 1, -1, 0.02},
-                    {"time.mode", 2, 0, 0, -1},       {"time.div", 9, 12, 0, -1},     {"time.mode", 2, 0, 1, 0.06},    {"time.div", 9, 12, 1, 0.06},
-                    {"time.mode", 2, 0, 2, 0.003},    {"time.div", 9, 12, 2, 0.003},  {"mod.shape", 0, 1, -1, -1},     {"mod.seed", 1, 2, -1, -1},
+                    {"time.mode", 2, 0, 0, -1},       {"time.div", 9, dv("1/8"), 0, -1},     {"time.mode", 2, 0, 1, 0.06},    {"time.div", 9, dv("1/8"), 1, 0.06},
+                    {"time.mode", 2, 0, 2, 0.003},    {"time.div", 9, dv("1/8"), 2, 0.003},  {"mod.shape", 0, 1, -1, -1},     {"mod.seed", 1, 2, -1, -1},
                     {"time.change", 0, 1, -1, -1},    {"time.law", 0, 1, -1, -1},     {"time.tempoMode", 1, 0, -1, -1}};
   const char* changeName[] = {"repitch", "crossfade", "jump"};
   struct Patch { std::string name; P::ModulePreset preset; bool modulated; };
@@ -4733,8 +4813,8 @@ const std::vector<Check> kChecks = {
     {"state A19: the worst case fits 4 KiB; 4 KiB + 1 refused first; staging allocates nothing", stateSize, {"stateOversizedAccepted"}},
     {"state A20: saved while ringing, mid-ramp and latched equals saved at rest", stateLiveExcluded, {"stateLatchSerialised"}},
     {"state undo: for each of the 29 keys, the snapshot restores byte- and bit-identically", stateUndo, {"stateKeyMissing"}},
-    {"state: every malformed text refused whole (strict number grammar), nothing staged; an alias reads and is written back by name",
-     stateRefusals, {"stateAcceptsUnknown", "stateKeyMissing", "stateMissingKeyDefaults"}},
+    {"state: every malformed text refused whole (strict number grammar), nothing staged; a division reads and is written back by its RC-7.4 name, a retired name is refused",
+     stateRefusals, {"stateAcceptsUnknown", "stateKeyMissing", "stateMissingKeyDefaults", "stateTrimsValue"}},
     {"state: an adopt mid-play is a D-020 load plus the Device keys ramping, bit for bit", stateAdoptLive, {"adoptResets"}},
     // ---- M3 B2, T-037 ----
     {"Clear: nothing changes before its sample; from it the repeats fade over 20 ms (48, 44.1 kHz) and end", clearFade, {"clearCuts"}},
@@ -4752,6 +4832,9 @@ const std::vector<Check> kChecks = {
     {"presets A12: no macros, every preset's slots empty (RS-5.1); the bank saves and loads exactly (id, label, description, values incl. the fixed row's keys); re-written byte-identical",
      presetA12,
      {"factoryCarriesSlot"}},
+    // ---- M3 B4, T-045 ----
+    {"fixed row A12 (SPEC §16.4): Time, Feedback, Mix, Type; Time is keyed on time.mode (time.ms in sec and hz, time.div in sync); a Time lane written to the keyed key across sec -> sync -> hz loses neither time.ms nor time.div (state round trip exact)",
+     fixedRowKeyed, {"keyedRowSwapped", "stateDropsInactiveKey"}},
     {"presets A13: one engine through four corners and back, mid-play, equals a fresh load and holds the corner's own values; restored, it renders the same (L and R)", presetA13,
      {"presetPatchOfDropsKey"}},
     // ---- M3 B4, T-021 ----
@@ -4835,6 +4918,7 @@ bool* plantFlag(std::string_view n) {
       {"modeFlipAlwaysMove", &modeFlipAlwaysMove}, {"keyResendIsMove", &keyResendIsMove}, {"moveReadsOneLine", &moveReadsOneLine}, {"hzFlipDelaysRest", &hzFlipDelaysRest},
       {"movingHeadStopsDead", &movingHeadStopsDead}, {"followHandoverStopsDead", &followHandoverStopsDead}, {"followCapDropsLengthening", &followCapDropsLengthening}, {"followCapDropsShortening", &followCapDropsShortening},
       {"followKeepsStaleSpeed", &followKeepsStaleSpeed}, {"keyFadeChains", &keyFadeChains}, {"tempoTickRelatches", &tempoTickRelatches},
+      {"keyedRowSwapped", &keyedRowSwapped}, {"stateDropsInactiveKey", &stateDropsInactiveKey}, {"stateTrimsValue", &stateTrimsValue},
   };
   for (const auto& p : table)
     if (n == p.n) return p.f;
@@ -4891,8 +4975,8 @@ const std::vector<AdmissionRow>& admissionRows() {
       {"A11", "Parameter classes",
        {switchesClickFree, crossfadeEqualGain, jumpIsShortFade, deferral, modSeeded, clickSweep, reversalClick, onsetClick, phaseSweepWorks, expSlewBinds, modeFlipControlMove, timeModeFlip, timeResolution, resendIsNoMove, stepClick, retargetOnMovingHead, keyFadeHandsOver, deferralOnMovingTempo, handoverLeavesNoSpeed, outgoingBound, tapeCatchUp, loadLeavesDevice, presetValidate, b265Port},
        "structural: every flip key's switch declaration in params.json (`check_manifest.py`, with planted bare and length-less switches); the B265 reading REPORTED, never judged (`.harness/b265-report.txt`)"},
-      {"A12", "Macros", {presetA12, presetValidate, presetFactoryBank},
-       "macros are not offered (RS-5.1; D-050): every preset's slots are empty and a slot is refused by name; the row still round-trips every preset's values, the fixed row's keys included, byte-identical, and the factory bank (the init plus seven) loads as its own values (T-021); B408 for the bank is stated in the run's REPORT lines"},
+      {"A12", "Macros", {presetA12, presetValidate, presetFactoryBank, fixedRowKeyed},
+       "macros are not offered (RS-5.1; D-050): every preset's slots are empty and a slot is refused by name; the row still round-trips every preset's values, the fixed row's keys included, byte-identical, and the factory bank (the init plus seven) loads as its own values (T-021); the keyed Time entry of the fixed row (time.ms in sec and hz, time.div in sync) is held to its map and round-trips across a mode flip (T-045); B408 for the bank is stated in the run's REPORT lines"},
       {"A13", "Corner presets", {presetA13}, "the horde preset's own save and reload is horde's"},
       {"A14", "Feedback", {a14Cycle}, "refusing a min_block > 1 module is the slot's; Echo declares 1"},
       {"A15", "Determinism", {determinism, timeModesIndependence}, ""},
@@ -5033,7 +5117,7 @@ int main(int argc, char** argv) {
                         "tapeKinkUnbounded", "tapeNoBrake", "tapeNoTargetBrake", "fbClampUnsigned", "fbFrozenOutgoing", "fadeLinear",
                         "modAccelUnbounded", "modFloorClampsBoth", "modNoFloorBrake", "modRideKink", "modBoundKeepsSlope", "fbClampStale",
                         "movingHeadStopsDead", "followHandoverStopsDead", "followCapDropsLengthening", "followCapDropsShortening",
-                        "followKeepsStaleSpeed", "keyFadeChains", "tempoTickRelatches"}) {
+                        "followKeepsStaleSpeed", "keyFadeChains", "tempoTickRelatches", "keyedRowSwapped", "stateDropsInactiveKey", "stateTrimsValue"}) {
     bool guarded = false;
     for (const auto& c : kChecks)
       for (const char* p : c.plants) guarded = guarded || std::string_view(p) == n;
