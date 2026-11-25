@@ -146,7 +146,7 @@ ECHO_PLANT(resetClearsLatch)     // reset() clears the meter latches (RS-6.13: t
 ECHO_PLANT(stateFloat6g)         // floats written as %.6g: lossy, so save -> load -> save drifts (L0008)
 ECHO_PLANT(stateKeyMissing)      // one key (fb.amount) left out of the saved state (A17)
 ECHO_PLANT(stateLatchSerialised) // the meter latch written into the state (A20: live state saved)
-ECHO_PLANT(stateOversizedAccepted) // a text over 2 KiB is parsed instead of refused first (A19)
+ECHO_PLANT(stateOversizedAccepted) // a text over 4 KiB is parsed instead of refused first (A19)
 ECHO_PLANT(stateDivByIndex)      // time.div written by index, not by name (SPEC §3.1)
 ECHO_PLANT(stateAcceptsUnknown)  // an unknown key is skipped silently instead of refusing the text
 ECHO_PLANT(adoptResets)          // adoptStaged resets first: a load mid-play cuts the repeats (D-020 broken; critic H1)
@@ -176,7 +176,7 @@ ECHO_PLANT(foldNotchUnsmoothed)  // TEST-SIDE: the notch search reads one raw bi
 ECHO_PLANT(zoneAnyMode)          // TEST-SIDE: the colouring flag is raised in every mode (the rule before D-044)
 ECHO_PLANT(zoneAtEqual)          // TEST-SIDE: the colouring flag is raised at equal times too
 // ---- M3, B4 (T-021: the factory bank) ----
-ECHO_PLANT(presetStateOversized) // TEST-SIDE: one factory preset's saved text is padded past 2 KiB (A19 over the bank)
+ECHO_PLANT(presetStateOversized) // TEST-SIDE: one factory preset's saved text is padded past 4 KiB (A19 over the bank)
 ECHO_PLANT(presetPatchOfDropsKey) // patchOf leaves fb.amount out of the load: the engine keeps its default (critic T-021 M1)
 ECHO_PLANT(factoryLabelTypo)     // pingpong-dotted's division label is "3/16 ": step() answers -1 and validate() must refuse it (critic T-021 M2)
 // ---- M3, B4 (T-039: no macros, D-050) ----

@@ -1549,3 +1549,21 @@ required.
 5. **§3.5's deferral holds for a key's move in flight on a moving tempo (2026-11-05, by poll, on the critic's L5).** A tempo tick under a key's move in flight no longer re-latches it, so a `time.change` or `time.law` flip waits for the next move; a `time.law` flip made mid-glide takes effect at the handover, which is the tempo's new move. Old code, no clicks; fixed here because it is the same lines.
 6. **Tempo-owned motion keeps re-latching on every tick (2026-11-05, by poll, on the critic's round-2 question).** A ramp is a stream of moves, so a `time.law` or `time.tempoMode` flip during tempo-owned motion applies at the next tick. It reads clean (360 rows, at most 1.058). SPEC §3.5 states it.
 `kClickMax` stays 2.5. No factory preset moves: every one of these needs a moving tempo, or a change of `time.change` mid-glide.
+
+## D-051 — The state budget is 4 KiB per corner, as horde ruled (2026-11-24, the human's go-ahead on T-043; horde ADR-401)
+
+horde's human ruled the re-derived state budgets on 2026-11-15 (ADR-401, by poll; `integrations/hypersaw/notice-state-budgets-ruled.md`,
+seq 5 of the thread). A budget counts what the module writes: its state text, counted Echo's way, without horde's wrapper. Echo's figure
+is **4,096 bytes per corner**; the FX device uses the same. The 64- and 32-byte caps are for names and labels horde's editor writes;
+Echo offers no macros (D-050), so, as horde notes, no label cap reaches Echo's state.
+
+1. **`state::kMaxBytes` moves from 2,048 to 4,096,** and the refusal text from "over 2 KiB" to "over 4 KiB". It stays the first test
+   on a text, before anything is allocated (A19). The planted `stateOversizedAccepted` must still read red at the new figure: a
+   4,097-byte text refused for its size, a 4,096-byte text not refused for its size.
+2. **Echo's ceiling fits with room:** at most 910 B calculated, 631 B the largest the suite built, 478 B the largest factory preset
+   (seq 4, at 30 keys); at 29 keys (D-050) the suite reads 618 B worst case and 467 B for the largest preset. No cap on values is added: no user action adds a key, so creation is bounded by construction.
+3. **SPEC §11 and §16.2 say 4 KiB.** Records of earlier items (DECISIONS, done ROADMAP rows, traces, filings) keep the 2 KiB they
+   were true under.
+4. **The suite pins the figure as a literal** (`stateSize`'s boundary rows at 4,096 and 4,097 bytes), not through `kMaxBytes`, so a
+   later edit to the constant fails the suite and needs a decision (T-043's critic, H1).
+

@@ -583,7 +583,7 @@ class Echo {
     return state::write(v, out, cap, latch);
   }
   // The load in two steps (RS-6.6). stageState parses and validates OFF the
-  // audio thread (all or nothing; a text over 2 KiB refused first) into one
+  // audio thread (all or nothing; a text over 4 KiB refused first) into one
   // staging slot; adoptStaged lands it ON the audio thread, between process()
   // calls, with no allocation. One slot, handed over by an atomic flag: a second
   // stage while one is pending is refused rather than racing the adopt.

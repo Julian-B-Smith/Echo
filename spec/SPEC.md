@@ -37,6 +37,7 @@ slot is refused; the rest of D-050 — Time, the saved modes, the fixed row — 
 (§3.1, §3.4, §3.5, §9, §11, §16.2); `route.mode`'s first label is `standard` (§1, §3.2, §4, §9, §16.2); macros leave the scope list (§1); the fixed row is
 Time (`time.ms`), Feedback, Mix and Type (`route.mode`), provisional until T-045 (§16.4). The other keys' ranges, defaults and classes are unchanged.
 **Amended 2026-11-05 by D-050 A4** (§3.5, §3.8, T-046: a head still moving leaves through a fade; a key's fade that ends hands over to `time.tempoMode`; a tempo tick does not re-latch a key's move; the handover and its limit stated).
+**Amended 2026-11-24 by D-051** (§11, §16.2, T-043: the state budget is 4 KiB per corner, as horde's ADR-401 ruled; the refusal stays first).
 
 **What this is.** The behaviour Echo must have, stated so the C++ core (M1–M3) can be built and tested against it.
 The machine-readable half is [`params.json`](params.json): every key, unit, range, default, morph class, rate
@@ -547,8 +548,8 @@ storage; the loop state is double):
 (The manifest's 17.58 MiB is the bare 12 s; the 20 ms modulation margin adds 0.03 MiB. The drift clamp, §7, keeps
 every read inside it.) **The tape law's position history**: one double per sample per line would be 35.2 MiB at
 192 kHz, so the C++ keeps it at control rate (one value per 32 samples, interpolated: 1.1 MiB at 192 kHz) — a design
-target, measured at M1 with the rest of the per-instance figure. **State size**: 29 keys, well inside the 2 KiB
-budget per corner (RS-6.12).
+target, measured at M1 with the rest of the per-instance figure. **State size**: 29 keys, well inside the 4 KiB
+budget per corner (RS-6.12, horde ADR-401).
 
 ## 12. Macros
 
@@ -663,7 +664,7 @@ io.outGain 0
 - **Floats: the shortest decimal that reads back exactly**, proven by reading it back as it is written; never
   `%.6g` (RS-6.11). Save → load → save is byte-identical. This holds for `time.ms` at the values a Hz reading produces
   (§3.1): a saved Time reads back bit for bit.
-- **At most 2 KiB** (2048 bytes, the whole text). A larger text is **refused before anything is allocated** (A19).
+- **At most 4 KiB** (4096 bytes, the whole text as Echo writes it; horde ADR-401 moved RS-6.12's 2 KiB). A larger text is **refused before anything is allocated** (A19).
 - **Loading is all or nothing:** an unknown, missing, duplicated or out-of-range key, a label that is neither the key's
   label nor a division alias, or a different version refuses the whole text and changes nothing. Out of range is refused, never clamped.
 - Nothing outside the saved state and `reset()` shapes the sound (A17): the 29 keys are the whole patch.
