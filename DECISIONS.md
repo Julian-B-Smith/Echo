@@ -1569,6 +1569,15 @@ found Echo's switch declarations in prose, which §12.7 (ADR-309) reads as Undec
    `integrations/echo/`, its text approved by the human before it is filed.
 8. **`mod.seed` declares `{"method": "seeded-jump", "length_s": 0}`**: SPEC §7's seed change is instant, and only its slope is
    bounded, by the offset's slew limit.
+9. **The C++ copy of the row leaves the public header** (2026-11-24, by poll, on T-045's critic's M4). D-050 ruling 7 dropped the C++ fixed
+   list; T-045 needs one only so the suite and the manifest tool can hold it equal to `params.json`, so it lives in a header only they
+   include, and horde sees no new symbol.
+10. **Type's `display` list is gated and mirrored:** parallel to `labels`, required on `route.mode`, with a planted fault; the lab carries
+   it. Its field name and shape go to horde with T-027's readiness notice.
+11. **The A12 round trip across sec -> sync -> hz gets its own must-fail plant** (on the critic's M3).
+12. **A value is the rest of its line, and the old division names are not aliases** (the implementer's two readings, checked by the
+   critic). RC-7.4 names contain spaces ("1 bar T"); stray spaces, tabs and blanks are still refused (SPEC §16.2). RC-7.4 keeps no
+   aliases, nothing shipped with the old names, and horde's import calls Echo's own parser.
 
 ## D-051 — The state budget is 4 KiB per corner, as horde ruled (2026-11-24, the human's go-ahead on T-043; horde ADR-401)
 
