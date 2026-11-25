@@ -205,7 +205,12 @@ inline std::size_t write(const Values& p, char* out, std::size_t cap, bool latch
   };
   char b[48];
   auto line = [&](int i) {
-    const std::size_t len = formatValue(i, p[static_cast<std::size_t>(i)], b, sizeof b);
+    double v = p[static_cast<std::size_t>(i)];
+    if (plant::stateDropsInactiveKey) {  // the planted writer that saves only the active time key
+      if (i == kDiv && p[kTimeMode] != 2.0) v = kParams[static_cast<std::size_t>(i)].def;
+      if (i == kTimeMs && p[kTimeMode] == 2.0) v = kParams[static_cast<std::size_t>(i)].def;
+    }
+    const std::size_t len = formatValue(i, v, b, sizeof b);
     return len > 0 && put(kParams[static_cast<std::size_t>(i)].key) && put(" ") && put(std::string_view(b, len)) && put("\n");
   };
   if (!put(kVersion) || !put("\n")) return 0;
@@ -260,7 +265,12 @@ inline bool parse(std::string_view text, Values& out, const char** why = nullptr
     const auto u = static_cast<std::size_t>(*i);
     if (seen[u]) return refuse("a duplicated key");
     if ((kParams[u].morph == Morph::Device) != device) return refuse("a key in the wrong block");
-    if (!parseValue(*i, ln.substr(sp + 1), v[u])) return refuse("a value out of range or not the key's");
+    std::string_view val = ln.substr(sp + 1);
+    if (plant::stateTrimsValue)  // the planted lenient reader
+      while (!val.empty() && val.back() == ' ') val.remove_suffix(1);
+    if (plant::stateTrimsValue)
+      while (!val.empty() && val.front() == ' ') val.remove_prefix(1);
+    if (!parseValue(*i, val, v[u])) return refuse("a value out of range or not the key's");
     seen[u] = true;
   }
   if (first) return refuse("empty");

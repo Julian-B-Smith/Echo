@@ -88,7 +88,7 @@ try { build(subst("function mulberry32(seed) {", "function mulberry32(seed) { Ma
 plant(threw, "poisoned Math throws on a planted Math.random in the engine");
 
 // ---- 3. The lab implements exactly the spec's manifest, switch declarations included.
-const FIELDS = ["key", "name", "unit", "type", "min", "max", "def", "morph", "rate", "law", "smoothing", "labels", "switch"];
+const FIELDS = ["key", "name", "unit", "type", "min", "max", "def", "morph", "rate", "law", "smoothing", "labels", "display", "switch"];
 function manifestDiff(spec, lab) {
   const out = [];
   if (spec.length !== lab.length) out.push(`count ${spec.length} (spec) vs ${lab.length} (lab)`);
@@ -105,8 +105,9 @@ check(diff.length === 0, `manifest: lab ECHO_PARAMS == spec/params.json (${specP
   const m1 = JSON.parse(JSON.stringify(specParams)); m1[2].def += 0.5;          // never lands on an integer default
   const m2 = JSON.parse(JSON.stringify(specParams)); m2.find(p => p.switch).switch += " ";   // the first is time.mode's: still prose (echo-005 Ask 2)
   const m3 = JSON.parse(JSON.stringify(specParams)); m3.find(p => typeof p.switch === "object").switch.length_s += 0.01;   // a §12.7 object
-  plant(manifestDiff(m1, X.ECHO_PARAMS).length > 0 && manifestDiff(m2, X.ECHO_PARAMS).length > 0 && manifestDiff(m3, X.ECHO_PARAMS).length > 0,
-    "manifest check detects a planted default change and a planted switch-declaration change (prose and §12.7 object)");
+  const m4 = JSON.parse(JSON.stringify(specParams)); m4.find(p => p.key === "route.mode").display.pop();   // a dropped display name
+  plant([m1, m2, m3, m4].every(m => manifestDiff(m, X.ECHO_PARAMS).length > 0),
+    "manifest check detects a planted default change, a planted switch-declaration change (prose and §12.7 object) and a dropped display name");
 }
 
 // ---- 4. Determinism and instance isolation (admission row A15): two instances

@@ -4,6 +4,7 @@
 #include <string_view>
 
 #include "echo/params.h"
+#include "fixed_row.h"  // core/tests: the fixed row is not part of what horde links
 
 int main(int argc, char** argv) {
   // --actions: the C++ action keys (params.h kActionKeys), for check_manifest.py.

@@ -224,6 +224,8 @@ ECHO_PLANT(keyFadeChains)           // a key's fade that ends on a moved target 
 ECHO_PLANT(tempoTickRelatches)      // a tempo tick under a key's move in flight re-latches it: a time.change or time.law flip applies on the next tick of a moving tempo, not from the next move
 // ---- M3, B4 (T-045: the keyed Time row and RC-7.4's divisions, D-050 A5) ----
 ECHO_PLANT(keyedRowSwapped)         // the keyed Time entry's map is read back to front: sync names time.ms and sec names time.div (a lane written to the wrong key)
+ECHO_PLANT(stateDropsInactiveKey)   // the saved state keeps only the ACTIVE time key: time.div is written as its default outside sync, time.ms in sync (a Time lane's other key is lost across a mode flip; A12's round trip, not the row's map, sees it)
+ECHO_PLANT(stateTrimsValue)         // the state parser trims spaces around a value before reading it (RC-7.4's names hold spaces, so a value is the rest of the line: a stray space must still be refused)
 }  // namespace echo::plant
 
 #undef ECHO_PLANT

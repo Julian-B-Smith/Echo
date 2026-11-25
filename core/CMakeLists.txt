@@ -59,6 +59,7 @@ target_compile_options(echo_plants PRIVATE ${ECHO_WARN})
 # tools/check_manifest.py, which compares it with spec/params.json.
 add_executable(echo_manifest tools/manifest.cpp)
 target_link_libraries(echo_manifest PRIVATE echocore)
+target_include_directories(echo_manifest PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)  # fixed_row.h
 target_compile_options(echo_manifest PRIVATE ${ECHO_WARN})
 
 # echo_presets: prints the factory bank (echo/presets.h, the one source, D-042)

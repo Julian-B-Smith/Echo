@@ -119,17 +119,17 @@ earlier list (`3/16`, `3/8`, `2/1`, …) is refused on load. A name may hold spa
 
 | index | name | quarters | index | name | quarters | index | name | quarters |
 |---|---|---|---|---|---|---|---|---|
-| 0 | `1/32` | 1/8 | 8 | `1/8D` | 3/4 | 16 | `2 bars T` | 16/3 |
+| 0 | `1/32` | 0.125 | 8 | `1/8D` | 0.75 | 16 | `2 bars T` | 16/3 |
 | 1 | `1/16T` | 1/6 | 9 | `1/4` | 1 | 17 | `1 bar D` | 6 |
-| 2 | `1/32D` | 3/16 | 10 | `1/2T` | 4/3 | 18 | `2 bars` | 8 |
-| 3 | `1/16` | 1/4 | 11 | `1/4D` | 3/2 | 19 | `4 bars T` | 32/3 |
+| 2 | `1/32D` | 0.1875 | 10 | `1/2T` | 4/3 | 18 | `2 bars` | 8 |
+| 3 | `1/16` | 0.25 | 11 | `1/4D` | 1.5 | 19 | `4 bars T` | 32/3 |
 | 4 | `1/8T` | 1/3 | 12 | `1/2` | 2 | 20 | `2 bars D` | 12 |
-| 5 | `1/16D` | 3/8 | 13 | `1 bar T` | 8/3 | 21 | `4 bars` | 16 |
-| 6 | `1/8` | 1/2 | 14 | `1/2D` | 3 | | | |
+| 5 | `1/16D` | 0.375 | 13 | `1 bar T` | 8/3 | 21 | `4 bars` | 16 |
+| 6 | `1/8` | 0.5 | 14 | `1/2D` | 3 | | | |
 | 7 | `1/4T` | 2/3 | 15 | `1 bar` | 4 | | | |
 
 A note row is a fraction of a whole note, a triplet two thirds and a dotted row three halves of its base; `quarters` is
-that length in quarter notes (the host's bpm counts quarters). **A bar row is four quarter notes** (`1 bar` = 4, `1 bar D` = 6,
+that length in quarter notes, written as decimals or thirds so no length reads as a division name (the host's bpm counts quarters). **A bar row is four quarter notes** (`1 bar` = 4, `1 bar D` = 6,
 `4 bars T` = 32/3). RC-7.4 measures a bar in the time signature's bars, but Echo is given bpm and no meter, so it reads every
 bar as 4/4 **until horde answers `echo-005` Ask 1** and delivers the meter as data beside bpm (D-050 A5 ruling 2; the
 `process()` signature stays open until FOUNDATIONS' ABI). The default is `1/4` (index 9). Sync reads the row's quarters × 60 / bpm

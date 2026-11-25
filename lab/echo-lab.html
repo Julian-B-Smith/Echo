@@ -215,10 +215,11 @@ const SW_XF20 = { method: "crossfade", length_s: 0.02, law: "equal-gain" };
 // The manifest as the lab implements it (mirror of spec/params.json).
 // morph: continuous | jump (flip-class) | device — Bulwark's local enum, which
 // maps one to one onto OQ #33 (RS-2.2). rate: FOUNDATIONS ReadCadence.
+// `display` (route.mode only): the names a host shows, parallel to `labels` (D-050 A5 ruling 10).
 // A stepped value is an index into `labels`; the LABEL is what a preset stores.
-const P = (key, name, unit, type, min, max, def, morph, law, smoothing, labels, sw) =>
+const P = (key, name, unit, type, min, max, def, morph, law, smoothing, labels, sw, display) =>
   Object.assign({ key, name, unit, type, min, max, def, morph, rate: "continuous", law, smoothing },
-    labels ? { labels } : {}, sw ? { switch: sw } : {});
+    labels ? { labels } : {}, display ? { display } : {}, sw ? { switch: sw } : {});
 const ECHO_PARAMS = [
   P("io.inGain", "Input Gain", "dB", "scalar", -24, 24, 0, "device", "io", "gain"),
   P("io.outGain", "Output Gain", "dB", "scalar", -24, 24, 0, "device", "io", "gain"),
@@ -234,7 +235,7 @@ const ECHO_PARAMS = [
   P("time.glide", "Glide", "s", "scalar", 0.01, 5, 0.3, "continuous", "log", "law"),
   P("time.xfadeMs", "Crossfade", "ms", "scalar", 2, 500, 60, "continuous", "log", "law"),
   P("fb.amount", "Feedback", "%", "scalar", 0, 120, 35, "continuous", "lin", "gain"),
-  P("route.mode", "Routing", "", "stepped", 0, 2, 0, "jump", "step", "crossfade", ["standard", "pingpong", "midside"], SW_XF20),
+  P("route.mode", "Routing", "", "stepped", 0, 2, 0, "jump", "step", "crossfade", ["standard", "pingpong", "midside"], SW_XF20, ["Standard", "Ping-Pong", "Mid/Side"]),
   P("filt.in.on", "Input Filter", "", "stepped", 0, 1, 0, "jump", "step", "crossfade", ["off", "on"], SW_XF20),
   P("filt.in.hpHz", "Input Low Cut", "Hz", "scalar", 20, 2000, 20, "continuous", "log", "filter"),
   P("filt.in.lpHz", "Input High Cut", "Hz", "scalar", 500, 20000, 20000, "continuous", "log", "filter"),

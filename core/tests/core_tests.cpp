@@ -38,6 +38,7 @@
 #include "echo/ir_render.h"
 #include "echo/presets.h"
 #include "b265.h"
+#include "fixed_row.h"
 #include "fold.h"
 
 using echo::Echo;
@@ -4813,7 +4814,7 @@ const std::vector<Check> kChecks = {
     {"state A20: saved while ringing, mid-ramp and latched equals saved at rest", stateLiveExcluded, {"stateLatchSerialised"}},
     {"state undo: for each of the 29 keys, the snapshot restores byte- and bit-identically", stateUndo, {"stateKeyMissing"}},
     {"state: every malformed text refused whole (strict number grammar), nothing staged; a division reads and is written back by its RC-7.4 name, a retired name is refused",
-     stateRefusals, {"stateAcceptsUnknown", "stateKeyMissing", "stateMissingKeyDefaults"}},
+     stateRefusals, {"stateAcceptsUnknown", "stateKeyMissing", "stateMissingKeyDefaults", "stateTrimsValue"}},
     {"state: an adopt mid-play is a D-020 load plus the Device keys ramping, bit for bit", stateAdoptLive, {"adoptResets"}},
     // ---- M3 B2, T-037 ----
     {"Clear: nothing changes before its sample; from it the repeats fade over 20 ms (48, 44.1 kHz) and end", clearFade, {"clearCuts"}},
@@ -4833,7 +4834,7 @@ const std::vector<Check> kChecks = {
      {"factoryCarriesSlot"}},
     // ---- M3 B4, T-045 ----
     {"fixed row A12 (SPEC §16.4): Time, Feedback, Mix, Type; Time is keyed on time.mode (time.ms in sec and hz, time.div in sync); a Time lane written to the keyed key across sec -> sync -> hz loses neither time.ms nor time.div (state round trip exact)",
-     fixedRowKeyed, {"keyedRowSwapped"}},
+     fixedRowKeyed, {"keyedRowSwapped", "stateDropsInactiveKey"}},
     {"presets A13: one engine through four corners and back, mid-play, equals a fresh load and holds the corner's own values; restored, it renders the same (L and R)", presetA13,
      {"presetPatchOfDropsKey"}},
     // ---- M3 B4, T-021 ----
@@ -4917,7 +4918,7 @@ bool* plantFlag(std::string_view n) {
       {"modeFlipAlwaysMove", &modeFlipAlwaysMove}, {"keyResendIsMove", &keyResendIsMove}, {"moveReadsOneLine", &moveReadsOneLine}, {"hzFlipDelaysRest", &hzFlipDelaysRest},
       {"movingHeadStopsDead", &movingHeadStopsDead}, {"followHandoverStopsDead", &followHandoverStopsDead}, {"followCapDropsLengthening", &followCapDropsLengthening}, {"followCapDropsShortening", &followCapDropsShortening},
       {"followKeepsStaleSpeed", &followKeepsStaleSpeed}, {"keyFadeChains", &keyFadeChains}, {"tempoTickRelatches", &tempoTickRelatches},
-      {"keyedRowSwapped", &keyedRowSwapped},
+      {"keyedRowSwapped", &keyedRowSwapped}, {"stateDropsInactiveKey", &stateDropsInactiveKey}, {"stateTrimsValue", &stateTrimsValue},
   };
   for (const auto& p : table)
     if (n == p.n) return p.f;
@@ -5116,7 +5117,7 @@ int main(int argc, char** argv) {
                         "tapeKinkUnbounded", "tapeNoBrake", "tapeNoTargetBrake", "fbClampUnsigned", "fbFrozenOutgoing", "fadeLinear",
                         "modAccelUnbounded", "modFloorClampsBoth", "modNoFloorBrake", "modRideKink", "modBoundKeepsSlope", "fbClampStale",
                         "movingHeadStopsDead", "followHandoverStopsDead", "followCapDropsLengthening", "followCapDropsShortening",
-                        "followKeepsStaleSpeed", "keyFadeChains", "tempoTickRelatches", "keyedRowSwapped"}) {
+                        "followKeepsStaleSpeed", "keyFadeChains", "tempoTickRelatches", "keyedRowSwapped", "stateDropsInactiveKey", "stateTrimsValue"}) {
     bool guarded = false;
     for (const auto& c : kChecks)
       for (const char* p : c.plants) guarded = guarded || std::string_view(p) == n;
