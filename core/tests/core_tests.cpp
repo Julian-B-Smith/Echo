@@ -3546,7 +3546,7 @@ bool stateComplete(Detail& d) {
   return true;
 }
 
-// A19: the worst case fits 2 KiB; a text of 2 KiB + 1 is refused FIRST, with no
+// A19: the worst case fits 4 KiB; a text of 4 KiB + 1 is refused FIRST, with no
 // allocation; staging a valid state allocates nothing either.
 bool stateSize(Detail& d) {
   auto w = mk({});
@@ -3557,29 +3557,33 @@ bool stateSize(Detail& d) {
   w->setParam("time.div", 19);
   w->setParam("mod.seed", 65535);
   const std::string worst = saveText(*w);
-  REQUIRE(!worst.empty() && worst.size() <= echo::state::kMaxBytes, "the worst-case state is %zu bytes (budget 2048)", worst.size());
-  std::printf("  REPORT state size: defaults %zu B, worst case %zu B (budget 2048)\n", saveText(*mk({})).size(), worst.size());
-  // No VALID state reaches 2 KiB (the worst case above is far under it), so the
-  // boundary is shown on texts padded with leading zeros on time.ms (a 1.5 KiB
-  // token, which the parser refuses on its own): at exactly 2048 bytes the text
+  REQUIRE(!worst.empty() && worst.size() <= echo::state::kMaxBytes, "the worst-case state is %zu bytes (budget %zu)", worst.size(), echo::state::kMaxBytes);
+  std::printf("  REPORT state size: defaults %zu B, worst case %zu B (budget %zu)\n", saveText(*mk({})).size(), worst.size(), echo::state::kMaxBytes);
+  // No VALID state reaches 4 KiB (the worst case above is far under it), so the
+  // boundary is shown on texts padded with leading zeros on time.ms (a token
+  // of several KiB, which the parser refuses on its own): at exactly the budget the text
   // must be refused for something OTHER than its size (the test is >, not >=);
-  // at 2049 it must be refused for its size, FIRST, before any parsing.
+  // one byte over, it must be refused for its size, FIRST, before any parsing.
   const std::string base = saveText(*mk({}));
   const std::size_t at = base.find("\ntime.ms ") + 9;
   auto padded = [&](std::size_t total) { return base.substr(0, at) + std::string(total - base.size(), '0') + base.substr(at); };
   auto e = mk({});
-  const std::string at2048 = padded(2048), over = padded(2049);
-  const char *why2048 = "", *whyOver = "", *whyOk = "";
+  // The ruled figure as a LITERAL, never kMaxBytes: the boundary rows below then
+  // pin the constant itself (any other value fails one of them), as the literal
+  // 2048 did before horde's ADR-401 (D-051).
+  constexpr std::size_t kB = 4096;
+  const std::string atMax = padded(kB), over = padded(kB + 1);
+  const char *whyMax = "", *whyOver = "", *whyOk = "";
   alloc_probe::arm();
   const bool okStaged = e->stageState(base, &whyOk);
   e->adoptStaged();
-  const bool s2048 = e->stageState(at2048, &why2048);
+  const bool sMax = e->stageState(atMax, &whyMax);
   const bool sOver = e->stageState(over, &whyOver);
   alloc_probe::disarm();
-  REQUIRE(at2048.size() == 2048 && over.size() == 2049, "the padding is wrong (%zu, %zu)", at2048.size(), over.size());
+  REQUIRE(atMax.size() == kB && over.size() == kB + 1, "the padding is wrong (%zu, %zu)", atMax.size(), over.size());
   REQUIRE(okStaged, "the default state was refused (%s)", whyOk);
-  REQUIRE(!s2048 && std::string_view(why2048) != "over 2 KiB", "a 2048-byte text was refused as oversized: the budget is not inclusive");
-  REQUIRE(!sOver && std::string_view(whyOver) == "over 2 KiB", "the 2049-byte text was refused for `%s`, not its size first", whyOver);
+  REQUIRE(!sMax && std::string_view(whyMax) != "over 4 KiB", "a %zu-byte text was refused as oversized: the budget is not inclusive", kB);
+  REQUIRE(!sOver && std::string_view(whyOver) == "over 4 KiB", "the %zu-byte text was refused for `%s`, not its size first", kB + 1, whyOver);
   REQUIRE(alloc_probe::g_allocs.load() == 0, "staging allocated %ld times", alloc_probe::g_allocs.load());
   return true;
 }
@@ -4175,7 +4179,7 @@ bool presetFactoryBank(Detail& d) {
   return true;
 }
 
-// A19 over the bank (D-039): every factory preset's saved state fits 2 KiB. The sizes vary
+// A19 over the bank (D-039): every factory preset's saved state fits 4 KiB. The sizes vary
 // with the value text (bounded, not fixed-width); stateSize's worst case bounds any preset.
 bool presetFactoryStateSize(Detail& d) {
   const auto bank = P::factory();
@@ -4192,7 +4196,7 @@ bool presetFactoryStateSize(Detail& d) {
     largest = std::max(largest, f.text.size());
     sizes += (i ? ", " : "") + p.id + " " + std::to_string(f.text.size());
   }
-  std::printf("  REPORT factory state sizes (B, budget 2048): %s; largest %zu\n", sizes.c_str(), largest);
+  std::printf("  REPORT factory state sizes (B, budget %zu): %s; largest %zu\n", echo::state::kMaxBytes, sizes.c_str(), largest);
   return true;
 }
 
@@ -4726,7 +4730,7 @@ const std::vector<Check> kChecks = {
     {"state A18: save -> load -> save byte-identical, values bit-equal, renders identical; also in a comma locale", stateExact, {"stateFloat6g"}},
     {"state RS-6.11: time.ms saved bit for bit at the values a Hz reading produces (1000 / 3, 1000 / 440, the range's ends), in sec and hz", stateTimeExact, {"stateFloat6g"}},
     {"state A17: a mid-session state in a fresh instance renders as the original after reset()", stateComplete, {"stateKeyMissing"}},
-    {"state A19: the worst case fits 2 KiB; 2 KiB + 1 refused first; staging allocates nothing", stateSize, {"stateOversizedAccepted"}},
+    {"state A19: the worst case fits 4 KiB; 4 KiB + 1 refused first; staging allocates nothing", stateSize, {"stateOversizedAccepted"}},
     {"state A20: saved while ringing, mid-ramp and latched equals saved at rest", stateLiveExcluded, {"stateLatchSerialised"}},
     {"state undo: for each of the 29 keys, the snapshot restores byte- and bit-identically", stateUndo, {"stateKeyMissing"}},
     {"state: every malformed text refused whole (strict number grammar), nothing staged; an alias reads and is written back by name",
@@ -4753,7 +4757,7 @@ const std::vector<Check> kChecks = {
     // ---- M3 B4, T-021 ----
     {"presets A12: the factory bank is the init plus seven (ids, order), each valid; loaded, its saved state is the preset's own values",
      presetFactoryBank, {"presetPatchOfDropsKey", "factoryLabelTypo"}},
-    {"presets A19: every factory preset's saved state is within 2 KiB (reported)", presetFactoryStateSize, {"presetStateOversized"}},
+    {"presets A19: every factory preset's saved state is within 4 KiB (reported)", presetFactoryStateSize, {"presetStateOversized"}},
     {"B408 for the bank: each preset's line times, colouring flag and worst 1/3-octave fold, REPORTED never judged", presetFactoryStereo, {}},
     // ---- M3 B3, T-018 ----
     {"A2 reset identity: 2 s of seeded noise at the defaults and a stress patch; reset() mid-ramp, mid-modulation = fresh", a2ResetIdentity, {"resetKeepsModPhase"}},
@@ -4895,7 +4899,7 @@ const std::vector<AdmissionRow>& admissionRows() {
       {"A16", "Sleep and wake", {sleepTwin, floorAndWake}, ""},
       {"A17", "State completeness", {stateComplete}, ""},
       {"A18", "Restore exactness", {stateExact, stateTimeExact}, "time.ms bit for bit at the values a Hz reading produces (RS-6.11)"},
-      {"A19", "State size", {stateSize, presetFactoryStateSize}, "every factory preset's saved state within 2 KiB (T-021)"},
+      {"A19", "State size", {stateSize, presetFactoryStateSize}, "every factory preset's saved state within 4 KiB (T-021)"},
       {"A20", "Live-state exclusion", {stateLiveExcluded}, ""},
       {"A21", "Morph position", {}, "not declared (RS-4.10; SPEC §16.6)"},
       {"A22", "Note context", {}, "not declared (RS-4.11; SPEC §16.6, D-034)"},

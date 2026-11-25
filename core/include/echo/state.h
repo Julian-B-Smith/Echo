@@ -30,7 +30,7 @@
 // Parsing is strict and ALL OR NOTHING: an unknown, missing or duplicated key, a
 // value out of range or not a whole number for a stepped key, a label that is
 // neither the key's nor a division alias, a key in the wrong block, a different
-// version, or a text over 2 KiB refuses the whole text. The size is checked
+// version, or a text over 4 KiB refuses the whole text. The size is checked
 // FIRST, before anything else is done with the text (A19). Numbers follow a
 // strict grammar (no '+', hex, whitespace, "30." or ".5"; the seed is a plain
 // decimal integer), so what is accepted does not depend on the libc's strtod.
@@ -59,7 +59,7 @@
 
 namespace echo::state {
 
-inline constexpr std::size_t kMaxBytes = 2048;  // horde RS-6.12: 2 KiB per corner, the whole text
+inline constexpr std::size_t kMaxBytes = 4096;  // horde ADR-401 (RS-6.12): 4 KiB per corner, the whole text as Echo writes it
 inline constexpr std::string_view kVersion = "echo-state 1";
 inline constexpr std::string_view kDeviceHeader = "[device]";
 
@@ -230,7 +230,7 @@ inline bool parse(std::string_view text, Values& out, const char** why = nullptr
     if (why) *why = w;
     return false;
   };
-  if (text.size() > kMaxBytes && !plant::stateOversizedAccepted) return refuse("over 2 KiB");  // FIRST (A19)
+  if (text.size() > kMaxBytes && !plant::stateOversizedAccepted) return refuse("over 4 KiB");  // FIRST (A19)
   Values v{};
   std::array<bool, kNumParams> seen{};
   bool device = false, first = true;
