@@ -22,7 +22,7 @@ with HIGH findings the author's own suite had passed.
   (D-037 – D-040), T-016 on its own PR (D-041): **batch 2 done**. Batch 3's four items done
   2026-10-28 (D-042 – D-045): T-017 on PR #24 (2975c34), T-018 on PR #25 (1a78af5), T-019 on
   PR #26 (2966256), T-020 on PR #27 (985c1d1); the T-021 bank draft B3 also plans is not
-  started (the bank holds the init only). Batch 4 (T-021 finished, T-022, T-023) next; D-048 (2026-10-29) adds T-038 and T-039 ahead of T-022's face; D-049 adds T-040, T-041 and T-042 before T-023 (all three done); D-050 (2026-11-03) removes macros and `time.scale`: T-039 rewritten, T-044 and T-045 added (T-039, T-044 and T-046 done; T-046 added by D-050 A3, widened by A4). T-043 done 2026-11-24 (D-051: the state budget is 4 KiB, horde ADR-401); T-045 done 2026-11-24 (D-050 A5: the keyed Time row, two DAW lanes, `time.div` on RC-7.4, §12.7 switch objects; `echo-005` open). **M4 (the IR
+  started (the bank holds the init only). Batch 4 (T-021 finished, T-022, T-023) next; D-048 (2026-10-29) adds T-038 and T-039 ahead of T-022's face; D-049 adds T-040, T-041 and T-042 before T-023 (all three done); D-050 (2026-11-03) removes macros and `time.scale`: T-039 rewritten, T-044 and T-045 added (T-039, T-044 and T-046 done; T-046 added by D-050 A3, widened by A4). T-043 done 2026-11-24 (D-051: the state budget is 4 KiB, horde ADR-401); T-045 done 2026-11-24 (D-050 A5: the keyed Time row, two DAW lanes, `time.div` on RC-7.4, §12.7 switch objects; `echo-005` open). D-052 (2026-11-27): the sonar scope is Echo's glass (horde ADR-409); the first answer on `fx-glass` is filed. **M4 (the IR
   display and Echo's screen) is under way beside it** (D-027, D-030): T-030 – T-032 done (PR #15,
   PR #16); T-033 open (T-014 is on main, PR #20); T-036 (gate 4's flicker) done 2026-10-28 (D-046).
 - **Oracle:** `./verify fast` = kit integrity, leak gate, private-name gate,
@@ -842,8 +842,9 @@ filings need the human's go-ahead each time.
   the spectrum strip and the EDC), the WebAssembly build of `ir_render.h` and `ir_view.h` (D-030), and
   `tools/screen_smoke.mjs` in `./verify` (a human gate).
 - **Acceptance criteria:**
-  0. **Two glasses, one model (D-030):** Echo's stem-echogram glass and horde's SONAR SCOPE
-     glass, both drawn from `ir_view.h`'s model, for the human to pick in the workshop.
+  0. **One glass, the sonar scope (D-052, horde ADR-409; replaces D-030's two glasses):** the
+     sonar scope, with the stem echogram, the spectrum strip and the EDC as pages on it, all
+     drawn from `ir_view.h`'s one model.
   1. **The drawing is the engine's (gate 1).** The page's drawn stems equal, bit for bit,
      the native renderer's output for the T-030 patches. The WebAssembly render's hash
      equals the native one, or the difference is traced to libm and recorded in
@@ -855,7 +856,8 @@ filings need the human's go-ahead each time.
      - Keyboard: every control can be reached and changed by keyboard in horde's keyboard
        mode.
      - Names: every key shows its `params.json` display name.
-     - Contrast: text and stems meet WCAG AA in the light and dark themes.
+     - Contrast: text and stems meet WCAG AA as phosphor on the near-black ground, in every
+       scheme (the glass overrides the scheme; D-052).
      - No feed while closed: nothing renders while the page is hidden.
      - Each is checked headlessly with a planted control.
   5. It follows horde's chassis rules: canvas and CSS only, no WebGL, no wheel
@@ -864,9 +866,9 @@ filings need the human's go-ahead each time.
 
 ### T-035 — M4: the workshop and close (B4-5)
 - **Status:** open (approved 2026-10-21, D-030).
-- **Scope:** a filing in horde's `integrations/echo/`, made with the human's go-ahead
-  after T-002's spin-up notice, asking horde's lead to edit Echo's glass into the
-  workshop. Also ROADMAP, DECISIONS and a trace.
+- **Scope (D-052, horde ADR-409):** the design stays in Echo's tree. Each revision is
+  announced by a notice on the `fx-glass` thread (`integrations/hypersaw/`), and horde copies
+  it in by its copy rule (ADR-400 ruling 2). Also ROADMAP, DECISIONS and a trace.
 - **Acceptance criteria:**
   1. The human's sign-off on Echo's design in the workshop, recorded here.
   2. An independent Opus critic review with no open HIGH findings.

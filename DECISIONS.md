@@ -1596,3 +1596,26 @@ Echo offers no macros (D-050), so, as horde notes, no label cap reaches Echo's s
 4. **The suite pins the figure as a literal** (`stateSize`'s boundary rows at 4,096 and 4,097 bytes), not through `kMaxBytes`, so a
    later edit to the constant fails the suite and needs a decision (T-043's critic, H1).
 
+
+## D-052 — The sonar scope is Echo's glass; the echogram becomes a page on it (2026-11-27, the human, by poll; horde ADR-409; closes D-030 Q-M4G)
+
+horde's human ruled on 2026-11-25 that each FX module designs its own glass, and that Echo's is the sonar scope (ADR-409;
+`integrations/hypersaw/brief-fx-glass.md`, thread `fx-glass`, seq 1, B712). The brief offered Echo a way to argue for its
+stem-echogram glass instead. The lead summarised the brief and recommended accepting. The human agreed on 2026-11-27,
+then took every recommended option in one poll:
+1. **Accept the sonar scope** under ADR-409's model: Echo designs the glass and its pages in its own tree; horde keeps the
+   chassis and the GUI-58 marks and builds the DOM view from Echo's writers. **D-030 Q-M4G's audition of two glasses is
+   closed.** Rejected: arguing for the stem-echogram glass to replace it.
+2. **The echogram, the spectrum strip and the EDC become pages on the sonar scope,** drawn in phosphor, from `ir_view.h`'s
+   one model. D-027's visualiser gate (the drawing equals the engine's offline render, bit for bit) is unchanged.
+3. **The first answer is filed as drafted** (`integrations/hypersaw/response-fx-glass.md`, seq 2, `ball: HYPERSAW`). It
+   asks four questions (the range scale, mid/side, marks on picture-only pages, the mock's tap swarm) and says the
+   GUI-21 hide conditions come with T-022's face spec, as data in `spec/params.json`.
+4. **T-034's criteria change:** criterion 0 is one glass, the sonar scope, with the three pages; criterion 4's contrast row
+   is phosphor on the near-black ground in every scheme, since the glass overrides the scheme.
+5. **T-035's scope follows ADR-409:** the design stays in Echo's tree and each revision is announced on the `fx-glass`
+   thread. horde copies it in by its copy rule (ADR-400 ruling 2). The filing asking horde's lead to edit Echo's glass
+   into the workshop is dropped. T-035's sign-off and critic rows are unchanged.
+
+Not changed: D-027's screen gate (the human's sign-off on Echo's design, plus the checkable rows) and its timing (M3 keeps
+priority until 2026-12-11). The design itself has no deadline.
